@@ -80,8 +80,9 @@ if [ "${RECUR_ROLE:-}" = "orchestrator" ]; then
     base="$(yq -oy ".providers.${prov}.base_url" "$cfg" 2>/dev/null)"
     key="$(yq -oy ".providers.${prov}.api_key" "$cfg" 2>/dev/null)"
 
-    out="$(curl -sS -m 25 "${base%/}/responses" \
-      ${key:+-H "Authorization: Bearer $key"} \
+    local auth=()
+    [ -n "$key" ] && auth=(-H "Authorization: Bearer $key")
+    out="$(curl -sS -m 25 "${base%/}/responses" "${auth[@]}" \
       -H "Content-Type: application/json" \
       -d "$(jq -n --arg m "$model" --arg e "$effort" '{model:$m,reasoning:{effort:$e},input:"Reply with OK"}')" 2>&1 || true)"
     status="$(printf '%s' "$out" | jq -r '.status // empty' 2>/dev/null || true)"
@@ -192,7 +193,10 @@ $ISSUE_BODY
 3. Отправь ветку в origin: 'git push -u origin autopilot/issue-$ISSUE_NUMBER'.
 4. Создай Pull Request в ветку main через 'gh pr create --repo $RECUR_AUTOPILOT_REPO --base main --head autopilot/issue-$ISSUE_NUMBER --title ... --body ...' (в body обязательно укажи 'Closes #$ISSUE_NUMBER').
 5. Смержи созданный PR через 'gh pr merge --repo $RECUR_AUTOPILOT_REPO --squash' и удали удаленную ветку 'git push origin --delete autopilot/issue-$ISSUE_NUMBER' (не используй --delete-branch у gh pr merge, так как мы внутри git worktree).
-6. Оставь комментарий в issue #$ISSUE_NUMBER об успешном выполнении и мерже PR."
+6. После подтвержденного мержа подготовь релиз из актуального origin/main: сделай fetch, прочитай VERSION и увеличь только patch-версию на 1 (например, 0.4.5 -> 0.4.6). Если VERSION не имеет формата MAJOR.MINOR.PATCH, остановись и сообщи об ошибке.
+7. Создай отдельный коммит с обновленным VERSION на основе актуального origin/main и отправь его в main без force push. Если main защищен или изменился при отправке, не обходи защиту и не перезаписывай чужие изменения: сообщи об ошибке в issue и остановись.
+8. Убедись, что тег v<новая версия> еще не существует на origin, создай его на отправленном коммите VERSION и отправь в origin. Workflow .github/workflows/release.yml сам соберет и опубликует релиз; не создавай GitHub Release вручную. Дождись завершения workflow и проверь, что релиз опубликован.
+9. Оставь комментарий в issue #$ISSUE_NUMBER со ссылкой на PR и опубликованный релиз. Если релиз не удалось создать или проверить, укажи точную ошибку и не сообщай об успешном релизе. Не изменяй и не удаляй существующие теги."
   }
 
   cat <<'HELP_EOF'
