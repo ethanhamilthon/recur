@@ -56,7 +56,7 @@ func TestUpRecallsOnlyPendingSteeringOnEmptyInput(t *testing.T) {
 		t.Fatal("nonempty draft overwritten")
 	}
 	m.input.Reset()
-	_ = m.steering.Take() // Agent wins the acceptance race before the UI handles Up.
+	_ = m.steering.TakeInputs() // Agent wins the acceptance race before the UI handles Up.
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	m = next.(model)
 	if m.input.Value() != "" || !strings.Contains(m.entries[len(m.entries)-1].Text, "already accepted") {

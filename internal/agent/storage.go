@@ -40,20 +40,21 @@ func (a *Agent) openProject(cwd string, target ...string) error {
 	if len(target) == 0 || target[0] == "" || target[0] == "new" {
 		return a.createSession()
 	}
-	ids, err := a.Sessions()
+	return a.openSession(target[0])
+}
+func (a *Agent) openSession(id string) error {
+	if id == "" || filepath.Base(id) != id || strings.ContainsAny(id, `/\`) {
+		return fmt.Errorf("invalid session ID: %s", id)
+	}
+	path := filepath.Join(a.sessionsDir, id+".jsonl")
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) || err == nil && !info.Mode().IsRegular() {
+		return fmt.Errorf("session not found in this project: %s", id)
+	}
 	if err != nil {
 		return err
 	}
-	found := false
-	for _, session := range ids {
-		if session.ID == target[0] {
-			found = true
-		}
-	}
-	if !found {
-		return fmt.Errorf("session not found in this project: %s", target[0])
-	}
-	a.HistoryPath = filepath.Join(a.sessionsDir, target[0]+".jsonl")
+	a.HistoryPath = path
 	if err := a.acquire(); err != nil {
 		return err
 	}
@@ -209,7 +210,6 @@ func (a *Agent) readSession() error {
 		a.applySettings(s)
 	}
 	a.History, a.records = history, records
-	a.records = a.Records()
 	return nil
 }
 

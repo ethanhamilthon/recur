@@ -132,12 +132,9 @@ func (a *Agent) AddProvider(name string, provider Provider) error {
 		s.Providers = map[string]Provider{}
 	}
 	s.Providers[name] = provider
-	selected := s.Provider
-	s.Provider = name
 	if err = validateSettings(s); err != nil {
 		return err
 	}
-	s.Provider = selected
 	data, err := toml.Marshal(s)
 	if err != nil {
 		return err

@@ -60,13 +60,6 @@ func (s *Steering) PushInput(input Input) bool {
 	s.pending = append(s.pending, input)
 	return true
 }
-func (s *Steering) Take() []string {
-	var texts []string
-	for _, input := range s.TakeInputs() {
-		texts = append(texts, input.Text)
-	}
-	return texts
-}
 func (s *Steering) TakeInputs() []Input {
 	if s == nil {
 		return nil
@@ -77,7 +70,6 @@ func (s *Steering) TakeInputs() []Input {
 	s.pending = nil
 	return pending
 }
-func (s *Steering) Recall() (string, bool) { input, ok := s.RecallInput(); return input.Text, ok }
 func (s *Steering) RecallInput() (Input, bool) {
 	if s == nil {
 		return Input{}, false

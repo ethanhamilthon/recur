@@ -122,14 +122,10 @@ func (a *Agent) NewSession() error      { return a.changeSession("") }
 func (a *Agent) Resume(id string) error { return a.changeSession(id) }
 
 func (a *Agent) changeSession(id string) error {
-	home := a.home
-	if home == "" {
-		home = filepath.Dir(a.HistoryPath)
-	}
 	if id != "" && id == strings.TrimSuffix(filepath.Base(a.HistoryPath), ".jsonl") {
 		return nil
 	}
-	c, err := loadConfiguration(home)
+	c, err := loadConfiguration(a.home)
 	if err != nil {
 		return err
 	}
@@ -151,33 +147,12 @@ func (a *Agent) changeSession(id string) error {
 	next.lastRequest = Metadata{}
 	next.History, next.records = nil, nil
 	if id == "" {
-		if a.sessionsDir == "" {
-			next.HistoryPath = a.HistoryPath
-		} else if err = next.createSession(); err != nil {
-			return err
-		}
+		err = next.createSession()
 	} else {
-		ids, e := a.Sessions()
-		if e != nil {
-			return e
-		}
-		found := false
-		for _, candidate := range ids {
-			if candidate.ID == id {
-				next.HistoryPath = filepath.Join(a.sessionsDir, id+".jsonl")
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("session not found in this project: %s", id)
-		}
-		if err = next.acquire(); err != nil {
-			return err
-		}
-		if err = next.readSession(); err != nil {
-			return err
-		}
+		err = next.openSession(id)
+	}
+	if err != nil {
+		return err
 	}
 	a.REPL.Close()
 	a.release()

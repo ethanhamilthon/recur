@@ -61,8 +61,7 @@ func delay(attempt int, err error) time.Duration {
 // requestWithRetries repeats a failed request while nothing has been shown to the user yet.
 // Retrying after output would duplicate text, so that case returns the error unchanged.
 func (a *Agent) requestWithRetries(ctx context.Context, emit func(Event)) ([]json.RawMessage, error) {
-	var last error
-	for attempt := 0; attempt < retryAttempts; attempt++ {
+	for attempt := 0; ; attempt++ {
 		shown := 0
 		items, err := a.request(ctx, func(e Event) {
 			if !e.Provisional {
@@ -73,7 +72,6 @@ func (a *Agent) requestWithRetries(ctx context.Context, emit func(Event)) ([]jso
 		if err == nil {
 			return items, nil
 		}
-		last = err
 		if shown > 0 || attempt == retryAttempts-1 || !retryable(err) {
 			return nil, err
 		}
@@ -85,5 +83,4 @@ func (a *Agent) requestWithRetries(ctx context.Context, emit func(Event)) ([]jso
 		case <-time.After(pause):
 		}
 	}
-	return nil, last
 }

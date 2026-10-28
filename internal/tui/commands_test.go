@@ -32,8 +32,8 @@ func TestSlashTextIsOrdinarySteeringWithoutCommandCompletion(t *testing.T) {
 		m.input.SetValue(text)
 		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		m = next.(model)
-		accepted := m.steering.Take()
-		if len(accepted) != 1 || accepted[0] != text || len(m.entries) != 0 {
+		accepted := m.steering.TakeInputs()
+		if len(accepted) != 1 || accepted[0].Text != text || len(m.entries) != 0 {
 			t.Fatalf("%q: got accepted=%v, entries=%v", text, accepted, m.entries)
 		}
 	}
@@ -46,7 +46,7 @@ func TestDismissedCompletionAllowsLiteralCommandText(t *testing.T) {
 	m.hideCompletion = true
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
-	if got := m.steering.Take(); len(got) != 1 || got[0] != "/help" {
+	if got := m.steering.TakeInputs(); len(got) != 1 || got[0].Text != "/help" {
 		t.Fatalf("dismissed completion still executed command: %v", got)
 	}
 }

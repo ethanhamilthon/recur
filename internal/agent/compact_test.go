@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -116,7 +118,7 @@ func TestCompactUsesSessionInstructionsAndPrompt(t *testing.T) {
 	}
 }
 
-func TestCompactFailureKeepsHistoryForExplicitPrompt(t *testing.T) {
+func TestCompactFailureKeepsHistoryWithOrWithoutPrompt(t *testing.T) {
 	a, closeAll := summaryAgent(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -125,16 +127,18 @@ func TestCompactFailureKeepsHistoryForExplicitPrompt(t *testing.T) {
 	defer closeAll()
 	a.History = compactHistory(t, 5)
 	a.settings.CompactKeepTurns = 1
-	before := len(a.History)
-	if _, err := a.Compact(context.Background(), "focus"); err == nil {
-		t.Fatal("expected an error")
-	}
-	if len(a.History) != before {
-		t.Fatal("failed explicit compaction changed the history")
+	before := append([]json.RawMessage(nil), a.History...)
+	for _, prompt := range []string{"", "focus"} {
+		if _, err := a.Compact(context.Background(), prompt); err == nil {
+			t.Fatal("expected an error")
+		}
+		if !reflect.DeepEqual(a.History, before) {
+			t.Fatal("failed compaction changed the history")
+		}
 	}
 }
 
-func TestAutomaticCompactionFallsBackWithoutSummary(t *testing.T) {
+func TestAutomaticCompactionFailurePreservesHistory(t *testing.T) {
 	a, closeAll := summaryAgent(t, func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/responses") {
 			w.Header().Set("Content-Type", "application/json")
@@ -145,16 +149,26 @@ func TestAutomaticCompactionFallsBackWithoutSummary(t *testing.T) {
 	defer closeAll()
 	a.History = compactHistory(t, 5)
 	a.settings.CompactKeepTurns = 1
+	a.records = a.Records()
+	before, err := a.sessionData()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Save(); err != nil {
+		t.Fatal(err)
+	}
 	var events []Event
 	a.compactIfNeeded(context.Background(), func(e Event) { events = append(events, e) })
-	if len(a.History) >= 20 {
-		t.Fatal("history was not trimmed")
+	after, err := a.sessionData()
+	if err != nil || string(after) != string(before) {
+		t.Fatalf("failed compaction changed the session: %v", err)
 	}
-	if !strings.Contains(string(a.History[0]), "Earlier conversation was removed") {
-		t.Fatalf("first item = %s", a.History[0])
+	saved, err := os.ReadFile(a.HistoryPath)
+	if err != nil || string(saved) != string(before) {
+		t.Fatalf("failed compaction changed the saved session: %v", err)
 	}
-	if len(events) == 0 {
-		t.Fatal("compaction must report itself")
+	if len(events) != 1 || events[0].Kind != "error" || !strings.Contains(events[0].Text, "Compaction failed:") {
+		t.Fatalf("compaction failure not reported: %+v", events)
 	}
 }
 

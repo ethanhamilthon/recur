@@ -223,11 +223,12 @@ turns alone exceed the budget, recur reports it instead of compacting again on e
 request, and an existing `<compact_summary>` is never summarized a second time. Before a request that would exceed the
 budget, everything older than the last `compact_keep_turns` turns is summarized into one
 `<compact_summary>` item, using the same system prompt and prefix as normal turns. Cuts
-happen only at user-message boundaries, so a tool call never loses its output. If the
-summary request fails during automatic compaction, the old part is dropped without a
-summary and the turn continues. `/compact` does the same on demand, `/compact <prompt>`
-adds an instruction to the summary request, and a failed explicit compaction leaves
-history untouched. The trimmed history is saved immediately.
+happen only at user-message boundaries, so a tool call never loses its output. Service
+notifications and image deliveries do not count as separate user turns. If a summary
+request fails, history stays untouched and the error is reported; automatic compaction
+lets the turn continue with the original history. `/compact` does the same on demand,
+and `/compact <prompt>` adds an instruction to the summary request. Compacted history
+is saved immediately; a save failure restores the in-memory history and display journal.
 
 ### Colors
 

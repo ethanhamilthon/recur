@@ -49,8 +49,13 @@ func estimateTokens(history []json.RawMessage) int64 {
 	var total int64
 	for _, item := range history {
 		text := stripDataURLs(string(item))
-		if strings.Contains(text, "input_image") {
-			total += imageTokens
+		var v struct{ Content []struct{ Type string } }
+		if json.Unmarshal(item, &v) == nil {
+			for _, part := range v.Content {
+				if part.Type == "input_image" {
+					total += imageTokens
+				}
+			}
 		}
 		total += int64(len(text)) / tokenBytes
 	}
@@ -63,7 +68,11 @@ func userTurn(item json.RawMessage) bool {
 	if json.Unmarshal(item, &v) != nil {
 		return false
 	}
-	return v.Role == "user" && v.Type != "function_call_output"
+	if v.Role != "user" || v.Type == "function_call_output" {
+		return false
+	}
+	records := RecordsForItem(item)
+	return len(records) == 1 && records[0].Kind == "user" && !strings.HasPrefix(records[0].Text, "<compact_summary>")
 }
 
 // turnStart returns the index where the last n user turns begin, or 0 when there are fewer.
@@ -135,8 +144,11 @@ func (a *Agent) summarize(ctx context.Context, old []json.RawMessage, prompt str
 }
 
 // Compact replaces everything before the last CompactKeepTurns turns with one summary.
-// Callers ensure an idle, writable session.
+// Callers ensure an idle session.
 func (a *Agent) Compact(ctx context.Context, prompt string) (string, error) {
+	if err := a.Writable(); err != nil {
+		return "", err
+	}
 	keep := max(1, a.settings.CompactKeepTurns)
 	cut := turnStart(a.History, keep)
 	// Compacting an existing summary would replace it with another summary.
@@ -144,18 +156,18 @@ func (a *Agent) Compact(ctx context.Context, prompt string) (string, error) {
 	if cut == 0 || cut == 1 && strings.Contains(string(a.History[0]), "compact_summary") {
 		return "Nothing to compact.", nil
 	}
-	old := append([]json.RawMessage(nil), a.History[:cut]...)
+	old := a.History[:cut]
 	summary, err := a.summarize(ctx, old, prompt)
 	if err != nil {
-		if ctx.Err() != nil || strings.TrimSpace(prompt) != "" {
-			return "", err
-		}
-		summary = "Earlier conversation was removed to fit the context limit."
+		return "", err
 	}
 	item := raw(map[string]any{"role": "user", "content": "<compact_summary>\n" + summary + "\n</compact_summary>"})
+	history, records := a.History, a.records
 	a.History = append([]json.RawMessage{item}, a.History[cut:]...)
 	a.records = nil
+	a.records = a.Records()
 	if err := a.Save(); err != nil {
+		a.History, a.records = history, records
 		return "", err
 	}
 	return fmt.Sprintf("Compacted %d items into a summary; kept the last %d turns.", len(old), keep), nil

@@ -3,7 +3,6 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/muesli/termenv"
 
 	"recur/internal/agent"
-	"recur/internal/repl"
 )
 
 func TestInputBorderGrows(t *testing.T) {
@@ -112,7 +110,13 @@ func TestCommandCompletionAndHelp(t *testing.T) {
 	}
 }
 func TestNewCommand(t *testing.T) {
-	a := &agent.Agent{REPL: &repl.REPL{}, HistoryPath: filepath.Join(t.TempDir(), "history.json"), History: []json.RawMessage{json.RawMessage(`{"role":"user","content":"old"}`)}}
+	t.Setenv("RECUR_HOME", t.TempDir())
+	a, err := agent.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	a.History = []json.RawMessage{json.RawMessage(`{"role":"user","content":"old"}`)}
 	m := newModel(a, "/project")
 	next, _ := m.runCommand("/new")
 	m = next.(model)

@@ -63,7 +63,8 @@ func TestSteeringQueueAndRecovery(t *testing.T) {
 	m.input.SetValue("follow up")
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
-	if m.input.Value() != "" || len(m.queued) != 1 || strings.Join(m.steering.Take(), "") != "follow up" {
+	accepted := m.steering.TakeInputs()
+	if m.input.Value() != "" || len(m.queued) != 1 || len(accepted) != 1 || accepted[0].Text != "follow up" {
 		t.Fatal("message not queued")
 	}
 	if !strings.Contains(ansi.Strip(m.workingBlock()), "queued · follow up") {
