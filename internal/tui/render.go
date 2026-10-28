@@ -12,19 +12,21 @@ import (
 )
 
 var (
-	cyan           lipgloss.Color
-	foreground     lipgloss.Color
-	muted          lipgloss.Color
-	codeGray       lipgloss.Color
-	darkGray       lipgloss.Color
-	inputBlue      lipgloss.Color
-	assistantColor lipgloss.Color
-	errorColor     lipgloss.Color
-	warnColor      lipgloss.Color
-	infoColor      lipgloss.Color
-	markdownStyle  string
-	mdKey          any
-	mdRenderer     *glamour.TermRenderer
+	cyan           = lipgloss.Color("#79d9ff")
+	foreground     = lipgloss.Color("#d5ddeb")
+	muted          = lipgloss.Color("#8794a8")
+	codeGray       = lipgloss.Color("#a0a0a0")
+	darkGray       = lipgloss.Color("#606060")
+	inputBlue      = lipgloss.Color("#8aadff")
+	assistantColor = lipgloss.Color("#9bdef5")
+	errorColor     = lipgloss.Color("#f09eac")
+	warnColor      = lipgloss.Color("#e5c07b")
+	infoColor      = lipgloss.Color("#d7c38b")
+	// The Markdown style uses the same fixed colors as the timeline.
+	markdownStyle = fmt.Sprintf(markdownTemplate, assistantColor, cyan, warnColor, muted,
+		infoColor, errorColor, inputBlue, inputBlue)
+	mdKey      any
+	mdRenderer *glamour.TermRenderer
 )
 
 func eventColors(kind string) (bg, fg lipgloss.TerminalColor, label string) {

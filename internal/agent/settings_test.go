@@ -127,26 +127,6 @@ func TestTimelineLineSettings(t *testing.T) {
 	}
 }
 
-func TestColorSettingsValidation(t *testing.T) {
-	base := Settings{Provider: "p", MaxContextTokens: 1, Providers: map[string]Provider{"p": {BaseURL: "https://example.com"}}}
-	for name, colors := range map[string]map[string]string{
-		"unknown name": {"nope": "#ffffff"},
-		"not a color":  {"accent": "red"},
-		"short hex":    {"accent": "#fff"},
-		"not hex":      {"accent": "#zzzzzz"},
-	} {
-		base.Colors = colors
-		err := validateSettings(base)
-		if err == nil || !strings.Contains(err.Error(), "color") {
-			t.Fatalf("%s: %v", name, err)
-		}
-	}
-	base.Colors = map[string]string{"accent": "#ABCDEF"}
-	if err := validateSettings(base); err != nil {
-		t.Fatalf("valid color rejected: %v", err)
-	}
-}
-
 func TestCompactionSettingsValidation(t *testing.T) {
 	base := Settings{Provider: "p", Providers: map[string]Provider{"p": {BaseURL: "https://example.com"}}}
 	base.MaxContextTokens = -1
@@ -160,5 +140,37 @@ func TestCompactionSettingsValidation(t *testing.T) {
 	base.CompactKeepTurns = 0
 	if err := validateSettings(base); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLegacyColorsTableIgnored(t *testing.T) {
+	dir := t.TempDir()
+	text := "provider = 'p'\nmodel = 'm'\nmax_code_lines = 12\n[providers.p]\nbase_url = 'https://example.com'\n[colors]\naccent = \"#ff0000\"\nbogus = \"red\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "settings.toml"), []byte(text), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := loadSettings(dir)
+	if err != nil {
+		t.Fatalf("legacy [colors] table rejected: %v", err)
+	}
+	if s.Provider != "p" || s.Model != "m" || s.MaxCodeLines != 12 {
+		t.Fatalf("settings not loaded: %+v", s)
+	}
+}
+
+func TestDefaultSettingsHaveNoColorTable(t *testing.T) {
+	if strings.Contains(strings.ToLower(defaultSettings), "color") {
+		t.Fatal("default settings must not mention colors")
+	}
+	dir := t.TempDir()
+	if _, err := loadSettings(dir); err != nil {
+		t.Fatal(err)
+	}
+	created, err := os.ReadFile(filepath.Join(dir, "settings.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ToLower(string(created)), "color") {
+		t.Fatalf("created settings mention colors:\n%s", created)
 	}
 }
