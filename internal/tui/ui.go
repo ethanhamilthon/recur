@@ -53,6 +53,12 @@ type model struct {
 	inputWidth, inputHeight int
 	contextInput            *int64
 	sel                     *selection
+	inputSel                *composerSelection
+	inputDrag               bool
+	inputTop                int
+	layoutValue             string
+	layoutWidth             int
+	layout                  []composerRow
 	latest                  string
 	menuKind                string
 	menu                    []command
@@ -185,9 +191,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	follow := m.viewport.AtBottom()
 	switch v := msg.(type) {
 	case clipboardResult:
-		m.acceptClipboard(v)
+		cmd := m.acceptClipboard(v)
 		m.refresh(true)
-		return m, nil
+		return m, cmd
 	case followerTick:
 		if !m.busy && !m.a.ReadOnly {
 			if messages := m.a.Notifications(); len(messages) > 0 {
@@ -261,13 +267,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh(follow)
 		return m, nil
 	case tea.MouseMsg:
-		if cmd := m.mouseSelection(v); cmd != nil || m.sel != nil {
+		if cmd, handled := m.mouseSelection(v); handled {
 			m.refresh(false)
 			return m, cmd
 		}
 		var cmd tea.Cmd
 		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
+	case composerShortcut:
+		key := tea.KeyMsg{Type: tea.KeyCtrlC}
+		if v.cut {
+			key = tea.KeyMsg{Type: tea.KeyCtrlX}
+		}
+		if cmd, handled := m.composerKey(key); handled {
+			return m, cmd
+		}
+		return m, nil
 	case clipboardCopied:
 		return m.stop("notice", fmt.Sprintf("Copied %d lines to the clipboard.", v.lines))
 	case compactMsg:
@@ -339,6 +354,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if next, cmd, handled := m.pickerKey(v); handled {
 			return next, cmd
+		}
+		if cmd, handled := m.composerKey(v); handled {
+			return m, cmd
 		}
 		switch v.String() {
 		case "ctrl+v":
@@ -463,9 +481,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 func (m model) View() string {
-	view := m.viewport.View()
-	if m.sel == nil {
-		return view
+	lines := strings.Split(m.viewport.View(), "\n")
+	if m.sel != nil {
+		lines = m.sel.highlight(lines, m.viewport.Width)
 	}
-	return strings.Join(m.sel.highlight(strings.Split(view, "\n"), m.viewport.Width), "\n")
+	return strings.Join(m.composerHighlight(lines), "\n")
 }

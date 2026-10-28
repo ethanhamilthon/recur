@@ -320,3 +320,33 @@ func TestMacClipboardBridgeCompilesWithoutReadingClipboard(t *testing.T) {
 		t.Fatalf("bridge syntax: %s %v", output, err)
 	}
 }
+
+func TestCopyCutShortcutsAcrossLayouts(t *testing.T) {
+	for _, payload := range []string{"99;9u", "1089;9u", "99;33u"} {
+		if got := normalizeTerminalKey(csiTestMessage(fmt.Sprintf("?CSI%+v?", []byte(payload)))); got != (composerShortcut{cut: false}) {
+			t.Fatalf("%s: copy shortcut = %#v", payload, got)
+		}
+	}
+	for _, payload := range []string{"120;9u", "1095;9u"} {
+		if got := normalizeTerminalKey(csiTestMessage(fmt.Sprintf("?CSI%+v?", []byte(payload)))); got != (composerShortcut{cut: true}) {
+			t.Fatalf("%s: cut shortcut = %#v", payload, got)
+		}
+	}
+	for payload, want := range map[string]tea.KeyType{"99;5u": tea.KeyCtrlC, "120;5u": tea.KeyCtrlX} {
+		key, ok := normalizeTerminalKey(csiTestMessage(fmt.Sprintf("?CSI%+v?", []byte(payload)))).(tea.KeyMsg)
+		if !ok || key.Type != want {
+			t.Fatalf("%s: control key = %v, want %v", payload, key, want)
+		}
+	}
+	for _, payload := range []string{"99;9:3u", "120;9:3u"} {
+		if got := normalizeTerminalKey(csiTestMessage(fmt.Sprintf("?CSI%+v?", []byte(payload)))); got != nil {
+			t.Fatalf("%s: release produced %v", payload, got)
+		}
+	}
+	for _, payload := range []string{"99;1u", "120;1u"} {
+		switch got := normalizeTerminalKey(csiTestMessage(fmt.Sprintf("?CSI%+v?", []byte(payload)))).(type) {
+		case composerShortcut, tea.KeyMsg:
+			t.Fatalf("%s: plain key decoded as shortcut: %#v", payload, got)
+		}
+	}
+}
