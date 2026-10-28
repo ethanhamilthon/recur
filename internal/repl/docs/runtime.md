@@ -15,9 +15,11 @@ GIT_PAGER are cat. ~/.zshrc and other shell startup files are not read: PATH and
 exported variables are inherited from the environment that started recur, but
 aliases and zsh functions are not. Put the functions you need in prefix.sh.
 
-Each call returns {output, exit_code}. Stdout and stderr are merged and capped at
-16 KiB (the first 8 KiB and last 8 KiB are kept with a truncation warning in
-the middle); filter large output with rg, grep, head, tail or sed -n. A syntax
+Each call returns {output, exit_code}. Stdout and stderr are merged. The
+max_output argument sets how many bytes are kept: default 8192 (first 4 KiB and
+last 4 KiB with a truncation notice in the middle); 0 disables truncation.
+Prefix output is never truncated. Prefer filtering with rg, grep, head, tail or
+sed -n. A syntax
 error runs nothing and returns exit_code 2. The exit builtin ends only the
 current call.
 

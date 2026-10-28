@@ -267,8 +267,9 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 				switch call.Name {
 				case "bash":
 					var args struct {
-						Command string `json:"command"`
-						Timeout *int64 `json:"timeout"`
+						Command   string `json:"command"`
+						Timeout   *int64 `json:"timeout"`
+						MaxOutput *int64 `json:"max_output"`
 					}
 					var value repl.Result
 					timeout := repl.DefaultTimeout
@@ -278,8 +279,14 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 							e = fmt.Errorf("timeout must be 1..600 seconds; run longer work as a top-level background job ending with recur notify")
 						}
 					}
+					limit := repl.DefaultOutputLimit
+					if e == nil && args.MaxOutput != nil {
+						if limit = int(*args.MaxOutput); limit < 0 {
+							e = fmt.Errorf("max_output must be >= 0 bytes (0 = no truncation)")
+						}
+					}
 					if e == nil {
-						value, e = a.REPL.Execute(ctx, args.Command, timeout)
+						value, e = a.REPL.ExecuteLimit(ctx, args.Command, timeout, limit)
 					}
 					if e != nil {
 						value = repl.Result{Output: e.Error(), ExitCode: 2, Error: true}

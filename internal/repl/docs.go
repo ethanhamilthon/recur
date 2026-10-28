@@ -11,9 +11,9 @@ import (
 const ToolDescription = `Run a command in a persistent bash-compatible shell (mvdan.cc/sh interpreter
 embedded in Recur, not /bin/bash). Variables, functions and the working directory persist across
 calls and user turns. External programs run from PATH with the user's permissions.
-Result: {output, exit_code}. Stdout and stderr are merged and capped at 16 KiB (first 8 KiB and
-last 8 KiB with a truncation warning in the middle); filter large output with rg, grep, head, tail,
-sed -n or wc. Syntax errors run nothing (exit_code 2).
+Result: {output, exit_code}. Stdout and stderr are merged. max_output: bytes kept, default 8192
+(null); longer output keeps the first and last halves with a truncation notice in the middle;
+0 disables truncation (use sparingly). Prefer filtering with rg, grep, head, tail, sed -n or wc. Syntax errors run nothing (exit_code 2).
 timeout: seconds for this call, default 120 (null), maximum 600. A timeout or cancellation kills
 the foreground command (exit_code 124 or 130) but keeps shell state. Run anything that may take
 longer than 600 seconds as a top-level background job that ends with recur notify, for example:

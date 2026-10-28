@@ -149,9 +149,10 @@ func (a *Agent) AddProvider(name string, provider Provider) error {
 }
 
 var bashParameters = map[string]any{"type": "object", "properties": map[string]any{
-	"command": map[string]any{"type": "string"},
-	"timeout": map[string]any{"type": []string{"integer", "null"}, "description": "seconds, default 120, maximum 600"},
-}, "required": []string{"command", "timeout"}, "additionalProperties": false}
+	"command":    map[string]any{"type": "string"},
+	"timeout":    map[string]any{"type": []string{"integer", "null"}, "description": "seconds, default 120, maximum 600"},
+	"max_output": map[string]any{"type": []string{"integer", "null"}, "description": "output bytes to keep, default 8192 (first half + last half); 0 = no truncation"},
+}, "required": []string{"command", "timeout", "max_output"}, "additionalProperties": false}
 
 // shellEnv is exported into the shell before every call.
 func (a *Agent) shellEnv() map[string]string {

@@ -109,7 +109,7 @@ The model has one tool, `bash`, with arguments `command` and `timeout`. Commands
 
 External programs are found through `PATH`, run with your permissions and get their own process group. There is no TTY and stdin is empty, so interactive programs do not work; `PAGER` and `GIT_PAGER` are `cat`. `~/.zshrc` and other startup files are not read: `PATH` and exported variables come from the environment that started recur, but aliases and zsh functions do not. Define what you need in `prefix.sh`.
 
-Each call returns `{output, exit_code}` with stdout and stderr merged and capped at 16 KiB (first 8 KiB and last 8 KiB with a truncation warning). Syntax errors run nothing (exit code 2). `timeout` is in seconds: default 120, maximum 600. A timeout (124) or cancellation (130) kills the foreground process group but keeps shell state. Longer work runs as a top-level background job that reports back itself:
+Each call returns `{output, exit_code}` with stdout and stderr merged. `max_output` (bytes) controls truncation: default 8192 — longer output keeps the first 4 KiB and last 4 KiB with a truncation notice between them; `0` disables truncation. Prefix output is never truncated. Syntax errors run nothing (exit code 2). `timeout` is in seconds: default 120, maximum 600. A timeout (124) or cancellation (130) kills the foreground process group but keeps shell state. Longer work runs as a top-level background job that reports back itself:
 
 ```sh
 (go test ./... > /tmp/test.log 2>&1; recur notify "tests finished: exit $?") &

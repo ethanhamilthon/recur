@@ -151,7 +151,7 @@ func TestOutputLimit(t *testing.T) {
 	start(t, r)
 	for _, command := range []string{"yes x | head -c 400000", "i=0; while [ $i -lt 40000 ]; do echo xxxxxxxxx; i=$((i+1)); done"} {
 		result := run(t, r, command, 20*time.Second)
-		if result.ExitCode != 0 || len(result.Output) > outputLimit+100 || !strings.Contains(result.Output, "[output truncated") {
+		if result.ExitCode != 0 || len(result.Output) > DefaultOutputLimit+300 || !strings.Contains(result.Output, "[output truncated") {
 			t.Fatalf("%s: length=%d %+v", command, len(result.Output), result.ExitCode)
 		}
 	}
@@ -176,5 +176,26 @@ func TestPrefixFailures(t *testing.T) {
 	}
 	if r.runner != nil {
 		t.Fatal("failed prefix left a shell")
+	}
+}
+
+func TestOutputLimitChoices(t *testing.T) {
+	r := &REPL{Dir: t.TempDir(), Prefix: "yes p | head -c 100000"}
+	start(t, r)
+	if len(r.PrefixOutput) != 100000 || strings.Contains(r.PrefixOutput, "[output truncated") {
+		t.Fatalf("prefix truncated: %d", len(r.PrefixOutput))
+	}
+	for _, tc := range []struct{ limit, max int }{{1000, 1300}, {NoOutputLimit, 50000}} {
+		result, err := r.ExecuteLimit(context.Background(), "yes x | head -c 50000", 20*time.Second, tc.limit)
+		if err != nil || len(result.Output) > tc.max {
+			t.Fatalf("limit %d: len=%d err=%v", tc.limit, len(result.Output), err)
+		}
+		if truncated := strings.Contains(result.Output, "[output truncated"); truncated != (tc.limit > 0) {
+			t.Fatalf("limit %d: truncated=%v", tc.limit, truncated)
+		}
+	}
+	result := run(t, r, "echo small", time.Second)
+	if result.Output != "small\n" {
+		t.Fatalf("small: %q", result.Output)
 	}
 }

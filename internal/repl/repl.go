@@ -91,7 +91,7 @@ func (r *REPL) Ensure(ctx context.Context) (bool, error) {
 	}
 	r.runner = runner
 	r.jobs, r.stopJobs = context.WithCancel(context.Background())
-	result, broken := r.run(ctx, r.Prefix, DefaultTimeout)
+	result, broken := r.run(ctx, r.Prefix, DefaultTimeout, NoOutputLimit)
 	if broken {
 		r.stop()
 		return false, fmt.Errorf("shell prefix failed: %s", result.Output)
@@ -101,23 +101,29 @@ func (r *REPL) Ensure(ctx context.Context) (bool, error) {
 }
 
 func (r *REPL) Execute(ctx context.Context, command string, timeout time.Duration) (Result, error) {
+	return r.ExecuteLimit(ctx, command, timeout, DefaultOutputLimit)
+}
+
+// ExecuteLimit runs a command keeping at most limit output bytes (first and last
+// halves); NoOutputLimit keeps everything.
+func (r *REPL) ExecuteLimit(ctx context.Context, command string, timeout time.Duration, limit int) (Result, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.runner == nil {
 		return Result{}, fmt.Errorf("shell unavailable")
 	}
-	result, _ := r.run(ctx, command, timeout)
+	result, _ := r.run(ctx, command, timeout, limit)
 	return result, nil
 }
 
 // run reports broken when the source did not run to completion: a syntax
 // error, a timeout, cancellation or an interpreter failure.
-func (r *REPL) run(ctx context.Context, source string, timeout time.Duration) (Result, bool) {
+func (r *REPL) run(ctx context.Context, source string, timeout time.Duration, limit int) (Result, bool) {
 	file, err := syntax.NewParser().Parse(strings.NewReader(source), "")
 	if err != nil {
 		return Result{Output: "[recur: syntax error, nothing was run] " + err.Error() + "\n", ExitCode: 2, Error: true}, true
 	}
-	c := &call{}
+	c := &call{output: cappedBuffer{limit: limit}}
 	r.callMu.Lock()
 	r.call = c
 	r.callMu.Unlock()

@@ -1,12 +1,21 @@
 package repl
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
-// outputLimit caps captured tool output at 16 KiB, keeping head and tail.
-const outputLimit = 16 * 1024
+const (
+	// DefaultOutputLimit caps a tool call result when the agent does not choose a limit.
+	DefaultOutputLimit = 8 * 1024
+	// NoOutputLimit keeps the complete output (used for the prefix and max_output 0).
+	NoOutputLimit = 0
+)
 
-// cappedBuffer captures bounded UTF-8 tool output, keeping head and tail when truncated.
+// cappedBuffer captures UTF-8 tool output. With a positive limit it keeps the
+// first and last limit/2 bytes; with NoOutputLimit it keeps everything.
 type cappedBuffer struct {
+	limit      int
 	head, tail []byte
 	size       int
 }
@@ -14,21 +23,28 @@ type cappedBuffer struct {
 func (b *cappedBuffer) Write(p []byte) (int, error) {
 	total := len(p)
 	b.size += total
-	if room := outputLimit/2 - len(b.head); room > 0 {
+	if b.limit <= 0 {
+		b.head = append(b.head, p...)
+		return total, nil
+	}
+	half := b.limit / 2
+	if room := half - len(b.head); room > 0 {
 		n := min(len(p), room)
 		b.head, p = append(b.head, p[:n]...), p[n:]
 	}
 	b.tail = append(b.tail, p...)
-	if len(b.tail) > outputLimit/2 {
-		b.tail = append(b.tail[:0], b.tail[len(b.tail)-outputLimit/2:]...)
+	if keep := b.limit - half; len(b.tail) > keep {
+		b.tail = append(b.tail[:0], b.tail[len(b.tail)-keep:]...)
 	}
 	return total, nil
 }
 func (b *cappedBuffer) Reset() { b.head, b.tail, b.size = b.head[:0], b.tail[:0], 0 }
 func (b *cappedBuffer) Text() string {
 	head, tail := strings.ToValidUTF8(string(b.head), ""), strings.ToValidUTF8(string(b.tail), "")
-	if b.size <= outputLimit {
+	if b.limit <= 0 || b.size <= b.limit {
 		return head + tail
 	}
-	return head + "\n[output truncated at 16 KiB; filter with rg, grep, head or tail]\n" + tail
+	return head + fmt.Sprintf("\n[output truncated: %d of %d bytes omitted (max_output=%d, first %d + last %d kept); "+
+		"filter with rg, grep, head, tail or pass a larger max_output]\n",
+		b.size-len(b.head)-len(b.tail), b.size, b.limit, len(b.head), len(b.tail)) + tail
 }
