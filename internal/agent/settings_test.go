@@ -162,15 +162,3 @@ func TestCompactionSettingsValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-func TestRemovedChatCompletionsConfigFails(t *testing.T) {
-	dir := t.TempDir()
-	settings := "[providers.p]\nbase_url = \"https://example.com\"\napi_type = \"chat_completions\"\n"
-	if err := os.WriteFile(filepath.Join(dir, "settings.toml"), []byte(settings), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	_, err := loadSettings(dir)
-	if err == nil || !strings.Contains(err.Error(), "removed chat_completions API") {
-		t.Fatalf("err = %v", err)
-	}
-}

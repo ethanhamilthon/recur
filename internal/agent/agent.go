@@ -98,7 +98,6 @@ func New(dir string, target ...string) (*Agent, error) {
 		a.release()
 		return nil, err
 	}
-
 	a.REPL.Env = a.shellEnv
 	return a, nil
 }
@@ -221,9 +220,6 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 			a.History = append(a.History, raw(map[string]any{"role": "user", "content": content}))
 			emit(Event{Kind: "notice", Text: text})
 		}
-		if e := a.Save(); e != nil {
-			return fmt.Errorf("could not save history: %w", e)
-		}
 		a.compactIfNeeded(ctx, emit)
 		if e := a.Save(); e != nil {
 			return fmt.Errorf("could not save history: %w", e)
@@ -267,11 +263,7 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 		}
 		// Discard streaming-only entries from the persistent journal. The UI
 		// continues showing them until the completed records reconcile them.
-		if durableRecords != nil {
-			a.records = durableRecords
-		} else {
-			a.records = baseRecords
-		}
+		a.records = baseRecords
 		meta := a.lastRequest
 		if meta.Usage == nil {
 			usageKnown = false
@@ -469,11 +461,6 @@ func (a *Agent) request(ctx context.Context, emit func(Event), checkpoints ...fu
 			completed = make([]json.RawMessage, len(event.Response.Output))
 			for i, item := range event.Response.Output {
 				completed[i] = json.RawMessage(item.RawJSON())
-				if len(checkpoints) > 0 && checkpoints[0] != nil {
-					if err := checkpoints[0](int64(i), completed[i]); err != nil {
-						return nil, err
-					}
-				}
 			}
 		case "response.failed", "response.incomplete", "error":
 			return nil, fmt.Errorf("provider stream: %s", event.RawJSON())

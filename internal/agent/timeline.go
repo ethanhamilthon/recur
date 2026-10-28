@@ -21,7 +21,7 @@ type Metadata struct {
 type Record struct {
 	Preview bool      `json:"preview,omitempty"`
 	Kind    string    `json:"kind"`
-	Text    string    `json:"text"`
+	Text    string    `json:"text,omitempty"`
 	ID      string    `json:"id,omitempty"`
 	Meta    *Metadata `json:"meta,omitempty"`
 }

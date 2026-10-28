@@ -4,7 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
+	"recur/internal/agent"
 )
 
 func TestSelectionSpanAcrossRows(t *testing.T) {
@@ -51,5 +53,22 @@ func TestSelectionTextAndHighlight(t *testing.T) {
 	}
 	if !strings.HasPrefix(ansi.Strip(marked[1]), "bravo") {
 		t.Fatalf("highlight changed the row text: %q", ansi.Strip(marked[1]))
+	}
+	// Highlighting the second occurrence of repeated text must not highlight the first.
+	repeat := selection{start: point{6, 0}, end: point{8, 0}}.highlight([]string{"foo + foo"}, 20)
+	if repeat[0] != "foo + \x1b[7mfoo\x1b[0m" {
+		t.Fatalf("repeated substring highlight = %q", repeat[0])
+	}
+}
+
+func TestSingleClickDoesNotCopy(t *testing.T) {
+	m := newModel(&agent.Agent{}, "/project")
+	m.add("user", "hello world")
+	m.refresh(true)
+	if cmd := m.mouseSelection(tea.MouseMsg{X: 2, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress}); cmd != nil {
+		t.Fatal("press should not copy")
+	}
+	if cmd := m.mouseSelection(tea.MouseMsg{X: 2, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionRelease}); cmd != nil {
+		t.Fatal("click without drag copied to clipboard")
 	}
 }

@@ -18,6 +18,9 @@ type selection struct{ start, end point }
 
 // span returns the selected cells of one row and whether the row is touched at all.
 func (s selection) span(row, width int) (int, int, bool) {
+	if s.start == s.end {
+		return 0, 0, false
+	}
 	first, last := s.start, s.end
 	if first.y > last.y || first.y == last.y && first.x > last.x {
 		first, last = last, first
@@ -35,31 +38,31 @@ func (s selection) span(row, width int) (int, int, bool) {
 	return max(0, min(from, width)), max(0, min(to, width)), true
 }
 
-// cells returns the plain selected text of one row.
-func (s selection) cells(line string, row, width int) (string, bool) {
+// cells returns the plain runes of one row and the selected rune range.
+func (s selection) cells(line string, row, width int) ([]rune, int, int, bool) {
 	from, to, ok := s.span(row, width)
 	if !ok {
-		return "", false
+		return nil, 0, 0, false
 	}
 	plain := []rune(strings.TrimRight(ansi.Strip(line), " "))
-	if from, to = min(from, len(plain)), min(to, len(plain)); from >= to {
-		return "", false
+	from, to = min(from, len(plain)), min(to, len(plain))
+	for to > from && plain[to-1] == ' ' {
+		to--
 	}
-	return strings.TrimRight(string(plain[from:to]), " "), true
+	return plain, from, to, from < to
 }
 
 // highlight reverses the selected cells while leaving other rows untouched.
 func (s selection) highlight(rows []string, width int) []string {
 	out := make([]string, len(rows))
 	for row, line := range rows {
-		text, ok := s.cells(line, row, width)
+		plain, from, to, ok := s.cells(line, row, width)
 		if !ok {
 			out[row] = line
 			continue
 		}
-		from := strings.Index(ansi.Strip(line), text)
-		plain := ansi.Strip(line)
-		out[row] = plain[:from] + "\x1b[7m" + text + "\x1b[0m" + plain[from+len(text):]
+		tail := []rune(ansi.Strip(line))[to:]
+		out[row] = string(plain[:from]) + "\x1b[7m" + string(plain[from:to]) + "\x1b[0m" + string(tail)
 	}
 	return out
 }
@@ -68,8 +71,8 @@ func (s selection) highlight(rows []string, width int) []string {
 func (s selection) text(rows []string, width int) string {
 	var out []string
 	for row, line := range rows {
-		if text, ok := s.cells(line, row, width); ok {
-			out = append(out, text)
+		if plain, from, to, ok := s.cells(line, row, width); ok {
+			out = append(out, string(plain[from:to]))
 		}
 	}
 	return strings.Join(out, "\n")

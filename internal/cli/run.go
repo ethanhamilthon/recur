@@ -98,18 +98,22 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 		fmt.Fprintln(diagnostics, "Read-only session; input is not submitted.")
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
-		previous := ""
+		previous, printed := "", 0
 		for {
-			data, _ := json.Marshal(a.Records())
-			snapshot := string(data)
-			if snapshot != previous {
+			records := a.Records()
+			data, _ := json.Marshal(records)
+			if snapshot := string(data); snapshot != previous {
 				previous = snapshot
 				if *mode == "jsonl" {
-					send(map[string]any{"type": "snapshot", "records": a.Records(), "session": a.SessionInfo()})
+					send(map[string]any{"type": "snapshot", "records": records, "session": a.SessionInfo()})
 				} else {
-					for _, record := range a.Records() {
+					if printed > len(records) {
+						printed = 0
+					}
+					for _, record := range records[printed:] {
 						fmt.Fprintln(out, record.Text)
 					}
+					printed = len(records)
 				}
 			}
 			if writeErr != nil {

@@ -59,6 +59,7 @@ type model struct {
 	effort, menuGeneration  int
 	menuCancel              context.CancelFunc
 	setup                   []string
+	sessions                []agent.SessionSummary
 }
 
 func newModel(a *agent.Agent, cwd string) model {
@@ -84,6 +85,7 @@ func newModel(a *agent.Agent, cwd string) model {
 }
 
 func (m *model) restoreHistory() {
+	m.entries, m.cache, m.contextInput = nil, nil, nil
 	for _, r := range m.a.Records() {
 		m.entries = append(m.entries, entry{Kind: r.Kind, Text: r.Text, ID: r.ID, Meta: r.Meta})
 		if r.Meta != nil && r.Meta.RequestID != "" {
@@ -135,6 +137,13 @@ func (m *model) updateInput(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 func (m *model) refresh(follow bool) {
+	if text := m.input.Value(); !m.hideCompletion && (text == "/resume" || strings.HasPrefix(text, "/resume ")) {
+		if m.sessions == nil {
+			m.sessions, _ = m.a.Sessions()
+		}
+	} else {
+		m.sessions = nil
+	}
 	m.resizeInput() // Constant-time unless input text or dimensions changed.
 	m.viewport.Width = max(1, m.width)
 	m.viewport.Height = max(1, m.height)
@@ -269,7 +278,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v.err != nil {
 			return m.stop("error", v.err.Error())
 		}
-		m.entries, m.cache, m.contextInput = nil, nil, nil
 		m.restoreHistory()
 		return m.stop("notice", v.text)
 	case agent.Event:
@@ -359,12 +367,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.runCommand("/quit")
 			}
 		case "esc":
-			if len(m.completions()) > 0 {
-				m.hideCompletion = true
-				m.refresh(true)
-				return m, nil
-			}
-			if m.busy {
+			if len(m.completions()) == 0 && m.busy {
 				m.requestCancel()
 			}
 			m.hideCompletion = true

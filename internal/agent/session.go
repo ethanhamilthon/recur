@@ -90,8 +90,7 @@ func loadOrCreateFile(path, fallback string) (string, error) {
 		return "", err
 	}
 	_, err = file.WriteString(fallback)
-	closeErr := file.Close()
-	if err == nil {
+	if closeErr := file.Close(); err == nil {
 		err = closeErr
 	}
 	return fallback, err
@@ -134,34 +133,19 @@ func (a *Agent) changeSession(id string) error {
 			return err
 		}
 	}
-	next := *a
-	next.owner, next.ReadOnly = nil, false
-	next.listener, next.inbox, next.views = nil, nil, nil
-	committed := false
-	defer func() {
-		if !committed {
-			next.release()
-		}
-	}()
+	next := &Agent{home: a.home, sessionsDir: a.sessionsDir, REPL: a.REPL, System: c.system}
 	next.applySettings(c.settings)
-	next.lastRequest = Metadata{}
-	next.History, next.records = nil, nil
 	if id == "" {
 		err = next.createSession()
 	} else {
 		err = next.openSession(id)
 	}
 	if err != nil {
+		next.release()
 		return err
 	}
-	a.REPL.Close()
-	a.release()
-	a.owner, a.ReadOnly = next.owner, next.ReadOnly
-	a.listener, a.socketDir, a.inbox, a.views = next.listener, next.socketDir, next.inbox, next.views
-	committed = true
-	a.History, a.records, a.HistoryPath = next.History, next.records, next.HistoryPath
-	a.REPL.Prefix, a.REPL.PrefixOutput = c.prefix, ""
-	a.System = c.system
-	a.applySettings(next.settings)
+	a.Close()
+	next.REPL.Prefix, next.REPL.PrefixOutput = c.prefix, ""
+	*a = *next
 	return nil
 }

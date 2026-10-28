@@ -18,15 +18,6 @@ type Provider struct {
 	APIKey  string `toml:"api_key"`
 }
 
-// removedProvider carries the retired api_type key so old files get a clear error.
-type removedProvider struct {
-	APIType string `toml:"api_type"`
-}
-
-type removedSettings struct {
-	Providers map[string]removedProvider `toml:"providers"`
-}
-
 // colorNames lists the palette entries accepted from settings.
 var colorNames = map[string]struct{}{
 	"accent": {}, "foreground": {}, "muted": {}, "code": {}, "dim": {},
@@ -95,13 +86,6 @@ func loadSettings(dir string) (Settings, error) {
 	}
 	if err = toml.Unmarshal([]byte(text), &s); err != nil {
 		return s, fmt.Errorf("%s: %w", path, err)
-	}
-	var removed removedSettings
-	_ = toml.Unmarshal([]byte(text), &removed)
-	for name, p := range removed.Providers {
-		if p.APIType == "chat_completions" {
-			return s, fmt.Errorf("%s: provider %q uses the removed chat_completions API; remove api_type or set it to \"responses\"", path, name)
-		}
 	}
 	if err := validateSettings(s); err != nil {
 		return s, fmt.Errorf("%s: %w", path, err)

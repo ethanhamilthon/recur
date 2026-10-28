@@ -63,9 +63,12 @@ func (m model) completions() []command {
 		return matches
 	}
 	if !m.hideCompletion && (text == "/resume" || strings.HasPrefix(text, "/resume ")) {
-		sessions, err := m.a.Sessions()
-		if err != nil {
-			return nil
+		sessions := m.sessions
+		if sessions == nil {
+			var err error
+			if sessions, err = m.a.Sessions(); err != nil {
+				return nil
+			}
 		}
 		prefix := strings.TrimSpace(strings.TrimPrefix(text, "/resume"))
 		lower := strings.ToLower(prefix)
@@ -132,19 +135,24 @@ func (m model) runCommand(name string) (tea.Model, tea.Cmd) {
 	}
 	if verb[0] == "/resume" {
 		sessions, err := m.a.Sessions()
-		found := false
-		if len(verb) == 2 {
-			for _, session := range sessions {
-				if session.ID == verb[1] {
-					found = true
-				}
-			}
-		}
-		if err == nil && !found {
-			err = fmt.Errorf("choose a session from /resume completions")
-		}
 		if err != nil {
 			return m.stop("error", err.Error())
+		}
+		if len(verb) == 1 && len(sessions) > 0 {
+			m.sessions = sessions
+			m.input.SetValue("/resume ")
+			m.input.CursorEnd()
+			m.refresh(true)
+			return m, nil
+		}
+		found := false
+		for _, session := range sessions {
+			if len(verb) == 2 && session.ID == verb[1] {
+				found = true
+			}
+		}
+		if !found {
+			return m.stop("error", "choose a session from /resume completions")
 		}
 	}
 	switch verb[0] {
@@ -196,9 +204,6 @@ func (m model) runCommand(name string) (tea.Model, tea.Cmd) {
 				m.pasteGeneration++
 				m.pasting = false
 				m.images = nil
-				m.entries = nil
-				m.cache = nil
-				m.contextInput = nil
 				m.restoreHistory()
 			}
 		}

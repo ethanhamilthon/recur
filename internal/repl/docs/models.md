@@ -1,15 +1,13 @@
 # Models, effort, and providers
 
 /model fetches the model lists of all configured providers when opened and shows each model with its provider. Choosing a model also makes its provider the default one. A provider that fails to answer is reported and skipped. Up/Down selects
-an entry, typing filters it, Left/Right cycles none, low, medium, high, xhigh,
+an entry, typing filters it, Left/Right cycles none, minimal, low, medium, high, xhigh,
 max, and Enter saves the selection. Esc cancels; late fetch results do not reopen
 a cancelled menu. Settings changes are disabled while a turn is running.
 
 /login lists configured providers and ends with + Add. Add asks for provider
 name, HTTP(S) base URL, and an optional API key. The key is masked, kept in
-private settings.toml, and never appended to chat history. Only the Responses API
-is supported; a provider configured with the removed chat_completions api_type
-fails to load with an explicit error.
+private settings.toml, and never appended to chat history. Only the Responses API is supported.
 Provider selection changes the active session's provider and new-session default;
 use /model afterwards to choose a model supported by that provider.
 

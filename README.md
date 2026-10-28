@@ -1,6 +1,6 @@
 # recur
 
-A terminal coding agent built in Go. The model works through one `bash` tool: a persistent bash-compatible shell interpreted in-process by [mvdan.cc/sh](https://github.com/mvdan/sh). No Python, Node or system bash is required. The official OpenAI Go SDK handles Responses and Chat Completions requests and streaming.
+A terminal coding agent built in Go. The model works through one `bash` tool: a persistent bash-compatible shell interpreted in-process by [mvdan.cc/sh](https://github.com/mvdan/sh). No Python, Node or system bash is required. The official OpenAI Go SDK handles Responses requests and streaming.
 
 Providers use the Responses protocol and are configured in `~/.recur/settings.toml`:
 
@@ -18,7 +18,7 @@ base_url = "https://example.com/v1"
 api_key = "another-key"
 ```
 
-`provider` selects one of the configured providers. `effort` accepts `none`, `minimal`, `low`, `medium`, `high`, or `xhigh` (support depends on the provider/model); an empty string omits the effort field (reasoning summaries are configured separately). Missing settings are created with defaults; existing files are never overwritten. There is no default provider or model: on first start `provider` and `model` are empty, the start screen tells you to run `/login` to add a provider and then `/model` to choose a model, and messages are not sent until both are set. The current version is in the `VERSION` file and is shown on the start screen. Settings no longer come from `~/.meno/provider.json`.
+`provider` selects one of the configured providers. `effort` accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` (support depends on the provider/model); an empty string omits the effort field (reasoning summaries are configured separately). Missing settings are created with defaults; existing files are never overwritten. There is no default provider or model: on first start `provider` and `model` are empty, the start screen tells you to run `/login` to add a provider and then `/model` to choose a model, and messages are not sent until both are set. The current version is in the `VERSION` file and is shown on the start screen. Settings no longer come from `~/.meno/provider.json`.
 
 Set `RECUR_HOME=/path/to/.recur` to use that directory **directly** for settings, prompts, and history. The default is `~/.recur`; relative paths are resolved from the working directory. This does not change the project working directory. `/new` reloads settings and prompts. Configuration may contain API keys; keep it private.
 
@@ -279,7 +279,7 @@ Shell commands stream into the timeline as decoded text, not raw JSON. Each call
 ## Model and provider selection
 
 `/model` fetches models from all configured providers when opened and shows each with its provider; choosing one makes that provider the default. Providers that fail are reported and skipped. Type to filter,
-Up/Down selects, Left/Right chooses `none`, `low`, `medium`, `high`, `xhigh`, or
+Up/Down selects, Left/Right chooses `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or
 `max`, and Enter applies the selection. Esc cancels. Changes are disabled during
 an active turn. The selected model/effort update the current session and global
 defaults for new sessions, not older sessions.
@@ -287,8 +287,7 @@ defaults for new sessions, not older sessions.
 `/login` lists providers and ends with **+ Add**. The creation wizard asks for a
 unique name, HTTP(S) base URL, and an optional API key. Keys are masked in the
 composer and stored only in private configuration, never in chat history. Only the
-Responses API is supported; a provider configured with the removed
-`chat_completions` `api_type` fails to load with an explicit error. After choosing a
+Responses API is supported. After choosing a
 provider, use `/model` to select a compatible model. Responses supports streaming,
 tool calls, image input, refusals and reported usage. Unsupported provider-specific
 extensions are not inferred.

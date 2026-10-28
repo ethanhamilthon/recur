@@ -16,7 +16,7 @@ type Selection struct {
 	Effort   string `json:"effort"`
 }
 
-var Efforts = []string{"none", "low", "medium", "high", "xhigh", "max"}
+var Efforts = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 
 func (a *Agent) selection() *Selection {
 	return &Selection{a.settings.Provider, a.settings.Model, a.settings.Effort}
@@ -156,19 +156,20 @@ var bashParameters = map[string]any{"type": "object", "properties": map[string]a
 
 // shellEnv is exported into the shell before every call.
 func (a *Agent) shellEnv() map[string]string {
-	env := map[string]string{"RECUR_ENDPOINT": ""}
+	info := a.SessionInfo()
+	endpoint, ctx := "", ""
 	if a.socketDir != "" {
-		env["RECUR_ENDPOINT"] = filepath.Join(a.socketDir, "socket")
+		endpoint = filepath.Join(a.socketDir, "socket")
 	}
-	for key, value := range a.SessionInfo() {
-		if key != "cwd" {
-			env["RECUR_"+strings.ToUpper(key)] = fmt.Sprint(value)
-			if value == nil {
-				env["RECUR_"+strings.ToUpper(key)] = ""
-			}
-		}
+	if info["ctx_size"] != nil {
+		ctx = fmt.Sprint(info["ctx_size"])
 	}
-	env["RECUR_SESSION_ID"] = env["RECUR_ID"]
-	delete(env, "RECUR_ID")
-	return env
+	return map[string]string{
+		"RECUR_ENDPOINT":   endpoint,
+		"RECUR_SESSION_ID": fmt.Sprint(info["id"]),
+		"RECUR_MODEL":      a.settings.Model,
+		"RECUR_PROVIDER":   a.settings.Provider,
+		"RECUR_EFFORT":     a.settings.Effort,
+		"RECUR_CTX_SIZE":   ctx,
+	}
 }

@@ -1,1 +1,0 @@
-You are Lopy, a coding agent

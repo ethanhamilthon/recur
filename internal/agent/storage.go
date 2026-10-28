@@ -133,9 +133,11 @@ func sessionSummary(path string) SessionSummary {
 		if entry.Selection != nil {
 			summary.Model = entry.Selection.Model
 		}
-		if entry.Record != nil && entry.Record.Kind == "user" {
-			summary.Title = strings.Join(strings.Fields(entry.Record.Text), " ")
-			break
+		for _, r := range RecordsForItem(entry.Item) {
+			if r.Kind == "user" {
+				summary.Title = strings.Join(strings.Fields(r.Text), " ")
+				return summary
+			}
 		}
 	}
 	return summary
@@ -146,13 +148,18 @@ func (a *Agent) sessionData() ([]byte, error) {
 	if err := encoder.Encode(sessionLine{Version: 2, CWD: a.REPL.Dir, Selection: a.selection()}); err != nil {
 		return nil, err
 	}
+	var derived []Record
 	for _, item := range a.History {
 		if err := encoder.Encode(sessionLine{Item: item}); err != nil {
 			return nil, err
 		}
+		derived = append(derived, RecordsForItem(item)...)
 	}
 	records := a.Records()
-	for _, record := range records {
+	for i, record := range records {
+		if i < len(derived) && record.Kind == derived[i].Kind && record.Text == derived[i].Text {
+			record.Text = ""
+		}
 		if err := encoder.Encode(sessionLine{Record: &record}); err != nil {
 			return nil, err
 		}
@@ -173,6 +180,7 @@ func (a *Agent) readSession() error {
 	lines := bytes.Split(bytes.TrimSuffix(data, []byte("\n")), []byte("\n"))
 	var selection *Selection
 	var history []json.RawMessage
+	var derived []Record
 	records := []Record{}
 	for i, line := range lines {
 		var entry sessionLine
@@ -192,8 +200,13 @@ func (a *Agent) readSession() error {
 			return fmt.Errorf("session checkpoint missing")
 		} else if entry.Item != nil {
 			history = append(history, entry.Item)
+			derived = append(derived, RecordsForItem(entry.Item)...)
 		} else if entry.Record != nil {
-			records = append(records, *entry.Record)
+			r := *entry.Record
+			if r.Text == "" && len(records) < len(derived) && r.Kind == derived[len(records)].Kind {
+				r.Text = derived[len(records)].Text
+			}
+			records = append(records, r)
 		} else {
 			return fmt.Errorf("invalid session line %d", i+1)
 		}
@@ -220,15 +233,13 @@ func writePrivate(path string, data []byte) error {
 	}
 	temp := file.Name()
 	defer os.Remove(temp)
-	if _, err = file.Write(data); err != nil {
-		file.Close()
-		return err
+	if _, err = file.Write(data); err == nil {
+		err = file.Sync()
 	}
-	if err = file.Sync(); err != nil {
-		file.Close()
-		return err
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
 	}
-	if err = file.Close(); err != nil {
+	if err != nil {
 		return err
 	}
 	return os.Rename(temp, path)

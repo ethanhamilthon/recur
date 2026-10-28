@@ -31,7 +31,7 @@ const (
 
 // Release endpoints are variables so tests can serve them locally.
 var (
-	apiURL  = "https://api.github.com/repos/" + Repo + "/releases/latest"
+	apiURL  = "https://api.github.com/" + "repos/" + Repo + "/releases/latest"
 	downURL = "https://github.com/" + Repo + "/releases/download/"
 )
 
@@ -123,16 +123,13 @@ func cacheFile() string {
 		if err != nil {
 			return ""
 		}
-		return filepath.Join(dir, ".recur", "update.json")
+		home = filepath.Join(dir, ".recur")
 	}
-	if !filepath.IsAbs(home) {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return ""
-		}
-		home = filepath.Join(cwd, home)
+	path, err := filepath.Abs(filepath.Join(home, "update.json"))
+	if err != nil {
+		return ""
 	}
-	return filepath.Join(home, "update.json")
+	return path
 }
 
 // Available returns the newer version tag, using a cached answer to keep startup cheap.
@@ -158,7 +155,6 @@ func Available(ctx context.Context, current string) string {
 	return newerTag(current, latest)
 }
 
-// newerTag returns latest when it is a later release than current.
 func newerTag(current, latest string) string {
 	if Newer(current, latest) {
 		return latest
@@ -263,11 +259,11 @@ func replace(target string, data []byte) error {
 	}
 	name := temp.Name()
 	defer os.Remove(name)
-	if _, err := temp.Write(data); err != nil {
-		temp.Close()
-		return err
+	_, err = temp.Write(data)
+	if closeErr := temp.Close(); err == nil {
+		err = closeErr
 	}
-	if err := temp.Close(); err != nil {
+	if err != nil {
 		return err
 	}
 	if err := os.Chmod(name, 0o755); err != nil {
