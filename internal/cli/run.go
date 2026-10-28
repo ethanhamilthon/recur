@@ -12,19 +12,22 @@ import (
 	"time"
 
 	"recur/internal/agent"
+	"recur/internal/repl"
 	"recur/internal/selfupdate"
 	"recur/internal/tui"
 )
 
 func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.Writer) error {
-	notify := len(args) > 0 && args[0] == "notify"
-	if notify {
-		args = args[1:]
+	command := ""
+	if len(args) > 0 && (args[0] == "notify" || args[0] == "view") {
+		command, args = args[0], args[1:]
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	if len(args) > 0 && !notify {
+	if len(args) > 0 && command == "" {
 		switch args[0] {
+		case "docs":
+			return repl.Docs(out, args[1:])
 		case "update":
 			return selfupdate.Run(ctx, tui.Version, args[1:], out)
 		case "version":
@@ -36,7 +39,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 	flags.SetOutput(diagnostics)
 	prompt := flags.String("prompt", "", "run one turn without TUI")
 	mode := flags.String("mode", "", "headless transport: stdio or jsonl")
-	sessionID := flags.String("s", "", "target session for notify")
+	sessionID := flags.String("s", "", "target session for notify/view (default: $RECUR_ENDPOINT)")
 	resume := flags.String("resume", "", "resume a project session ID")
 	if err := flags.Parse(args); err != nil {
 		if err == flag.ErrHelp {
@@ -44,7 +47,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 		}
 		return err
 	}
-	if flags.NArg() != 0 && !notify {
+	if flags.NArg() != 0 && command == "" {
 		return fmt.Errorf("unexpected arguments: %v", flags.Args())
 	}
 	if *mode != "" && *mode != "stdio" && *mode != "jsonl" {
@@ -54,7 +57,10 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 	if err != nil {
 		return err
 	}
-	if notify {
+	if command == "view" {
+		return view(cwd, *sessionID, flags.Args())
+	}
+	if command == "notify" {
 		text := strings.Join(flags.Args(), " ")
 		if text == "" {
 			data, e := io.ReadAll(io.LimitReader(in, 128*1024+1))
@@ -188,4 +194,25 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 			return err
 		}
 	}
+}
+
+// view queues PNG/JPEG images for the session's next model request.
+func view(cwd, id string, paths []string) error {
+	if len(paths) == 0 {
+		return fmt.Errorf("usage: recur view PATH...")
+	}
+	endpoint, err := agent.Endpoint(cwd, id)
+	if err != nil {
+		return err
+	}
+	for _, path := range paths {
+		image, err := repl.CaptureImage(path)
+		if err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		if err = agent.Send(endpoint, agent.Message{Image: &image}); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+	}
+	return nil
 }

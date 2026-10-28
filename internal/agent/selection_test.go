@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -84,7 +85,7 @@ func TestSessionGlobalAndContextMatchesRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	a.REPL.Prefix = "print(session.model)"
+	a.REPL.Prefix = `echo "$RECUR_MODEL"`
 	if _, err = a.REPL.Ensure(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -93,18 +94,15 @@ func TestSessionGlobalAndContextMatchesRecords(t *testing.T) {
 	}
 	n := int64(36679)
 	a.records = []Record{{Kind: "assistant", Meta: &Metadata{RequestID: "r-1", ContextInput: &n}}}
-	result, err := a.REPL.Execute(context.Background(), "print(session.ctx_size)\nprint(session.cwd)\nprint(session.id)")
-	if err != nil || result.Error || !strings.Contains(result.Output, "36679") || !strings.Contains(result.Output, a.REPL.Dir) {
+	result, err := a.REPL.Execute(context.Background(), `echo "$RECUR_CTX_SIZE $RECUR_SESSION_ID"; sh -c 'echo "$RECUR_ENDPOINT"'`, time.Second)
+	id := strings.TrimSuffix(filepath.Base(a.HistoryPath), ".jsonl")
+	if err != nil || result.Error || !strings.Contains(result.Output, "36679 "+id) || !strings.Contains(result.Output, filepath.Join(a.socketDir, "socket")) {
 		t.Fatalf("metadata: %+v %v", result, err)
 	}
-	result, err = a.REPL.Execute(context.Background(), "session.model = 'fake'")
-	if err != nil || !result.Error {
-		t.Fatalf("metadata should be immutable: %+v %v", result, err)
-	}
 	a.records = append(a.records, Record{Kind: "assistant", Meta: &Metadata{RequestID: "r-2"}})
-	result, err = a.REPL.Execute(context.Background(), "session.ctx_size")
-	if err != nil || result.Error || result.Output != "" {
-		t.Fatalf("unknown context must be None: %+v %v", result, err)
+	result, err = a.REPL.Execute(context.Background(), `echo "[$RECUR_CTX_SIZE]"`, time.Second)
+	if err != nil || result.Error || result.Output != "[]\n" {
+		t.Fatalf("unknown context must be empty: %+v %v", result, err)
 	}
 	a.REPL.Close()
 	if _, err = a.REPL.Ensure(context.Background()); err != nil {

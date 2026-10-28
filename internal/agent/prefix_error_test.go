@@ -29,7 +29,7 @@ func TestInitializationFailureRetryAndSaveErrors(t *testing.T) {
 	}
 	defer a.Close()
 	configureTestAgent(t, a, Settings{Provider: "p", Model: "m", Providers: map[string]Provider{"p": {BaseURL: server.URL}}})
-	a.REPL.Prefix = "raise ValueError('prefix broken')"
+	a.REPL.Prefix = "if then"
 	var events []Event
 	err = a.Run(context.Background(), "keep request", func(e Event) { events = append(events, e) })
 	var init *InitializationError
@@ -53,7 +53,7 @@ func TestInitializationFailureRetryAndSaveErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.REPL.Close()
-	a.REPL.Prefix = "1/0"
+	a.REPL.Prefix = "if then"
 	err = a.Run(context.Background(), "retry me", func(Event) {})
 	if !errors.As(err, &init) || !strings.Contains(err.Error(), "prefix failed") || !strings.Contains(err.Error(), "save history") {
 		t.Fatalf("lost combined errors: %v", err)
@@ -126,7 +126,7 @@ func TestMidTurnAndRestoredPrefixNotifications(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		output := []any{}
 		if requests == 1 {
-			output = append(output, map[string]string{"type": "function_call", "name": "python_repl", "call_id": "c", "arguments": `{"code":"print(42)"}`})
+			output = append(output, map[string]string{"type": "function_call", "name": "bash", "call_id": "c", "arguments": `{"command":"echo 42","timeout":null}`})
 		}
 		fmt.Fprintf(w, "data: %s\n\n", raw(map[string]any{"type": "response.completed", "response": map[string]any{"output": output}}))
 	}))
@@ -137,7 +137,7 @@ func TestMidTurnAndRestoredPrefixNotifications(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	a.REPL.Prefix = "print('context ready')"
+	a.REPL.Prefix = "echo 'context ready'"
 	s := Settings{Provider: "p", Model: "m", Providers: map[string]Provider{"p": {BaseURL: server.URL}}}
 	configureTestAgent(t, a, s)
 	if err = a.Run(context.Background(), "start", func(e Event) {

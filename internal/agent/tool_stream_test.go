@@ -8,13 +8,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPartialCodeEscapes(t *testing.T) {
 	for _, tc := range []struct{ input, want string }{
-		{`{"co`, ""}, {`{"code":"abc`, "abc"}, {`{"code":"a\n`, "a\n"},
-		{`{"code":"x\`, "x"}, {`{"code":"\ud83d`, ""}, {`{"code":"\ud83d\ude80`, "🚀"},
-		{`{"code":"\\ud83d`, `\ud83d`}, {`{"code":"print(\"hi\")"}`, `print("hi")`},
+		{`{"co`, ""}, {`{"command":"abc`, "abc"}, {`{"command":"a\n`, "a\n"},
+		{`{"command":"x\`, "x"}, {`{"command":"\ud83d`, ""}, {`{"command":"\ud83d\ude80`, "🚀"},
+		{`{"command":"\\ud83d`, `\ud83d`}, {`{"command":"print(\"hi\")"}`, `print("hi")`},
 	} {
 		if got := partialCode(tc.input); got != tc.want {
 			t.Errorf("%q: %q, want %q", tc.input, got, tc.want)
@@ -33,12 +34,12 @@ func TestToolCallStreamingIsDisplayOnlyAndSequential(t *testing.T) {
 				send := func(v any) { fmt.Fprintf(w, "data: %s\n\n", raw(v)) }
 				if requests == 1 {
 					for i := 0; i < 2; i++ {
-						send(map[string]any{"type": "response.output_item.added", "output_index": i, "item": map[string]any{"type": "function_call", "id": fmt.Sprint(i), "call_id": fmt.Sprint(i), "name": "python_repl", "arguments": ""}})
+						send(map[string]any{"type": "response.output_item.added", "output_index": i, "item": map[string]any{"type": "function_call", "id": fmt.Sprint(i), "call_id": fmt.Sprint(i), "name": "bash", "arguments": ""}})
 					}
 					for _, part := range []struct {
 						i     int
 						delta string
-					}{{0, `{"code":"x = `}, {1, `{"code":"print(x `}, {0, `10"}`}, {1, `+ 5)"}`}} {
+					}{{0, `{"command":"x=`}, {1, `{"command":"echo $((x `}, {0, `10"}`}, {1, `+ 5))"}`}} {
 						send(map[string]any{"type": "response.function_call_arguments.delta", "output_index": part.i, "delta": part.delta})
 					}
 					if failed {
@@ -46,10 +47,10 @@ func TestToolCallStreamingIsDisplayOnlyAndSequential(t *testing.T) {
 						return
 					}
 					output := []any{}
-					for i, code := range []string{"x = 10", "print(x + 5)"} {
-						args := string(raw(map[string]string{"code": code}))
+					for i, code := range []string{"x=10", "echo $((x + 5))"} {
+						args := string(raw(map[string]any{"command": code, "timeout": nil}))
 						send(map[string]any{"type": "response.function_call_arguments.done", "output_index": i, "arguments": args})
-						item := map[string]any{"type": "function_call", "id": fmt.Sprint(i), "call_id": fmt.Sprint(i), "name": "python_repl", "arguments": args}
+						item := map[string]any{"type": "function_call", "id": fmt.Sprint(i), "call_id": fmt.Sprint(i), "name": "bash", "arguments": args}
 						send(map[string]any{"type": "response.output_item.done", "output_index": i, "item": item})
 						output = append(output, item)
 					}
@@ -78,7 +79,7 @@ func TestToolCallStreamingIsDisplayOnlyAndSequential(t *testing.T) {
 					if e.Meta != nil {
 						t.Error("provisional usage invented")
 					}
-					result, err := a.REPL.Execute(context.Background(), "x")
+					result, err := a.REPL.Execute(context.Background(), `test -n "$x"`, time.Second)
 					if err != nil || !result.Error {
 						t.Errorf("tool executed before response completed: %+v %v", result, err)
 					}
@@ -96,7 +97,7 @@ func TestToolCallStreamingIsDisplayOnlyAndSequential(t *testing.T) {
 					calls = append(calls, record)
 				}
 			}
-			if len(calls) != 2 || calls[0].Text != "x = 10" || calls[1].Text != "print(x + 5)" {
+			if len(calls) != 2 || calls[0].Text != "x=10" || calls[1].Text != "echo $((x + 5))" {
 				t.Fatalf("calls mixed or duplicated: %+v", calls)
 			}
 			if failed {
@@ -106,7 +107,7 @@ func TestToolCallStreamingIsDisplayOnlyAndSequential(t *testing.T) {
 				if len(a.History) != 2 {
 					t.Fatal("partial calls committed to API history")
 				}
-				if result, _ := a.REPL.Execute(context.Background(), "x"); !result.Error {
+				if result, _ := a.REPL.Execute(context.Background(), `test -n "$x"`, time.Second); !result.Error {
 					t.Fatal("failed-stream call executed")
 				}
 			} else if calls[0].Meta.Usage.Input != 100 || calls[1].Meta.Usage.Input != 100 {

@@ -109,7 +109,7 @@ func loadConfiguration(dir string) (configuration, error) {
 	if err != nil {
 		return c, err
 	}
-	c.prefix, err = loadOrCreateFile(filepath.Join(dir, "prefix.py"), prompts.Prefix)
+	c.prefix, err = loadOrCreateFile(filepath.Join(dir, "prefix.sh"), prompts.Prefix)
 	if err != nil {
 		return c, err
 	}
@@ -136,7 +136,7 @@ func (a *Agent) changeSession(id string) error {
 	}
 	next := *a
 	next.owner, next.ReadOnly = nil, false
-	next.listener, next.inbox = nil, nil
+	next.listener, next.inbox, next.views = nil, nil, nil
 	committed := false
 	defer func() {
 		if !committed {
@@ -157,7 +157,7 @@ func (a *Agent) changeSession(id string) error {
 	a.REPL.Close()
 	a.release()
 	a.owner, a.ReadOnly = next.owner, next.ReadOnly
-	a.listener, a.socketDir, a.inbox = next.listener, next.socketDir, next.inbox
+	a.listener, a.socketDir, a.inbox, a.views = next.listener, next.socketDir, next.inbox, next.views
 	committed = true
 	a.History, a.records, a.HistoryPath = next.History, next.records, next.HistoryPath
 	a.REPL.Prefix, a.REPL.PrefixOutput = c.prefix, ""

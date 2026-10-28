@@ -2,7 +2,6 @@ package repl
 
 import (
 	"bytes"
-	"context"
 	"encoding/base64"
 	"fmt"
 	"image"
@@ -10,8 +9,6 @@ import (
 	_ "image/png"
 	"io"
 	"os"
-
-	monty "github.com/ewhauser/gomonty"
 )
 
 type Image struct {
@@ -48,28 +45,4 @@ func CaptureImage(path string) (Image, error) {
 		return Image{}, fmt.Errorf("view image exceeds 20 megapixels")
 	}
 	return Image{URL: "data:image/" + format + ";base64," + base64.StdEncoding.EncodeToString(data)}, nil
-}
-func imageFunction(images *[]Image, prefix *bool) monty.ExternalFunction {
-	return func(_ context.Context, call monty.Call) (monty.Result, error) {
-		if *prefix {
-			return pythonError("ValueError", "view() is unavailable during prefix initialization"), nil
-		}
-		args, err := bind(call, []string{"path"})
-		if err != nil {
-			return pythonError("TypeError", err.Error()), nil
-		}
-		path, ok := args[0].(string)
-		if !ok {
-			return pythonError("TypeError", "view(path) expects a string"), nil
-		}
-		if len(*images) >= 4 {
-			return pythonError("ValueError", "view limit is four images per execution"), nil
-		}
-		img, err := CaptureImage(path)
-		if err != nil {
-			return pythonError("ValueError", err.Error()), nil
-		}
-		*images = append(*images, img)
-		return monty.Return(monty.MustValueOf("Image queued for the next model request.")), nil
-	}
 }

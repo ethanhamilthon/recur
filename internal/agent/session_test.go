@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"recur/internal/repl"
 )
@@ -18,14 +19,14 @@ func TestPromptFilesAndNewSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	for _, name := range []string{"prefix.py", "system.md", "settings.toml"} {
+	for _, name := range []string{"prefix.sh", "system.md", "settings.toml"} {
 		if _, err := os.Stat(filepath.Join(a.home, name)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	prefix := "print('custom context')\nx = 42\n999\n"
+	prefix := "echo 'custom context'\nx=42\n"
 	system := "Custom system instructions."
-	if err := os.WriteFile(filepath.Join(a.home, "prefix.py"), []byte(prefix), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(a.home, "prefix.sh"), []byte(prefix), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(a.home, "system.md"), []byte(system), 0600); err != nil {
@@ -47,7 +48,7 @@ func TestPromptFilesAndNewSession(t *testing.T) {
 	if a.REPL.PrefixOutput != "custom context\n" {
 		t.Fatalf("prefix output should only include prints, got %q", a.REPL.PrefixOutput)
 	}
-	result, err := a.REPL.Execute(context.Background(), "x")
+	result, err := a.REPL.Execute(context.Background(), "echo $x", time.Second)
 	if err != nil || result.Output != "42\n" {
 		t.Fatalf("prefix variable: %+v %v", result, err)
 	}
@@ -62,13 +63,13 @@ func TestPromptFilesAndNewSession(t *testing.T) {
 }
 
 func TestPromptFailureDoesNotLeaveInterpreterAlive(t *testing.T) {
-	r := &repl.REPL{Prefix: "print('before failure')\n1/0"}
+	r := &repl.REPL{Prefix: "echo before failure\nif then"}
 	defer r.Close()
 	_, err := r.Ensure(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "prefix failed") {
 		t.Fatalf("prefix failure: %v", err)
 	}
-	r.Prefix = "print('recovered')"
+	r.Prefix = "echo recovered"
 	if fresh, err := r.Ensure(context.Background()); err != nil || !fresh {
 		t.Fatalf("retry %v %v", fresh, err)
 	}
@@ -81,7 +82,7 @@ func TestReloadFailurePreservesSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	a.REPL.Prefix = "x = 42"
+	a.REPL.Prefix = "x=42"
 	if _, err = a.REPL.Ensure(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +99,7 @@ func TestReloadFailurePreservesSession(t *testing.T) {
 	if len(a.History) != 1 || len(a.Records()) != 1 || a.System != previousSystem {
 		t.Fatal("reload mutated session")
 	}
-	result, err := a.REPL.Execute(context.Background(), "x")
+	result, err := a.REPL.Execute(context.Background(), "echo $x", time.Second)
 	if err != nil || result.Output != "42\n" {
 		t.Fatalf("worker changed: %+v %v", result, err)
 	}
@@ -125,7 +126,7 @@ func TestSaveFailurePreservesSession(t *testing.T) {
 	if len(a.History) != 1 || len(a.Records()) != 1 {
 		t.Fatal("save failure discarded history")
 	}
-	result, err := a.REPL.Execute(context.Background(), "x")
+	result, err := a.REPL.Execute(context.Background(), "echo $x", time.Second)
 	if err != nil || result.Output != "42\n" {
 		t.Fatalf("worker changed: %+v %v", result, err)
 	}

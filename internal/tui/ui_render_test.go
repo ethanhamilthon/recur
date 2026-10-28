@@ -360,11 +360,11 @@ func TestMinimalCommandCompletions(t *testing.T) {
 }
 
 func TestSingleLineNotifications(t *testing.T) {
-	reset := "<notify>Python REPL was newly created or its in-memory state was lost. Previous variables are unavailable. The prefix has been executed again; its code and output are in the system prompt.</notify>"
+	reset := "<notify>Shell session restarted. Previous variables and functions are unavailable. The prefix has been executed again.</notify>"
 	for _, tc := range []struct{ text, want string }{
-		{reset, "! · Python session restarted. Previous variables were cleared."},
-		{"<notify>\nPython session restarted. Previous variables are unavailable.\n<prefix_output>secret details</prefix_output>\n</notify>", "! · Python session restarted. Previous variables were cleared."},
-		{"<notify>\nPython session initialized. The prefix has been executed.\n<prefix_output>secret details</prefix_output>\n</notify>", "! · Python session initialized."},
+		{reset, "! · Shell session restarted. Previous variables were cleared."},
+		{"<notify>\nShell session restarted. Previous variables are unavailable.\n<prefix_output>secret details</prefix_output>\n</notify>", "! · Shell session restarted. Previous variables were cleared."},
+		{"<notify>\nShell session initialized. The prefix has been executed.\n<prefix_output>secret details</prefix_output>\n</notify>", "! · Shell session initialized."},
 		{"<notify>Configuration\n  reloaded.\tReady.</notify>", "! · Configuration reloaded. Ready."},
 		{"\x1b[31mProvider event\x1b[0m\r\nreceived", "! · Provider event received"},
 		{"", "! · Notification received."},
@@ -393,7 +393,7 @@ func TestSingleLineNotifications(t *testing.T) {
 	}
 	m := newModel(&agent.Agent{History: []json.RawMessage{json.RawMessage(`{"role":"user","content":"` + reset + `"}`)}}, "/project")
 	restored := m.timeline()
-	if !strings.Contains(ansi.Strip(restored), "! · Python session restarted.") || strings.Contains(ansi.Strip(restored), "<notify>") {
+	if !strings.Contains(ansi.Strip(restored), "! · Shell session restarted.") || strings.Contains(ansi.Strip(restored), "<notify>") {
 		t.Fatal("restored notice not formatted")
 	}
 	live := newModel(&agent.Agent{}, "/project")

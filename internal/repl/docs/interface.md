@@ -3,7 +3,7 @@
 Commands: /new starts a new chat; /resume selects a project session; /cancel
 cancels work; /quit saves/exits; /help shows commands and shortcuts; /compact
 [prompt] summarizes older turns; /reload re-reads settings and prompts and
-restarts the interpreter without changing the session.
+restarts the shell without changing the session.
 Up/Down navigates completions, Tab completes, and Enter immediately executes
 the selected visible completion. Without a matching visible completion,
 slash-prefixed text is an ordinary message. Esc dismisses completions.
@@ -23,6 +23,6 @@ input-token count, including cached input, not accumulated usage or capacity.
 
 recur -prompt 'your request' runs one turn without the TUI. Diagnostics go to
 stderr; answer text goes to stdout. /model selects a model and effort; /login selects or creates providers.
-docs("models") explains both. docs("headless") covers stdio/JSONL, resume,
-external notifications and read-only followers. docs("clipboard") describes image attachments and terminal shortcut limitations;
+recur docs models explains both. recur docs headless covers stdio/JSONL, resume,
+external notifications and read-only followers. recur docs clipboard describes image attachments and terminal shortcut limitations;
 the composer shows labels, never image pixels.

@@ -12,13 +12,13 @@ import (
 type command struct{ name, icon, description, label string }
 
 var commands = []command{
-	{name: "/new", icon: "+", description: "Start a new chat and REPL; reload prompt files"},
+	{name: "/new", icon: "+", description: "Start a new chat and shell; reload prompt files"},
 	{name: "/help", icon: "?", description: "Show commands and keyboard shortcuts"},
 	{name: "/quit", icon: "->", description: "Save the chat and exit"},
 	{name: "/cancel", icon: "!", description: "Cancel the current turn"},
 	{name: "/resume", icon: "<", description: "Resume a saved session in this project"},
 	{name: "/compact", icon: "=", description: "Summarize older turns; add a prompt to guide it"},
-	{name: "/reload", icon: "*", description: "Reload settings and prompts; restart the REPL"},
+	{name: "/reload", icon: "*", description: "Reload settings and prompts; restart the shell"},
 	{name: "/model", icon: "~", description: "Choose model; Left/Right changes effort"},
 	{name: "/login", icon: "+", description: "Select or create a provider"},
 }
@@ -164,7 +164,7 @@ func (m model) runCommand(name string) (tea.Model, tea.Cmd) {
 		}
 		applyColors(m.a.Settings())
 		m.cache = nil
-		m.add("notice", "Settings reloaded; Python state was reset.")
+		m.add("notice", "Settings reloaded; shell state was reset.")
 	case "/compact":
 		if m.busy || m.a.ReadOnly {
 			return m.stop("notice", "Wait for the active turn before compacting.")
@@ -175,7 +175,7 @@ func (m model) runCommand(name string) (tea.Model, tea.Cmd) {
 		for _, cmd := range commands {
 			fmt.Fprintf(&help, "%-9s %s\n", cmd.name, cmd.description)
 		}
-		help.WriteString("\nEnter: execute selected completion or send / steer while working · Shift+Enter / Alt+Enter / Ctrl+J: newline\nClipboard: Ctrl+V (Cmd+V when forwarded) · Ctrl+X: remove last image\nTab: complete · Up/Down: select completion · unmatched slash text: send normally · Up on empty input: recall queued steering\nPgUp/PgDn or mouse wheel: scroll timeline\nEsc / Ctrl+C: cancel current turn\n\nConfig files: $RECUR_HOME (default: ~/.recur): settings.toml, prefix.py, system.md\nEdit them, then /reload to apply them to this chat.\nHost access: sh(command) in python_repl; not an OS security sandbox.")
+		help.WriteString("\nEnter: execute selected completion or send / steer while working · Shift+Enter / Alt+Enter / Ctrl+J: newline\nClipboard: Ctrl+V (Cmd+V when forwarded) · Ctrl+X: remove last image\nTab: complete · Up/Down: select completion · unmatched slash text: send normally · Up on empty input: recall queued steering\nPgUp/PgDn or mouse wheel: scroll timeline\nEsc / Ctrl+C: cancel current turn\n\nConfig files: $RECUR_HOME (default: ~/.recur): settings.toml, prefix.sh, system.md\nEdit them, then /reload to apply them to this chat.\nHost access: the bash tool runs commands with your permissions; not an OS security sandbox.")
 		m.add("info", help.String())
 	case "/new", "/resume":
 		if m.busy {

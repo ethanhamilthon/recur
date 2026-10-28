@@ -19,7 +19,7 @@ func compactHistory(t *testing.T, turns int) []json.RawMessage {
 	for i := 0; i < turns; i++ {
 		history = append(history,
 			raw(map[string]any{"role": "user", "content": fmt.Sprintf("question %d", i)}),
-			raw(map[string]any{"type": "function_call", "name": "python_repl", "arguments": "{}", "call_id": fmt.Sprintf("call-%d", i)}),
+			raw(map[string]any{"type": "function_call", "name": "bash", "arguments": "{}", "call_id": fmt.Sprintf("call-%d", i)}),
 			raw(map[string]any{"type": "function_call_output", "call_id": fmt.Sprintf("call-%d", i), "output": "ok"}),
 			raw(map[string]any{"role": "assistant", "content": fmt.Sprintf("answer %d", i)}),
 		)
@@ -113,7 +113,7 @@ func TestCompactUsesSessionInstructionsAndPrompt(t *testing.T) {
 			t.Fatalf("summary request missing %q", want)
 		}
 	}
-	if strings.Contains(body, "python_repl") {
+	if strings.Contains(body, "bash") {
 		t.Fatal("summary request must not offer tools")
 	}
 }

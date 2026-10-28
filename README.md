@@ -1,6 +1,6 @@
 # recur
 
-A terminal coding agent built in Go, with a persistent **Monty** Python REPL. No CPython installation or `python3` executable is required. The official OpenAI Go SDK handles Responses and Chat Completions requests and streaming.
+A terminal coding agent built in Go. The model works through one `bash` tool: a persistent bash-compatible shell interpreted in-process by [mvdan.cc/sh](https://github.com/mvdan/sh). No Python, Node or system bash is required. The official OpenAI Go SDK handles Responses and Chat Completions requests and streaming.
 
 Providers use the Responses protocol and are configured in `~/.recur/settings.toml`:
 
@@ -47,7 +47,7 @@ CGO_ENABLED=0 go build -o recur .
 ./recur
 ```
 
-Build requires Go 1.26+ (the release workflow uses the `go` directive in `go.mod`). Monty is pinned through `github.com/ewhauser/gomonty v0.0.14` (upstream Monty commit `c9802b5f30d11fecf9f153feb1dfdab3abda070e`). Normal builds use bundled native libraries through purego, without Rust, CPython or cgo. Run from the project directory the agent should work in. A single non-interactive turn is also supported:
+Build requires Go 1.26+ (the release workflow uses the `go` directive in `go.mod`). The shell is pinned through `mvdan.cc/sh/v3 v3.14.1`, pure Go without cgo. Run from the project directory the agent should work in. A single non-interactive turn is also supported:
 
 ```sh
 ./recur -prompt 'Inspect this project'
@@ -59,13 +59,13 @@ Type `/` to open command completion. Use **Up/Down** to choose, **Tab** to compl
 
 | Command | Action |
 | --- | --- |
-| `/new` | Start a fresh chat and interpreter; reload prompt files |
+| `/new` | Start a fresh chat and shell; reload prompt files |
 | `/help` | Show commands, shortcuts and prompt paths |
 | `/quit` | Save the chat and exit |
 | `/cancel` | Cancel the current turn |
 | `/resume` | Complete/select a saved session in the current project |
 | `/compact [prompt]` | Summarize everything but the last `compact_keep_turns` turns; an optional prompt guides the summary |
-| `/reload` | Re-read settings, prompt files and the palette, then restart the interpreter |
+| `/reload` | Re-read settings, prompt files and the palette, then restart the shell |
 
 `/new`, `/resume <id>`, and `/quit` also work during a turn: they cancel it first and wait for history to be saved before continuing.
 
@@ -78,11 +78,11 @@ The input lives at the end of the timeline, not in a fixed bottom panel. **PgUp/
 Defaults are separate source files, embedded into the binary:
 
 - `prompts/system.md` — agent instructions
-- `prompts/prefix.py` — interpreter initialization code
+- `prompts/prefix.sh` — shell initialization code
 
-On first run, editable copies are created in `~/.recur/system.md` and `~/.recur/prefix.py` (or the explicit `RECUR_HOME`). Existing copies are never overwritten. Edit those copies and use `/new` (or restart) to reload them.
+On first run, editable copies are created in `~/.recur/system.md` and `~/.recur/prefix.sh` (or the explicit `RECUR_HOME`). Existing copies are never overwritten. Edit those copies and use `/new` (or restart) to reload them.
 
-The default system prompt is exactly `You are Recur, a coding agent`. Final system instructions contain **system prompt + prefix source**, never the executed prefix output. The Python environment contract, host functions, usage and limits are supplied in the `python_repl` tool description, not an additional system runtime block. Before the first request, a separate service-generated user notification contains the captured output, followed by the actual user message as a separate item. Empty output is marked explicitly. After REPL state loss, the prefix executes again and a new notification supplies its output before work continues. Ordinary turns do not rerun it. A failed/cancelled initialization does not send the user's request; the TUI returns it to the composer for retry.
+The default system prompt is exactly `You are Recur, a coding agent`. Final system instructions contain **system prompt + prefix source**, never the executed prefix output. The shell contract, recur commands, usage and limits are supplied in the `bash` tool description, not an additional system runtime block. Before the first request, a separate service-generated user notification contains the captured output, followed by the actual user message as a separate item. Empty output is marked explicitly. After shell state loss, the prefix executes again and a new notification supplies its output before work continues. Ordinary turns do not rerun it. A failed/cancelled initialization does not send the user's request; the TUI returns it to the composer for retry.
 
 ## Timeline, usage and context
 
@@ -91,11 +91,11 @@ Assistant replies render Markdown. The timeline includes intermediate assistant 
 User messages have the same left rail as the composer, without a role heading or background. Other entries use compact markers:
 
 - `*  ↑2.1k ↓120 · 1.5s · cache 29%` — assistant message
-- `>_  ↑1.0k ↓100 · 250ms · cache 20%` — REPL call (API name: `python_repl`)
+- `>_  ↑1.0k ↓100 · 250ms · cache 20%` — shell call (API name: `bash`)
 - `<  12ms` — tool result
 - `~` — muted reasoning/summary block
 
-Assistant metadata summarizes requests up to that message **within the current turn**. The final reply includes the entire turn, counting each request once even if it emitted several tool calls. REPL calls show their originating request's duration and usage; results show execution duration. Cache is cached input tokens divided by input tokens, rounded to a whole percent. Unavailable or undefined cache shows `cache —`; other missing values show `?`, not an invented zero.
+Assistant metadata summarizes requests up to that message **within the current turn**. The final reply includes the entire turn, counting each request once even if it emitted several tool calls. Shell calls show their originating request's duration and usage; results show execution duration. Cache is cached input tokens divided by input tokens, rounded to a whole percent. Unavailable or undefined cache shows `cache —`; other missing values show `?`, not an invented zero.
 
 Reasoning summaries are explicitly requested by default (`reasoning_summary = "auto"` in settings). Set `reasoning_summary = "off"` for providers/models that reject this option, or models without reasoning support. Transient transport failures (`408`, `409`, `429`, `5xx`, timeouts, dropped connections) are retried up to three attempts with a visible `Retrying in Ns` notice, honoring `Retry-After`. Retries happen only before any output reaches the screen, so partial text is never duplicated; other errors are reported without an automatic retry. No summary block is invented when the provider supplies no text, and encrypted reasoning is never rendered.
 
@@ -103,77 +103,56 @@ The single-line bar, separated from the composer by one empty row, shows `provid
 
 Completed entries are cached; streaming updates only reformat the changing entry. Resizing invalidates width-dependent caches. Input sizing is recalculated only when text or dimensions change. The viewport still assembles the full timeline; no virtualization layer is needed for the measured 1,000-message case.
 
-## Interpreter and host access
+## Shell and host access
 
-Variables and functions persist across tool calls **and user turns**. Restarting the app, `/new`, `/resume`, a worker crash, or cancelling active Python execution loses interpreter state. A separate user message in `<notify>` tells the model when previous variables are unavailable.
+The model has one tool, `bash`, with arguments `command` and `timeout`. Commands run in a persistent bash-compatible shell interpreted by mvdan.cc/sh inside the recur process; it is not `/bin/bash`, but almost all bash syntax works. Variables, functions and the working directory persist across tool calls **and user turns**. Restarting the app, `/new`, `/resume`, `/reload` or an interpreter crash discards shell state; a separate user message in `<notify>` tells the model when that happened.
 
-Monty supports a restricted Python subset, not all of CPython. Functions, lists, dicts, sets, tuples, ordinary builtins, `print()` and f-strings are supported. The only importable modules are `json`, `math`, `re`, `os`, `sys`, `pathlib`, `datetime`, `typing` and `asyncio`; everything else (for example `collections`, `dataclasses`, `enum`, `itertools`, `random`, `time`, `io`) raises `ModuleNotFoundError`, and there are no third-party packages. Those modules are partial: OS-backed calls such as `Path.exists()`, `os.environ` and `datetime.now()` raise `NotImplementedError` because Recur provides no OS handler, so use `sh`, `read` and `write` instead. `class` definitions, `del`, `@`, `input()`, `open()` and `print(..., file=)` are unsupported; importing a module never grants host access. Unsupported syntax and operations return errors. Monty's `repr` is not always CPython-identical (a one-element tuple can display as `(1)` instead of `(1,)`).
+External programs are found through `PATH`, run with your permissions and get their own process group. There is no TTY and stdin is empty, so interactive programs do not work; `PAGER` and `GIT_PAGER` are `cat`. `~/.zshrc` and other startup files are not read: `PATH` and exported variables come from the environment that started recur, but aliases and zsh functions do not. Define what you need in `prefix.sh`.
 
-Tool results include captured print output and Monty's `repr` of the final top-level expression unless it is `None`; `_` retains the last non-None value. Ordinary runtime exceptions preserve state, including earlier assignments. Syntax errors execute nothing. The prefix executes once per new interpreter, with print output but without implicit expression display.
+Each call returns `{output, exit_code}` with stdout and stderr merged and capped at 16 KiB (first 8 KiB and last 8 KiB with a truncation warning). Syntax errors run nothing (exit code 2). `timeout` is in seconds: default 120, maximum 600. A timeout (124) or cancellation (130) kills the foreground process group but keeps shell state. Longer work runs as a top-level background job that reports back itself:
 
-Each Python execution (including prefix initialization) has its own two-minute timeout, enforced by the parent worker controller; idle time and API waits do not consume it. Native limits cap interpreter heap at 128 MiB, allocations at 10,000,000 and recursion depth at 1,000. These are interpreter limits, not an OS-wide memory sandbox. Output capture is capped at 16 KiB (preserving the first 8 KiB and last 8 KiB with a middle truncation warning; slice or filter large text in Python before printing). The native VM stays in a child copy of the Go executable; cancellation kills its entire process group, so a tight native loop or a blocked shell cannot hang the TUI. The service protocol uses a separate descriptor, never stdout.
-
-### Shell access through Python
-
-```python
-result = sh("ls -la")
-print(result["stdout"])
-print(result["stderr"])
-result["returncode"]
+```sh
+(go test ./... > /tmp/test.log 2>&1; recur notify "tests finished: exit $?") &
 ```
 
-`sh(command)` remains available for processing shell output in Python. It uses **`/bin/sh -c`**, and returns `stdout`, `stderr` and `returncode`. Nonzero status is data rather than a Python exception. Each stream is capped at 16 KiB; the containing Python execution's timeout/cancellation applies. External programs must be installed separately.
+Top-level `&` jobs are detached from the call deadline and live until they finish or the shell is closed; their output after the call ends is discarded. `&` nested in functions, loops or subshells stays bound to the call timeout. There is no memory limit beyond the process itself.
+
+Every call exports `RECUR_SESSION_ID`, `RECUR_MODEL`, `RECUR_PROVIDER`, `RECUR_EFFORT`, `RECUR_CTX_SIZE` and `RECUR_ENDPOINT`. The directory of the running recur binary is first in `PATH`.
 
 **Shell access is not an OS security sandbox.** Commands have your user's filesystem, environment and network permissions. Only run trusted tasks. Histories can contain sensitive code and command output.
 
-### File helpers, images, and built-in documentation
+### recur commands
 
-The Python environment exposes `read(path, offset=1, limit=200)`,
-`write(path, content)`, `patch(edits)`, and `view(path)` alongside `sh`.
-`read` supports positive 1-based offsets or negative offsets from EOF, clips
-overly long lines, and appends range/truncation footers on partial reads.
-`write` creates missing parent directories automatically before atomic rename.
-`patch` accepts a list of `{path, old, new}` replacements across multiple files
-and locations; each old string must match exactly once (mismatch errors report
-the match count). It validates all edits first and rolls back earlier
-replacements on a write failure. Individual file writes are atomic; a multi-file
-patch is not crash-atomic. Searching is done through `sh` with the system `grep`
-or `rg`, narrowed by `-n`, a path and a match limit; recur does not provide its
-own search helper. File helpers support UTF-8 files up to 4 MiB; paths resolve
-relative to the project directory.
+These are ordinary subcommands of the recur binary, so they also work in scripts and background jobs started from the shell:
 
-`view(path)` captures a PNG/JPEG image (up to 2 MiB and 20 megapixels; four per
-execution). After all tool outputs in the response are committed, the next
-model request receives the actual captured images in a separate notification.
-Image data is preserved in history independently of the original file.
-`view` is unavailable during prefix initialization.
+- `recur notify TEXT...` (or text on stdin) queues a `<notify>` message for the session. An idle agent starts a new turn; during a turn it arrives after the current tool outputs.
+- `recur view PATH...` captures PNG/JPEG images (2 MiB and 20 megapixels each, at most four waiting) for the next model request. Image data is preserved in history independently of the original file.
+- `recur docs [TOPIC]` prints built-in documentation: `index`, `runtime`, `images`, `sessions`, `steering`, `interface`, `models`, `headless`, `clipboard`.
 
-Use `docs("index")` to discover built-in documentation topics: `runtime`,
-`files`, `images`, `sessions`, `steering`, `interface`, `models`, `headless`, and `clipboard`. Unknown topics raise
-an error. These documents describe implemented behavior, not planned features.
+Inside a recur shell they find the session through `RECUR_ENDPOINT`; elsewhere pass `-s SESSION_ID`. There are no file helpers: the model reads files with `sed -n`/`cat -n`, searches with `rg`/`grep` and writes with heredocs. Put your own tools (web search, MCP clients, skills) in `prefix.sh` as shell functions or separate programs.
 
-### Native runtime platforms
+### Platforms
 
-The pinned Go binding bundles native libraries for macOS arm64, Linux amd64/arm64 (glibc), Windows amd64, and Linux musl variants. However, **recur itself currently targets macOS/Linux** because process-group cancellation uses Unix syscalls. macOS amd64 is not bundled by this binding. Alpine/musl builds require `-tags musl`. On first use the binding extracts its embedded library into the user cache (temporary-directory fallback); this location must allow native library loading. Changing runtime or platform may require revisiting the binding. Only macOS arm64 was exercised for this change.
+recur targets macOS and Linux; process-group cancellation uses Unix syscalls.
 
 ### Saved history and upgrading
 
 Session files live at `$RECUR_HOME/sessions/<cwd>/<date>-<id>.jsonl` (default: `~/.recur/sessions/...`). `<cwd>` is a sanitized directory basename plus a SHA-256 path hash, derived from the cleaned absolute working directory; same-named projects stay separate. IDs use a UTC timestamp and random suffix. Settings/prompts are shared in the home; session histories remain project-scoped.
 
-`/new` retains previous sessions and starts a fresh interpreter. Type `/resume` or `/resume ` to see this project's session completions; Up/Down selects, Tab completes, and Enter executes a completed selection. Prefixes filter full session IDs. The visible completion window is bounded and follows the selected row. There is no separate session-list command. Startup opens a fresh session and only creates its `.jsonl` file on disk after the first message (use `--resume ID` or `/resume` to open an existing session). Switching sessions saves a non-empty chat first and reloads settings/prompts; a failed save/load leaves the active chat and interpreter intact. Read-only TUI followers can still use `/new`, `/resume`, `/help`, and `/quit`.
+`/new` retains previous sessions and starts a fresh shell. Type `/resume` or `/resume ` to see this project's session completions; Up/Down selects, Tab completes, and Enter executes a completed selection. Prefixes filter full session IDs. The visible completion window is bounded and follows the selected row. There is no separate session-list command. Startup opens a fresh session and only creates its `.jsonl` file on disk after the first message (use `--resume ID` or `/resume` to open an existing session). Switching sessions saves a non-empty chat first and reloads settings/prompts; a failed save/load leaves the active chat and shell intact. Read-only TUI followers can still use `/new`, `/resume`, `/help`, and `/quit`.
 
 JSONL version 2 stores a project/version header, one API item per line, one display record per line, and a final count-checked completion checkpoint. Metadata and provisional display records are never sent as API input. Each save writes a complete snapshot through a private temporary file, file sync, and atomic rename, rather than appending partial records to the active file. Interrupted temporary writes leave the last committed session intact. Malformed, wrong-project, missing-checkpoint, and unterminated session files are rejected without truncating or silently repairing them; preserve a copy and restore a known-good backup. Session data is saved at turn completion, not durably on every streamed delta. Only one writer can own a session; other clients are read-only followers. Cross-process history merging is not performed.
 
 **Upgrading from project-local configuration:** existing project `.recur` files are not moved or overwritten. Copy any desired provider settings and custom prompts to `~/.recur` yourself, or explicitly set `RECUR_HOME` to the existing config directory. Missing files are created with defaults; existing files remain unchanged.
 
-Existing editable prompts are **never overwritten**. Update obsolete instructions from `prompts/system.md` if needed. The Python tool description independently identifies the actual Monty tool contract and separate prefix-output notifications. Older binaries cannot load the new JSONL sessions; keep old history files/backups if downgrading.
+Existing editable prompts are **never overwritten**. Update obsolete instructions from `prompts/system.md` if needed. The `bash` tool description independently identifies the actual shell contract and separate prefix-output notifications. Version 0.4.0 replaced the Python tool with `bash` without migration: sessions and `prefix.py` from 0.3.x are not supported (an old `prefix.py` is ignored; a default `prefix.sh` is created). Older binaries cannot load the new JSONL sessions; keep old history files/backups if downgrading.
 
 ## Source layout
 
 `main.go` handles CLI startup and agent lifetime. `internal/tui` contains the
 terminal interface, rendering, commands, terminal compatibility, headless event
-printing, and their tests. `internal/cli` owns headless transports and command-line dispatch. Agent logic, session storage, and interpreter support
-remain in `internal/agent`, `internal/repl`, and `internal/limitbuf`.
+printing, and their tests. `internal/cli` owns headless transports and command-line dispatch. Agent logic and session storage live in `internal/agent`;
+the embedded shell is in `internal/repl`.
 `go run .` and `go build .` still use the root entry point.
 
 ## Tests
@@ -202,7 +181,7 @@ a darker gray; errors retain their distinctive error styling.
 
 Limits apply only to the TUI. Complete content remains in the saved history and
 in the agent's context, and headless output is not truncated. Reload settings
-with `/reload` (keeps the chat, restarts the interpreter) or `/new` (starts a new
+with `/reload` (keeps the chat, restarts the shell) or `/new` (starts a new
 session without deleting the old chat). Existing configuration files are never
 overwritten automatically.
 
@@ -272,7 +251,7 @@ Press **Enter while working** to queue a steering instruction instead of
 cancelling the turn. Pending instructions appear as `queued` previews above the
 composer. The agent accepts them in submission order before its next request,
 after the current response and all tool calls from that response have completed.
-This does not interrupt an in-flight API request or reset the REPL. Accepted
+This does not interrupt an in-flight API request or reset the shell. Accepted
 instructions become ordinary user messages in the timeline and saved history.
 
 An instruction submitted just as the turn finishes continues in a new turn
@@ -285,7 +264,7 @@ messages until accepted. Press **Up on an empty composer** to recall the newest 
 Explicit `/new`, `/resume`, or `/quit` discards pending input as part of switching/exiting; these commands wait for the active turn to end. Late steering continuation preserves both the unsent draft and the viewport position when scrolled up.
 
 Notifications use a single muted gray row, `! · <message>`, truncated to the
-terminal width. REPL reset notices display `Python session restarted. Previous
+terminal width. Shell reset notices display `Shell session restarted. Previous
 variables were cleared.` instead of protocol details. Full technical notices
 remain unchanged in saved history and the model's context.
 
@@ -293,9 +272,9 @@ Errors use one row with a red `!` icon, a dot separator, and dark-blue message t
 
 ### Streaming tool calls
 
-REPL arguments stream into the timeline as decoded Python code, not raw JSON. Each call has its own entry even if argument deltas interleave. Incomplete escape/Unicode sequences wait for enough input to decode correctly; completion snapshots reconcile the entry without duplicating it. Provisional entries carry a `preview` label. They can survive in the display journal after a failed stream but are not committed as completed API calls.
+Shell commands stream into the timeline as decoded text, not raw JSON. Each call has its own entry even if argument deltas interleave. Incomplete escape/Unicode sequences wait for enough input to decode correctly; completion snapshots reconcile the entry without duplicating it. Provisional entries carry a `preview` label. They can survive in the display journal after a failed stream but are not committed as completed API calls.
 
-**Streaming is UI-only.** Tools still execute sequentially in response order in the shared REPL, only after the entire API response completes. No partial code is executed, and calls do not run in parallel. Steering is accepted only after the current response's calls and outputs complete. Headless mode prints final calls once; tool stdout/stderr itself is not streamed while a call runs.
+**Streaming is UI-only.** Tools still execute sequentially in response order in the shared shell, only after the entire API response completes. No partial code is executed, and calls do not run in parallel. Steering is accepted only after the current response's calls and outputs complete. Headless mode prints final calls once; tool stdout/stderr itself is not streamed while a call runs.
 
 ## Model and provider selection
 
@@ -319,12 +298,11 @@ credentials remain in settings.toml. Missing providers produce an explicit error
 Old headers without selection use current defaults and pin them on their next
 save. Runtime endpoint/credential changes still apply by provider identity.
 
-Python exposes `session.id`, `session.model`, `session.provider`, `session.effort`,
-`session.cwd`, and `session.ctx_size` as a named-tuple snapshot refreshed before
-every execution, including the prefix. Fields are immutable; replacing the
-Python variable does not change application settings. `ctx_size` matches the
-status bar's latest request input-token estimate (including cache), or `None`
-when unknown. It is not model context capacity.
+Every shell call, including the prefix, exports `RECUR_SESSION_ID`, `RECUR_MODEL`,
+`RECUR_PROVIDER`, `RECUR_EFFORT` and `RECUR_CTX_SIZE`. Changing them does not change
+application settings. `RECUR_CTX_SIZE` matches the status bar's latest request
+input-token estimate (including cache), or is empty when unknown. It is not model
+context capacity.
 
 ## Headless transports
 
@@ -350,6 +328,7 @@ resume, headless runs create new sessions, not continuations of the last one.
 ```sh
 recur notify -s FULL_SESSION_ID 'Please also check the tests'
 printf 'A message from another process' | recur notify -s FULL_SESSION_ID
+recur notify 'done'   # inside a recur shell: uses $RECUR_ENDPOINT
 ```
 
 Notifications are project-scoped, XML-escaped and wrapped in `<notify>` before
@@ -367,7 +346,7 @@ notifications are persisted with normal history.
 
 A stable OS lock permits only one writer per session. Another TUI client opens
 read-only, preserves scroll position, and reloads the committed JSONL every
-second. It does not stream in-progress turns, execute Python or send requests.
+second. It does not stream in-progress turns, run shell commands or send requests.
 Headless clients resuming an owned session also become followers: JSONL emits
 `snapshot` records when display records change; stdio prints a complete text
 snapshot on changes. Input/prompts are not submitted in this mode. Followers do
@@ -377,7 +356,7 @@ Do not remove `.lock` files while clients are running: lock inodes must remain
 stable. Socket endpoint sidecars are private; inactive/stale endpoints are not
 queued for later delivery.
 
-Clipboard image paste is available; see the section below. Python `view(path)`
+Clipboard image paste is available; see the section below. `recur view PATH`
 also supplies actual captured images to the model.
 
 ## Clipboard images (text labels only)

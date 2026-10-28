@@ -84,7 +84,7 @@ func TestNotifyAcceptedAfterToolOutput(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		var output []any
 		if requests == 1 {
-			output = []any{map[string]any{"type": "function_call", "call_id": "c", "name": "python_repl", "arguments": `{"code":"x = 1"}`}}
+			output = []any{map[string]any{"type": "function_call", "call_id": "c", "name": "bash", "arguments": `{"command":"x=1","timeout":null}`}}
 		} else {
 			if len(data.Input) < 2 {
 				t.Error("missing tool output and notification")

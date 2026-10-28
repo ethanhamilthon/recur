@@ -2,6 +2,8 @@ package repl
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -10,164 +12,169 @@ import (
 	"recur/prompts"
 )
 
-func TestPersistentInterpreter(t *testing.T) {
-	r := &REPL{Dir: "../..", Prefix: prompts.Prefix}
-	defer r.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	fresh, err := r.Ensure(ctx)
-	if err != nil || !fresh {
+func start(t *testing.T, r *REPL) {
+	t.Helper()
+	t.Cleanup(r.Close)
+	if fresh, err := r.Ensure(context.Background()); err != nil || !fresh {
 		t.Fatalf("start: %v %v", fresh, err)
 	}
+}
+
+func run(t *testing.T, r *REPL, command string, timeout time.Duration) Result {
+	t.Helper()
+	result, err := r.Execute(context.Background(), command, timeout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestPersistentShell(t *testing.T) {
+	r := &REPL{Dir: "../..", Prefix: prompts.Prefix}
+	start(t, r)
 	if !strings.Contains(r.PrefixOutput, "# Project Rules") {
 		t.Fatalf("prefix output: %q", r.PrefixOutput)
 	}
-	for _, test := range []struct{ code, want string }{
-		{"x = 40\nprint('hello')\nx + 2", "hello\n42\n"},
-		{"x += 1\nx", "41\n"},
-		{"x = 41; print('hello'); x + 1; # end", "hello\n42\n"},
-		{"(\n x +\n 1\n)", "42\n"},
-		{"def add(n):\n    return n + 1\n\nadd(x)", "42\n"},
-		{"print('before')\n1/0", "ZeroDivisionError"},
-		{"x", "41\n"},
-		{"print('a', 'b', sep='-', end='!')", "a-b!"},
-		{"print(sh('printf shell-output')[\"stdout\"])", "shell-output\n"},
-		{"sh('exit 7')['returncode']", "7\n"},
-		{"print(sh('printf problem >&2')['stderr'])", "problem\n"},
-		{"import os\nos.getcwd()", "AttributeError"},
-		{"open('/etc/passwd')", "LookupError"},
-		{"input()", "LookupError"},
+	for _, test := range []struct {
+		command, want string
+		code          int
+	}{
+		{"x=40; echo hello", "hello\n", 0},
+		{"echo $((x + 2))", "42\n", 0},
+		{"add() { echo $(($1 + 1)); }", "", 0},
+		{"add $x", "41\n", 0},
+		{"cd internal && basename \"$PWD\"", "internal\n", 0},
+		{"basename \"$(pwd)\"", "internal\n", 0},
+		{"printf problem >&2; exit 7", "problem", 7},
+		{"echo after-exit $x", "after-exit 40\n", 0},
+		{"false", "", 1},
+		{"if then", "syntax error", 2},
+		{"missing-command-xyz", "not found", 127},
+		{"cat | wc -c", "0", 0},
+		{"cat; echo after-cat", "after-cat\n", 0},
+		{"cat <<'EOF'\nheredoc $x\nEOF", "heredoc $x\n", 0},
+		{"echo $PAGER $GIT_PAGER", "cat cat\n", 0},
 	} {
-		result, err := r.Execute(ctx, test.code)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(result.Output, test.want) {
-			t.Errorf("%s: got %q want %q", test.code, result.Output, test.want)
+		result := run(t, r, test.command, 10*time.Second)
+		if result.ExitCode != test.code || result.Error != (test.code != 0) || !strings.Contains(result.Output, test.want) {
+			t.Errorf("%s: %+v; want %q code %d", test.command, result, test.want, test.code)
 		}
 	}
-	fresh, err = r.Ensure(ctx)
-	if err != nil || fresh {
+	if fresh, err := r.Ensure(context.Background()); err != nil || fresh {
 		t.Fatalf("unexpected reset: %v %v", fresh, err)
 	}
 }
-func TestLossAndCancellation(t *testing.T) {
-	r := &REPL{Prefix: "print('init')"}
-	defer r.Close()
-	if _, err := r.Ensure(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if err := syscall.Kill(r.cmd.Process.Pid, syscall.SIGKILL); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.Execute(context.Background(), "1"); err == nil {
-		t.Fatal("expected state loss")
-	}
-	if fresh, err := r.Ensure(context.Background()); err != nil || !fresh {
-		t.Fatalf("restart: %v %v", fresh, err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	if _, err := r.Execute(ctx, "while True: pass"); err == nil {
-		t.Fatal("expected timeout")
-	}
-	if fresh, err := r.Ensure(context.Background()); err != nil || !fresh {
-		t.Fatalf("restart after timeout: %v %v", fresh, err)
-	}
-}
-func TestNoSystemPython(t *testing.T) {
-	t.Setenv("PATH", t.TempDir())
-	r := &REPL{Prefix: "print('Monty')"}
-	defer r.Close()
-	if _, err := r.Ensure(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	result, err := r.Execute(context.Background(), "sum(range(10))")
-	if err != nil || result.Output != "45\n" {
-		t.Fatalf("%q %v", result.Output, err)
+
+func TestEnvIsExportedBeforeEveryCall(t *testing.T) {
+	model := "m o"
+	r := &REPL{Dir: t.TempDir(), Env: func() map[string]string {
+		return map[string]string{"RECUR_MODEL": model, "RECUR_CTX_SIZE": "12"}
+	}}
+	start(t, r)
+	model = "changed"
+	result := run(t, r, `sh -c 'echo "$RECUR_MODEL|$RECUR_CTX_SIZE"'`, 5*time.Second)
+	if result.Output != "changed|12\n" {
+		t.Fatalf("%+v", result)
 	}
 }
 
-func TestMontyMemoryAndOutputLimits(t *testing.T) {
-	r := &REPL{}
-	defer r.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if _, err := r.Ensure(ctx); err != nil {
+func TestTimeoutKeepsStateAndKillsProcessGroup(t *testing.T) {
+	dir := t.TempDir()
+	r := &REPL{Dir: dir}
+	start(t, r)
+	run(t, r, "x=kept", time.Second)
+	started := time.Now()
+	result := run(t, r, "sh -c 'sleep 30 & echo $! > child.pid; wait'", 300*time.Millisecond)
+	if result.ExitCode != 124 || !strings.Contains(result.Output, "timed out") || time.Since(started) > 5*time.Second {
+		t.Fatalf("timeout: %+v after %s", result, time.Since(started))
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "child.pid"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := r.Execute(ctx, "a = [0] * 200000000")
-	if err != nil || !result.Error || !strings.Contains(result.Output, "MemoryError") {
-		t.Fatalf("memory limit: %+v %v", result, err)
+	var pid int
+	for _, c := range strings.TrimSpace(string(data)) {
+		pid = pid*10 + int(c-'0')
 	}
-	for _, code := range []string{"print('x' * 400000)", "print(sh('yes x | head -c 400000')['stdout'])"} {
-		result, err = r.Execute(ctx, code)
-		if err != nil || result.Error || len(result.Output) > outputLimit+100 || !strings.Contains(result.Output, "[output truncated") {
-			t.Fatalf("output limit: code=%s length=%d err=%v error=%v", code, len(result.Output), err, result.Error)
+	// Allow init to reap the killed grandchild; a zombie still answers signal 0.
+	for i := 0; syscall.Kill(pid, 0) == nil; i++ {
+		if i == 40 {
+			t.Fatalf("grandchild %d survived", pid)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	result = run(t, r, "while :; do :; done", 200*time.Millisecond)
+	if result.ExitCode != 124 {
+		t.Fatalf("builtin loop: %+v", result)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	result, err = r.Execute(ctx, "sleep 30", 10*time.Second)
+	if err != nil || result.ExitCode != 130 {
+		t.Fatalf("cancel: %+v %v", result, err)
+	}
+	if result = run(t, r, "echo $x", time.Second); result.Output != "kept\n" {
+		t.Fatalf("state lost: %+v", result)
+	}
+}
+
+func TestBackgroundJobOutlivesCallTimeout(t *testing.T) {
+	dir := t.TempDir()
+	r := &REPL{Dir: dir}
+	start(t, r)
+	result := run(t, r, "(sleep 0.5; echo \"job done $?\" > job.txt) &\necho started", time.Second)
+	if result.ExitCode != 0 || result.Output != "started\n" {
+		t.Fatalf("%+v", result)
+	}
+	if result = run(t, r, "sleep 5", 100*time.Millisecond); result.ExitCode != 124 {
+		t.Fatalf("%+v", result)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		data, _ := os.ReadFile(filepath.Join(dir, "job.txt"))
+		if string(data) == "job done 0\n" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("background job was killed by another call's timeout")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	r.Close()
+	if _, err := r.Execute(context.Background(), "true", time.Second); err == nil {
+		t.Fatal("closed shell accepted a command")
+	}
+}
+
+func TestOutputLimit(t *testing.T) {
+	r := &REPL{Dir: t.TempDir()}
+	start(t, r)
+	for _, command := range []string{"yes x | head -c 400000", "i=0; while [ $i -lt 40000 ]; do echo xxxxxxxxx; i=$((i+1)); done"} {
+		result := run(t, r, command, 20*time.Second)
+		if result.ExitCode != 0 || len(result.Output) > outputLimit+100 || !strings.Contains(result.Output, "[output truncated") {
+			t.Fatalf("%s: length=%d %+v", command, len(result.Output), result.ExitCode)
 		}
 	}
-	result, err = r.Execute(ctx, "40+2")
-	if err != nil || result.Output != "42\n" {
-		t.Fatalf("state after limits: %+v %v", result, err)
-	}
-}
-func TestMontyShellCancellationAndProtocolIsolation(t *testing.T) {
-	r := &REPL{}
-	defer r.Close()
-	if _, err := r.Ensure(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	result, err := r.Execute(context.Background(), `sh("printf 'data: fake\\n'; printf stderr >&2")`)
-	if err != nil || result.Error || !strings.Contains(result.Output, "data: fake") {
-		t.Fatalf("protocol: %+v %v", result, err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	if _, err = r.Execute(ctx, `sh("sleep 30 & wait")`); err == nil {
-		t.Fatal("expected shell cancellation")
-	}
-	if fresh, err := r.Ensure(context.Background()); err != nil || !fresh {
-		t.Fatalf("restart: %v %v", fresh, err)
-	}
 }
 
-func TestFreshDeadlineAfterIdlePreservesState(t *testing.T) {
-	r := &REPL{Prefix: "x = 40"}
-	defer r.Close()
-	if _, err := r.Ensure(context.Background()); err != nil {
-		t.Fatal(err)
+func TestPrefixFailures(t *testing.T) {
+	r := &REPL{Dir: t.TempDir(), Prefix: "if then"}
+	if _, err := r.Ensure(context.Background()); err == nil || !strings.Contains(err.Error(), "syntax error") {
+		t.Fatalf("syntax: %v", err)
 	}
-	execute := func(code, want string) {
-		t.Helper()
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		result, err := r.Execute(ctx, code)
-		if err != nil || result.Error || result.Output != want {
-			t.Fatalf("%s: %+v %v", code, result, err)
-		}
+	r.Prefix = "echo init; false"
+	start(t, r)
+	if r.PrefixOutput != "init\n" {
+		t.Fatalf("nonzero prefix status must not fail: %q", r.PrefixOutput)
 	}
-	execute("x += 1\nx", "41\n")
-	time.Sleep(25 * time.Millisecond)
-	if fresh, err := r.Ensure(context.Background()); err != nil || fresh {
-		t.Fatalf("idle reset state: %v %v", fresh, err)
-	}
-	execute(`print(sh("echo ok")["stdout"], end=""); x+1`, "ok\n42\n")
-	execute("x", "41\n")
-}
-
-func TestPrefixCancellationStopsWorker(t *testing.T) {
-	r := &REPL{Prefix: "while True: pass"}
-	defer r.Close()
+	r.Close()
+	r.Prefix = "sleep 30"
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 	if _, err := r.Ensure(ctx); err == nil {
-		t.Fatal("expected prefix timeout")
+		t.Fatal("expected prefix cancellation")
 	}
-	if r.cmd != nil {
-		t.Fatal("prefix timeout left worker running")
-	}
-	r.Prefix = "x=42"
-	if fresh, err := r.Ensure(context.Background()); err != nil || !fresh {
-		t.Fatalf("restart: %v %v", fresh, err)
+	if r.runner != nil {
+		t.Fatal("failed prefix left a shell")
 	}
 }

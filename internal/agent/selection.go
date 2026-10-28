@@ -148,4 +148,26 @@ func (a *Agent) AddProvider(name string, provider Provider) error {
 	return nil
 }
 
-var pythonParameters = map[string]any{"type": "object", "properties": map[string]any{"code": map[string]string{"type": "string"}}, "required": []string{"code"}, "additionalProperties": false}
+var bashParameters = map[string]any{"type": "object", "properties": map[string]any{
+	"command": map[string]any{"type": "string"},
+	"timeout": map[string]any{"type": []string{"integer", "null"}, "description": "seconds, default 120, maximum 600"},
+}, "required": []string{"command", "timeout"}, "additionalProperties": false}
+
+// shellEnv is exported into the shell before every call.
+func (a *Agent) shellEnv() map[string]string {
+	env := map[string]string{"RECUR_ENDPOINT": ""}
+	if a.socketDir != "" {
+		env["RECUR_ENDPOINT"] = filepath.Join(a.socketDir, "socket")
+	}
+	for key, value := range a.SessionInfo() {
+		if key != "cwd" {
+			env["RECUR_"+strings.ToUpper(key)] = fmt.Sprint(value)
+			if value == nil {
+				env["RECUR_"+strings.ToUpper(key)] = ""
+			}
+		}
+	}
+	env["RECUR_SESSION_ID"] = env["RECUR_ID"]
+	delete(env, "RECUR_ID")
+	return env
+}

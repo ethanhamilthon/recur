@@ -206,7 +206,7 @@ func TestPrefixFailureRecoversOriginalThenSteeringAndDraft(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	a.REPL.Prefix = "1/0"
+	a.REPL.Prefix = "if then"
 	m := newModel(a, a.REPL.Dir)
 	next, _ := m.startTurn("original request")
 	m = next.(model)

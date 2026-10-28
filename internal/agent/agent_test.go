@@ -26,12 +26,12 @@ func TestTurnsPrefixAndReset(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			t.Error(err)
 		}
-		if !strings.Contains(p.Instructions, "print('prefix-context')") || strings.Contains(p.Instructions, "<prefix_output>") {
+		if !strings.Contains(p.Instructions, "echo prefix-context") || strings.Contains(p.Instructions, "<prefix_output>") {
 			t.Errorf("missing source or output leaked into system: %s", p.Instructions)
 		}
 		notices := 0
 		for _, item := range p.Input {
-			if strings.Contains(string(item), "Previous variables are unavailable") {
+			if strings.Contains(string(item), "Shell session restarted") {
 				notices++
 			}
 		}
@@ -54,7 +54,7 @@ func TestTurnsPrefixAndReset(t *testing.T) {
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n")
 	}))
 	defer server.Close()
-	a := &Agent{REPL: &repl.REPL{Prefix: "print('prefix-context')"}, HistoryPath: filepath.Join(t.TempDir(), "history.json")}
+	a := &Agent{REPL: &repl.REPL{Prefix: "echo prefix-context"}, HistoryPath: filepath.Join(t.TempDir(), "history.json")}
 	configureTestAgent(t, a, Settings{Provider: "test", Model: "test-model", Providers: map[string]Provider{"test": {BaseURL: server.URL}}})
 	defer a.Close()
 	var notices []string
@@ -131,7 +131,7 @@ func TestSDKRequestAndHistory(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			t.Fatal(err)
 		}
-		if p.Model != "custom" || p.Store || !p.Stream || p.Reasoning.Effort != "high" || p.Reasoning.Summary != "auto" || len(p.Tools) != 1 || p.Tools[0].Name != "python_repl" || !p.Tools[0].Strict {
+		if p.Model != "custom" || p.Store || !p.Stream || p.Reasoning.Effort != "high" || p.Reasoning.Summary != "auto" || len(p.Tools) != 1 || p.Tools[0].Name != "bash" || !p.Tools[0].Strict {
 			t.Errorf("unexpected payload: %+v", p)
 		}
 		if len(p.Input) != 2 || !strings.Contains(string(p.Input[1]), `"opaque":"keep"`) {

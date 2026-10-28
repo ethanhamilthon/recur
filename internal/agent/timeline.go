@@ -119,10 +119,10 @@ func RecordsForItem(item json.RawMessage) []Record {
 			return []Record{{Kind: "reasoning", Text: strings.Join(texts, "\n")}}
 		}
 	case v.Type == "function_call":
-		var args struct{ Code string }
+		var args struct{ Command string }
 		_ = json.Unmarshal([]byte(v.Arguments), &args)
-		if v.Name == "python_repl" {
-			return []Record{{Kind: "code", Text: args.Code}}
+		if v.Name == "bash" {
+			return []Record{{Kind: "code", Text: args.Command}}
 		}
 		return []Record{{Kind: "code", Text: v.Name + "\n" + v.Arguments}}
 	case v.Type == "function_call_output":

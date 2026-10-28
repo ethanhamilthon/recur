@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"recur/internal/repl"
 )
 
 func TestViewDeliveredAfterAllToolOutputsAndPersists(t *testing.T) {
@@ -39,8 +41,8 @@ func TestViewDeliveredAfterAllToolOutputsAndPersists(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		if requests == 1 {
 			items := []any{
-				map[string]any{"type": "function_call", "name": "python_repl", "call_id": "v1", "arguments": string(raw(map[string]string{"code": "view('image.png')"}))},
-				map[string]any{"type": "function_call", "name": "python_repl", "call_id": "v2", "arguments": string(raw(map[string]string{"code": "print('second call')"}))},
+				map[string]any{"type": "function_call", "name": "bash", "call_id": "v1", "arguments": string(raw(map[string]any{"command": "echo first", "timeout": nil}))},
+				map[string]any{"type": "function_call", "name": "bash", "call_id": "v2", "arguments": string(raw(map[string]any{"command": "echo second call", "timeout": 5}))},
 			}
 			fmt.Fprintf(w, "data: %s\n\n", raw(map[string]any{"type": "response.completed", "response": map[string]any{"output": items}}))
 			return
@@ -87,6 +89,14 @@ func TestViewDeliveredAfterAllToolOutputsAndPersists(t *testing.T) {
 	removed := false
 	err = a.Run(context.Background(), "inspect image", func(e Event) {
 		if e.Kind == "output" && !removed {
+			// recur view captures bytes in the CLI process, then uses the socket.
+			image, err := repl.CaptureImage(path)
+			if err == nil {
+				err = Send(a.shellEnv()["RECUR_ENDPOINT"], Message{Image: &image})
+			}
+			if err != nil {
+				t.Error(err)
+			}
 			if err := os.Remove(path); err != nil {
 				t.Error(err)
 			}

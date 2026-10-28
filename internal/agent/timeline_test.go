@@ -21,7 +21,7 @@ func TestRecordsForLegacyItems(t *testing.T) {
 		{`{"role":"assistant","content":"string content"}`, "assistant", "string content"},
 		{`{"type":"message","role":"assistant","content":[{"type":"output_text","text":"intermediate"},{"type":"refusal","refusal":"refused"}]}`, "assistant", "intermediate\nrefused"},
 		{`{"type":"reasoning","summary":[{"text":"summary"}],"content":[{"text":"thinking"}]}`, "reasoning", "summary\nthinking"},
-		{`{"type":"function_call","name":"python_repl","arguments":"{\"code\":\"1+1\"}"}`, "code", "1+1"},
+		{`{"type":"function_call","name":"bash","arguments":"{\"command\":\"ls -l\"}"}`, "code", "ls -l"},
 		{`{"type":"function_call_output","output":"{\"output\":\"oops\",\"error\":true}"}`, "error", "oops"},
 		{`{"type":"function_call_output","output":"raw tool output"}`, "output", "raw tool output"},
 		{`{"type":"web_search_call","id":"w"}`, "notice", `{"type":"web_search_call","id":"w"}`},
@@ -56,8 +56,8 @@ func TestFullTurnLiveAndHistory(t *testing.T) {
 			output := []any{
 				map[string]any{"type": "reasoning", "summary": []any{map[string]string{"type": "summary_text", "text": "complete summary"}}},
 				map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]string{"type": "output_text", "text": "Before tools"}}},
-				map[string]any{"type": "function_call", "name": "python_repl", "call_id": "a", "arguments": string(raw(map[string]string{"code": `print(sh("printf first")["stdout"])`}))},
-				map[string]any{"type": "function_call", "name": "python_repl", "call_id": "b", "arguments": string(raw(map[string]string{"code": `print(sh("pwd")["stdout"]); raise ValueError("problem")`}))},
+				map[string]any{"type": "function_call", "name": "bash", "call_id": "a", "arguments": string(raw(map[string]any{"command": "printf first", "timeout": nil}))},
+				map[string]any{"type": "function_call", "name": "bash", "call_id": "b", "arguments": string(raw(map[string]any{"command": "pwd; echo problem >&2; exit 3", "timeout": nil}))},
 			}
 			fmt.Fprintf(w, "data: %s\n\n", raw(map[string]any{"type": "response.completed", "response": map[string]any{"output": output, "usage": map[string]any{"input_tokens": 1000, "output_tokens": 100, "input_tokens_details": map[string]int{"cached_tokens": 200}}}}))
 		} else {
@@ -212,7 +212,7 @@ func TestReasoningSummaryCanBeDisabled(t *testing.T) {
 		if _, ok := payload.Reasoning["summary"]; ok {
 			t.Error("summary must be omitted")
 		}
-		if len(payload.Tools) != 1 || payload.Tools[0].Name != "python_repl" {
+		if len(payload.Tools) != 1 || payload.Tools[0].Name != "bash" {
 			t.Errorf("tools: %+v", payload.Tools)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")

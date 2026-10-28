@@ -123,7 +123,7 @@ func TestTurnStartIgnoresServiceMessages(t *testing.T) {
 	history := compactHistory(t, 3)
 	history = append(history, raw(map[string]any{"role": "user", "content": "<notify>prefix restarted</notify>"}),
 		raw(map[string]any{"role": "user", "content": []any{
-			map[string]string{"type": "input_text", "text": "<notify>Images queued by view().</notify>"},
+			map[string]string{"type": "input_text", "text": "<notify>Images queued by recur view.</notify>"},
 			map[string]string{"type": "input_image", "image_url": "data:image/png;base64,AAAA"},
 		}}))
 	if got := turnStart(history, 2); got != 4 {

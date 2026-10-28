@@ -73,11 +73,11 @@ func renderEntry(e entry, width int, limits ...int) string {
 	if e.Kind == "notice" || e.Kind == "error" {
 		text = strings.TrimSpace(text)
 		text = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(text, "<notify>"), "</notify>"))
-		if e.Kind == "notice" && (strings.HasPrefix(text, "Python REPL was newly created or its in-memory state was lost.") || strings.HasPrefix(text, "Python session restarted.")) {
-			text = "Python session restarted. Previous variables were cleared."
+		if e.Kind == "notice" && strings.HasPrefix(text, "Shell session restarted.") {
+			text = "Shell session restarted. Previous variables were cleared."
 		}
-		if e.Kind == "notice" && strings.HasPrefix(text, "Python session initialized.") {
-			text = "Python session initialized."
+		if e.Kind == "notice" && strings.HasPrefix(text, "Shell session initialized.") {
+			text = "Shell session initialized."
 		}
 		text = strings.Join(strings.Fields(text), " ")
 		if text == "" {

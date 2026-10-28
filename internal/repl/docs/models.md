@@ -30,9 +30,9 @@ execution, image input, refusals, and available usage. History is stored as
 Responses items verbatim. Unsupported nonstandard provider extensions are not
 inferred.
 
-Python session is an immutable named-tuple snapshot refreshed before every
-execution, including the prefix. Fields: id, model, provider, effort, cwd,
-ctx_size. ctx_size is the latest recorded request input-token count, including
-cached tokens, matching the status-bar estimate; it is None when unknown, not the
-model context limit. Session credentials are not exposed. Interpreter restarts
-and session changes recreate the snapshot without restoring old Python variables.
+Every shell call, including the prefix, exports session metadata:
+RECUR_SESSION_ID, RECUR_MODEL, RECUR_PROVIDER, RECUR_EFFORT and RECUR_CTX_SIZE.
+RECUR_CTX_SIZE is the latest recorded request input-token count, including
+cached tokens, matching the status-bar estimate; it is empty when unknown, not
+the model context limit. Credentials are not exposed. Changing these variables
+does not change application settings.

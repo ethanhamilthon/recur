@@ -28,7 +28,7 @@ func TestSteeringAtSafeBoundaries(t *testing.T) {
 					output := []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]string{"type": "output_text", "text": "First"}}}}
 					if tools {
 						for _, id := range []string{"a", "b"} {
-							output = append(output, map[string]any{"type": "function_call", "name": "python_repl", "call_id": id, "arguments": string(raw(map[string]string{"code": "print(42)"}))})
+							output = append(output, map[string]any{"type": "function_call", "name": "bash", "call_id": id, "arguments": string(raw(map[string]any{"command": "echo 42", "timeout": nil}))})
 						}
 					}
 					fmt.Fprintf(w, "data: %s\n\n", raw(map[string]any{"type": "response.completed", "response": map[string]any{"output": output}}))

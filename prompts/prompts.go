@@ -3,7 +3,7 @@ package prompts
 
 import _ "embed"
 
-//go:embed prefix.py
+//go:embed prefix.sh
 var Prefix string
 
 //go:embed system.md

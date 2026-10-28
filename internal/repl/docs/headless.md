@@ -14,8 +14,10 @@ ends the process; keep stdin open for an idle long-lived client. A failed turn,
 invalid input or cancellation ends processing with nonzero exit status and full
 diagnostics on stderr. Stdout has no terminal escape sequences added by the TUI.
 
-recur notify -s ID 'message' sends to the active project session owner. Without
-message arguments it reads stdin. Use -- before message arguments starting with
+recur notify 'message' sends to the running session. Inside a recur shell (and
+any program it starts) the session comes from RECUR_ENDPOINT; elsewhere pass
+-s ID for an active session of the current project. Without message arguments
+it reads stdin. Use -- before message arguments starting with
 a dash. The text is XML-escaped and wrapped in a notify block, then queued for
 the next safe model request boundary. No extra user-authored message or tool
 output is invented. An idle TUI starts a continuation within its one-second poll;
@@ -31,7 +33,7 @@ exactly-once delivery after an ambiguous connection failure. There is no
 automatic retry. Accepted notifications are persisted with normal history.
 
 Only one client owns a session's writer lock. Other clients are read-only and
-reload committed snapshots once per second, without starting an interpreter or
+reload committed snapshots once per second, without starting a shell or
 API request. TUI followers preserve scroll position. JSONL followers emit
 snapshot records when display records change; stdio followers print the full
 text snapshot on changes. Input/prompts are not submitted in read-only mode, though TUI followers can still

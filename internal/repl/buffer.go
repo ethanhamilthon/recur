@@ -30,5 +30,5 @@ func (b *cappedBuffer) Text() string {
 	if b.size <= outputLimit {
 		return head + tail
 	}
-	return head + "\n[output truncated at 16 KiB; slice or filter in Python before printing]\n" + tail
+	return head + "\n[output truncated at 16 KiB; filter with rg, grep, head or tail]\n" + tail
 }

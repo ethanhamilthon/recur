@@ -23,7 +23,7 @@ func TestGlobalHomeDefaultsAndMissingFiles(t *testing.T) {
 	if a.home != filepath.Join(home, ".recur") {
 		t.Fatal(a.home)
 	}
-	for _, name := range []string{"settings.toml", "prefix.py", "system.md"} {
+	for _, name := range []string{"settings.toml", "prefix.sh", "system.md"} {
 		info, err := os.Stat(filepath.Join(a.home, name))
 		if err != nil || info.Mode().Perm() != 0600 {
 			t.Fatalf("private default %s: %v", name, err)
@@ -32,7 +32,7 @@ func TestGlobalHomeDefaultsAndMissingFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(a.home, "system.md"), []byte("Keep this prompt"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(filepath.Join(a.home, "prefix.py")); err != nil {
+	if err := os.Remove(filepath.Join(a.home, "prefix.sh")); err != nil {
 		t.Fatal(err)
 	}
 	b, err := New(a.REPL.Dir)

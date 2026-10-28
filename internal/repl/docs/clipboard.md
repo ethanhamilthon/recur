@@ -25,7 +25,7 @@ attachments. A legacy terminal cannot communicate modifiers it does not send.
 attachment_dir in settings.toml selects the captured-image directory. Empty
 uses the platform temporary directory/recur-images (often /var/folders/... on
 macOS). Relative configured paths resolve against the project cwd. New
-directories use 0700 and files 0600. Images use the shared view validator: PNG or
+directories use 0700 and files 0600. Images use the shared recur view validator: PNG or
 JPEG, at most 2 MiB and 20 megapixels after clipboard conversion. At most eight
 clipboard images can be pending across the active input, queued instructions,
 and current turn. The terminal never renders the files as graphics.

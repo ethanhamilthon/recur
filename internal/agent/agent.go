@@ -21,7 +21,7 @@ import (
 	"recur/internal/repl"
 )
 
-var codeField = regexp.MustCompile(`"code"\s*:\s*"`)
+var codeField = regexp.MustCompile(`"command"\s*:\s*"`)
 
 // Decode only the complete prefix of a JSON string, withholding split escapes,
 // UTF-8 characters and surrogate pairs until the next delta completes them.
@@ -68,6 +68,7 @@ type Agent struct {
 	listener          net.Listener
 	socketDir         string
 	inbox             chan string
+	views             chan repl.Image
 	owner             *os.File
 	ReadOnly          bool
 	settings          Settings
@@ -97,7 +98,7 @@ func New(dir string, target ...string) (*Agent, error) {
 		return nil, err
 	}
 
-	a.REPL.Session = a.SessionInfo
+	a.REPL.Env = a.shellEnv
 	return a, nil
 }
 func raw(v any) json.RawMessage { data, _ := json.Marshal(v); return data }
@@ -184,9 +185,9 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 			return e
 		}
 		if fresh {
-			status := "Python session initialized. The prefix has been executed."
+			status := "Shell session initialized. The prefix has been executed."
 			if len(a.History) > 0 {
-				status = "Python session restarted. Previous variables are unavailable. The prefix has been executed again."
+				status = "Shell session restarted. Previous variables and functions are unavailable. The prefix has been executed again."
 			}
 			output := a.REPL.PrefixOutput
 			if output == "" {
@@ -202,6 +203,15 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 		}
 
 		acceptSteering()
+		if images := a.viewed(); len(images) > 0 {
+			text := "<notify>\nImages queued by recur view.\n</notify>"
+			content := []any{map[string]any{"type": "input_text", "text": text}}
+			for _, img := range images {
+				content = append(content, map[string]any{"type": "input_image", "image_url": img.URL, "detail": "auto"})
+			}
+			a.History = append(a.History, raw(map[string]any{"role": "user", "content": content}))
+			emit(Event{Kind: "notice", Text: text})
+		}
 		a.compactIfNeeded(ctx, emit)
 		items, e := a.requestWithRetries(ctx, emit)
 		if e != nil {
@@ -220,7 +230,6 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 			}
 		}
 		calls := 0
-		var images []repl.Image
 		// Commit and display all response items before executing their tool calls.
 		for i, item := range items {
 			a.History = append(a.History, item)
@@ -256,23 +265,25 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 				result = repl.Result{Output: ctx.Err().Error(), Error: true}
 			} else {
 				switch call.Name {
-				case "python_repl":
+				case "bash":
 					var args struct {
-						Code string `json:"code"`
+						Command string `json:"command"`
+						Timeout *int64 `json:"timeout"`
 					}
 					var value repl.Result
-					if e = json.Unmarshal([]byte(call.Arguments), &args); e != nil {
-						value = repl.Result{Output: e.Error(), Error: true}
-					} else {
-						toolCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-						value, e = a.REPL.Execute(toolCtx, args.Code)
-						cancel()
-						if e != nil {
-							value = repl.Result{Output: e.Error(), Error: true}
+					timeout := repl.DefaultTimeout
+					if e = json.Unmarshal([]byte(call.Arguments), &args); e == nil && args.Timeout != nil {
+						timeout = time.Duration(*args.Timeout) * time.Second
+						if timeout <= 0 || timeout > repl.MaxTimeout {
+							e = fmt.Errorf("timeout must be 1..600 seconds; run longer work as a top-level background job ending with recur notify")
 						}
 					}
-					images = append(images, value.Images...)
-					value.Images = nil
+					if e == nil {
+						value, e = a.REPL.Execute(ctx, args.Command, timeout)
+					}
+					if e != nil {
+						value = repl.Result{Output: e.Error(), ExitCode: 2, Error: true}
+					}
 					result = value
 				default:
 					result = repl.Result{Output: "Unknown tool: " + call.Name, Error: true}
@@ -283,15 +294,6 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 			for _, r := range RecordsForItem(output) {
 				emit(Event{Kind: r.Kind, Text: r.Text, Meta: &Metadata{Duration: time.Since(started)}, Final: true})
 			}
-		}
-		if len(images) > 0 {
-			text := "<notify>\nImages queued by view().\n</notify>"
-			content := []any{map[string]any{"type": "input_text", "text": text}}
-			for _, img := range images {
-				content = append(content, map[string]any{"type": "input_image", "image_url": img.URL, "detail": "auto"})
-			}
-			a.History = append(a.History, raw(map[string]any{"role": "user", "content": content}))
-			emit(Event{Kind: "notice", Text: text})
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -321,9 +323,9 @@ func (a *Agent) request(ctx context.Context, emit func(Event)) ([]json.RawMessag
 		Input:        responses.ResponseNewParamsInputUnion{OfInputItemList: input},
 		Store:        openai.Bool(false),
 		Tools: []responses.ToolUnionParam{{OfFunction: &responses.FunctionToolParam{
-			Name:        "python_repl",
+			Name:        "bash",
 			Description: openai.String(repl.ToolDescription),
-			Parameters:  pythonParameters,
+			Parameters:  bashParameters,
 			Strict:      openai.Bool(true),
 		}}},
 	}
@@ -349,7 +351,7 @@ func (a *Agent) request(ctx context.Context, emit func(Event)) ([]json.RawMessag
 			} else {
 				arguments[event.OutputIndex] = event.Arguments
 			}
-			if names[event.OutputIndex] == "python_repl" {
+			if names[event.OutputIndex] == "bash" {
 				emit(Event{Kind: "code", Text: partialCode(arguments[event.OutputIndex]), Provisional: true, ID: fmt.Sprintf("%s-%d", a.lastRequest.RequestID, event.OutputIndex), Final: true})
 			}
 		case "response.output_item.added", "response.output_item.done":
@@ -361,7 +363,7 @@ func (a *Agent) request(ctx context.Context, emit func(Event)) ([]json.RawMessag
 				if event.Item.Arguments.OfString != "" {
 					arguments[event.OutputIndex] = event.Item.Arguments.OfString
 				}
-				if event.Item.Name == "python_repl" {
+				if event.Item.Name == "bash" {
 					emit(Event{Kind: "code", Text: partialCode(arguments[event.OutputIndex]), Provisional: true, ID: fmt.Sprintf("%s-%d", a.lastRequest.RequestID, event.OutputIndex), Final: true})
 					continue
 				}

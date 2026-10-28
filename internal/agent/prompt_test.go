@@ -33,7 +33,7 @@ func TestRuntimeContractOnlyInToolDescription(t *testing.T) {
 			if body.Instructions != want {
 				t.Errorf("system prompt changed: %q; want %q", body.Instructions, want)
 			}
-			if len(body.Tools) != 1 || body.Tools[0].Name != "python_repl" || body.Tools[0].Description != repl.ToolDescription {
+			if len(body.Tools) != 1 || body.Tools[0].Name != "bash" || body.Tools[0].Description != repl.ToolDescription {
 				t.Errorf("missing runtime contract: %+v", body.Tools)
 			}
 			if strings.Contains(body.Instructions, "<runtime>") || strings.Contains(body.Instructions, "<prefix_output>") {

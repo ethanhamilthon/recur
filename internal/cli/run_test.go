@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -219,5 +220,52 @@ func TestHeadlessReadOnlyFollowerPublishesCommittedSnapshots(t *testing.T) {
 	}
 	if len(writer.History) != 1 {
 		t.Fatal("follower mutated session")
+	}
+}
+
+func TestShellCommandsUseEndpoint(t *testing.T) {
+	t.Setenv("RECUR_HOME", t.TempDir())
+	cwd := t.TempDir()
+	a, err := agent.New(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	var out bytes.Buffer
+	if err = Run(context.Background(), []string{"docs", "runtime"}, strings.NewReader(""), &out, io.Discard); err != nil || !strings.Contains(out.String(), "recur notify") {
+		t.Fatalf("docs: %v %q", err, out.String())
+	}
+	t.Setenv("RECUR_ENDPOINT", "")
+	if err = Run(context.Background(), []string{"notify", "hi"}, strings.NewReader(""), io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "-s") {
+		t.Fatalf("notify outside a shell: %v", err)
+	}
+	if _, err = a.REPL.Ensure(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	result, err := a.REPL.Execute(context.Background(), `echo "$RECUR_ENDPOINT"`, time.Second)
+	if err != nil || result.Error {
+		t.Fatal(result, err)
+	}
+	t.Setenv("RECUR_ENDPOINT", strings.TrimSpace(result.Output))
+	if err = Run(context.Background(), []string{"notify"}, strings.NewReader("from stdin"), io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if messages := a.Notifications(); len(messages) != 1 || !strings.Contains(messages[0], "from stdin") {
+		t.Fatalf("%v", messages)
+	}
+	path := filepath.Join(cwd, "image.png")
+	data, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=")
+	if err = os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	err = Run(context.Background(), []string{"view", path, path, path, path}, strings.NewReader(""), io.Discard, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = Run(context.Background(), []string{"view", path}, strings.NewReader(""), io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "four images") {
+		t.Fatalf("view limit: %v", err)
+	}
+	if err = Run(context.Background(), []string{"view", filepath.Join(cwd, "missing.png")}, strings.NewReader(""), io.Discard, io.Discard); err == nil {
+		t.Fatal("missing image accepted")
 	}
 }
