@@ -1,0 +1,167 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestCompletedItemSavedBeforeResponseFinishes(t *testing.T) {
+	t.Setenv("RECUR_HOME", t.TempDir())
+	finished := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, `data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"complete answer"}]}}`+"\n\n")
+		fmt.Fprint(w, `data: {"type":"response.output_text.delta","output_index":1,"delta":"unfinished fragment"}`+"\n\n")
+		w.(http.Flusher).Flush()
+		<-release
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	a, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	a.REPL.Prefix = ""
+	configureTestAgent(t, a, Settings{Provider: "p", Model: "m", Providers: map[string]Provider{"p": {BaseURL: server.URL}}})
+	done := make(chan error, 1)
+	go func() {
+		done <- a.Run(context.Background(), "hello", func(e Event) {
+			if e.Kind == "delta" {
+				close(finished)
+			}
+		})
+	}()
+	select {
+	case <-finished:
+	case <-time.After(10 * time.Second):
+		t.Fatal("stream stalled")
+	}
+	// Open the committed snapshot while the writer is still in the response.
+	b, err := New(dir, strings.TrimSuffix(filepath.Base(a.HistoryPath), ".jsonl"))
+	if err != nil {
+		close(release)
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(a.HistoryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "complete answer") || strings.Contains(string(data), "unfinished fragment") {
+		t.Fatalf("incorrect checkpoint: %s", data)
+	}
+	if !strings.Contains(string(b.History[len(b.History)-1]), "complete answer") {
+		t.Fatal("completed item missing from API history")
+	}
+	b.Close()
+	close(release)
+	<-done
+}
+
+func TestInterruptedCallsRecoveredWithoutRerunning(t *testing.T) {
+	history := []json.RawMessage{
+		raw(map[string]any{"type": "function_call", "call_id": "first"}),
+		raw(map[string]any{"type": "function_call", "call_id": "second"}),
+		raw(map[string]any{"type": "function_call_output", "call_id": "first", "output": "ok"}),
+	}
+	outputs := interruptedOutputs(history)
+	if len(outputs) != 1 || !strings.Contains(string(outputs[0]), "second") || !strings.Contains(string(outputs[0]), "not rerun") {
+		t.Fatalf("unexpected recovery: %s", outputs)
+	}
+	history = append(history, outputs...)
+	if len(interruptedOutputs(history)) != 0 {
+		t.Fatal("recovery not idempotent")
+	}
+}
+
+func TestCrashDuringSecondToolKeepsFirstResult(t *testing.T) {
+	if os.Getenv("RECUR_CRASH_HELPER") == "1" {
+		a, err := New(os.Getenv("CRASH_DIR"))
+		if err != nil {
+			os.Exit(2)
+		}
+		a.REPL.Prefix = ""
+		configureTestAgent(t, a, Settings{Provider: "p", Model: "m", Providers: map[string]Provider{"p": {BaseURL: os.Getenv("CRASH_SERVER")}}})
+		_ = a.Run(context.Background(), "run tools", func(Event) {})
+		os.Exit(3)
+	}
+	home, dir := t.TempDir(), t.TempDir()
+	t.Setenv("RECUR_HOME", home)
+	started := filepath.Join(dir, "started")
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requests == 1 {
+			calls := []any{}
+			for i, cmd := range []string{"echo first-result", "echo started > " + started + "; sleep 3"} {
+				calls = append(calls, map[string]any{"type": "function_call", "call_id": fmt.Sprint(i), "name": "bash", "arguments": string(raw(map[string]any{"command": cmd}))})
+			}
+			fmt.Fprintf(w, "data: %s\n\n", raw(map[string]any{"type": "response.completed", "response": map[string]any{"output": calls}}))
+		} else {
+			var request struct {
+				Input []json.RawMessage `json:"input"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Error(err)
+			}
+			if !strings.Contains(fmt.Sprint(request.Input), "not rerun") {
+				t.Error("missing interrupted tool output")
+			}
+			fmt.Fprint(w, `data: {"type":"response.completed","response":{"output":[]}}`+"\n\n")
+		}
+	}))
+	defer server.Close()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(executable, "-test.run=^TestCrashDuringSecondToolKeepsFirstResult$")
+	cmd.Env = append(os.Environ(), "RECUR_CRASH_HELPER=1", "CRASH_DIR="+dir, "CRASH_SERVER="+server.URL)
+	if err = cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("tool did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err = cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
+	a, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	sessions, err := a.Sessions()
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("sessions: %+v %v", sessions, err)
+	}
+	if err = a.Resume(sessions[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fmt.Sprint(a.History), "first-result") {
+		t.Fatal("first tool result lost after crash")
+	}
+	if err = a.Run(context.Background(), "continue", func(Event) {}); err != nil {
+		t.Fatal(err)
+	}
+}

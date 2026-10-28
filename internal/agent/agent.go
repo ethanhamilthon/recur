@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -131,6 +132,14 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 	}
 	forward := emit
 	emit = func(e Event) { a.records = ApplyEvent(a.records, e); forward(e) }
+	// A crash may leave calls without outputs. Their effects are unknown, so
+	// never rerun them; supply an explicit interrupted result on continuation.
+	for _, output := range interruptedOutputs(a.History) {
+		a.History = append(a.History, output)
+		for _, r := range RecordsForItem(output) {
+			emit(Event{Kind: r.Kind, Text: r.Text, Final: true})
+		}
+	}
 	defer func() {
 		if err != nil && !errors.Is(err, context.Canceled) {
 			emit(Event{Kind: "error", Text: err.Error()})
@@ -212,10 +221,56 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 			a.History = append(a.History, raw(map[string]any{"role": "user", "content": content}))
 			emit(Event{Kind: "notice", Text: text})
 		}
+		if e := a.Save(); e != nil {
+			return fmt.Errorf("could not save history: %w", e)
+		}
 		a.compactIfNeeded(ctx, emit)
-		items, e := a.requestWithRetries(ctx, emit)
+		if e := a.Save(); e != nil {
+			return fmt.Errorf("could not save history: %w", e)
+		}
+		baseHistory := append([]json.RawMessage(nil), a.History...)
+		baseRecords := append([]Record(nil), a.records...)
+		finished := map[int64]json.RawMessage{}
+		var durableHistory []json.RawMessage
+		var durableRecords []Record
+		checkpoint := func(index int64, item json.RawMessage) error {
+			finished[index] = append(json.RawMessage(nil), item...)
+			indexes := make([]int, 0, len(finished))
+			for i := range finished {
+				indexes = append(indexes, int(i))
+			}
+			sort.Ints(indexes)
+			durableHistory = append([]json.RawMessage(nil), baseHistory...)
+			durableRecords = append([]Record(nil), baseRecords...)
+			for _, i := range indexes {
+				part := finished[int64(i)]
+				durableHistory = append(durableHistory, part)
+				for _, r := range RecordsForItem(part) {
+					durableRecords = ApplyEvent(durableRecords, Event{Kind: r.Kind, Text: r.Text, ID: fmt.Sprintf("%s-%d", a.lastRequest.RequestID, i), Final: true})
+				}
+			}
+			snapshot := *a
+			snapshot.History, snapshot.records = durableHistory, durableRecords
+			if err := snapshot.Save(); err != nil {
+				return fmt.Errorf("could not save history: %w", err)
+			}
+			return nil
+		}
+		items, e := a.requestWithRetries(ctx, emit, checkpoint)
 		if e != nil {
+			if durableHistory != nil {
+				a.History, a.records = durableHistory, durableRecords
+			} else {
+				a.records = baseRecords
+			}
 			return e
+		}
+		// Discard streaming-only entries from the persistent journal. The UI
+		// continues showing them until the completed records reconcile them.
+		if durableRecords != nil {
+			a.records = durableRecords
+		} else {
+			a.records = baseRecords
 		}
 		meta := a.lastRequest
 		if meta.Usage == nil {
@@ -246,6 +301,9 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 				}
 				emit(Event{Kind: r.Kind, Text: r.Text, ID: fmt.Sprintf("%s-%d", meta.RequestID, i), Meta: &m, Final: true})
 			}
+		}
+		if e := a.Save(); e != nil {
+			return fmt.Errorf("could not save history: %w", e)
 		}
 		for _, item := range items {
 			var call struct {
@@ -301,17 +359,24 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 			for _, r := range RecordsForItem(output) {
 				emit(Event{Kind: r.Kind, Text: r.Text, Meta: &Metadata{Duration: time.Since(started)}, Final: true})
 			}
+			if e := a.Save(); e != nil {
+				return fmt.Errorf("could not save history: %w", e)
+			}
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		if steered := acceptSteering(); calls == 0 && !steered {
 			return nil
+		} else if steered {
+			if e := a.Save(); e != nil {
+				return fmt.Errorf("could not save history: %w", e)
+			}
 		}
 	}
 	return fmt.Errorf("stopped after %d agent steps; raise max_agent_steps in settings.toml", a.settings.MaxAgentSteps)
 }
-func (a *Agent) request(ctx context.Context, emit func(Event)) ([]json.RawMessage, error) {
+func (a *Agent) request(ctx context.Context, emit func(Event), checkpoints ...func(int64, json.RawMessage) error) ([]json.RawMessage, error) {
 	if strings.TrimSpace(a.settings.Model) == "" || strings.TrimSpace(a.settings.Provider) == "" {
 		return nil, fmt.Errorf("no provider or model selected: use /login to add a provider, then choose a model with /model")
 	}
@@ -362,6 +427,11 @@ func (a *Agent) request(ctx context.Context, emit func(Event)) ([]json.RawMessag
 				emit(Event{Kind: "code", Text: partialCode(arguments[event.OutputIndex]), Provisional: true, ID: fmt.Sprintf("%s-%d", a.lastRequest.RequestID, event.OutputIndex), Final: true})
 			}
 		case "response.output_item.added", "response.output_item.done":
+			if event.Type == "response.output_item.done" && len(checkpoints) > 0 && checkpoints[0] != nil {
+				if err := checkpoints[0](event.OutputIndex, json.RawMessage(event.Item.RawJSON())); err != nil {
+					return nil, err
+				}
+			}
 
 			// Some providers deliver complete message.content without text deltas.
 			// Show it as soon as available, not only at response.completed.
@@ -377,14 +447,14 @@ func (a *Agent) request(ctx context.Context, emit func(Event)) ([]json.RawMessag
 			}
 
 			for _, record := range RecordsForItem(json.RawMessage(event.Item.RawJSON())) {
-				emit(Event{Kind: record.Kind, Text: record.Text, ID: fmt.Sprintf("%s-%d", a.lastRequest.RequestID, event.OutputIndex), Final: true})
+				emit(Event{Kind: record.Kind, Text: record.Text, ID: fmt.Sprintf("%s-%d", a.lastRequest.RequestID, event.OutputIndex), Final: true, Provisional: event.Type == "response.output_item.added"})
 			}
 		case "response.output_text.delta":
-			emit(Event{Kind: "delta", Text: event.Delta, ID: fmt.Sprintf("%s-%d", a.lastRequest.RequestID, event.OutputIndex)})
+			emit(Event{Kind: "delta", Text: event.Delta, ID: fmt.Sprintf("%s-%d", a.lastRequest.RequestID, event.OutputIndex), Provisional: true})
 		case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
-			emit(Event{Kind: "reasoning_delta", Text: event.Delta, ID: fmt.Sprintf("%s-%d", a.lastRequest.RequestID, event.OutputIndex)})
+			emit(Event{Kind: "reasoning_delta", Text: event.Delta, ID: fmt.Sprintf("%s-%d", a.lastRequest.RequestID, event.OutputIndex), Provisional: true})
 		case "response.refusal.delta":
-			emit(Event{Kind: "refusal_delta", Text: event.Delta, ID: fmt.Sprintf("%s-%d", a.lastRequest.RequestID, event.OutputIndex)})
+			emit(Event{Kind: "refusal_delta", Text: event.Delta, ID: fmt.Sprintf("%s-%d", a.lastRequest.RequestID, event.OutputIndex), Provisional: true})
 		case "response.completed":
 			a.lastRequest.Duration = time.Since(started)
 			if event.Response.JSON.Usage.Valid() {
@@ -399,6 +469,11 @@ func (a *Agent) request(ctx context.Context, emit func(Event)) ([]json.RawMessag
 			completed = make([]json.RawMessage, len(event.Response.Output))
 			for i, item := range event.Response.Output {
 				completed[i] = json.RawMessage(item.RawJSON())
+				if len(checkpoints) > 0 && checkpoints[0] != nil {
+					if err := checkpoints[0](int64(i), completed[i]); err != nil {
+						return nil, err
+					}
+				}
 			}
 		case "response.failed", "response.incomplete", "error":
 			return nil, fmt.Errorf("provider stream: %s", event.RawJSON())

@@ -160,5 +160,10 @@ func (a *Agent) Records() []Record {
 // RememberDisplay retains UI-only diagnostics in the journal without adding
 // them to API history. The caller must wait for the active turn to finish.
 func (a *Agent) RememberDisplay(records []Record) {
-	a.records = append([]Record(nil), records...)
+	a.records = make([]Record, 0, len(records))
+	for _, record := range records {
+		if !record.Preview {
+			a.records = append(a.records, record)
+		}
+	}
 }

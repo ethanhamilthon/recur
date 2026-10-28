@@ -186,7 +186,7 @@ func NewEventPrinter(stdout, stderr io.Writer) func(agent.Event) {
 		lastID, lastOut = id, out
 	}
 	return func(e agent.Event) {
-		if e.Provisional || e.Kind == "user" {
+		if (e.Provisional && e.Kind == "code") || e.Kind == "user" {
 			return
 		}
 		switch e.Kind {

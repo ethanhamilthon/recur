@@ -97,12 +97,9 @@ func TestToolCallStreamingIsDisplayOnlyAndSequential(t *testing.T) {
 					calls = append(calls, record)
 				}
 			}
-			if len(calls) != 2 || calls[0].Text != "x=10" || calls[1].Text != "echo $((x + 5))" {
-				t.Fatalf("calls mixed or duplicated: %+v", calls)
-			}
 			if failed {
-				if !calls[0].Preview || !calls[1].Preview {
-					t.Fatal("failed-stream calls not marked as previews")
+				if len(calls) != 0 {
+					t.Fatalf("unfinished calls saved: %+v", calls)
 				}
 				if len(a.History) != 2 {
 					t.Fatal("partial calls committed to API history")
@@ -110,8 +107,13 @@ func TestToolCallStreamingIsDisplayOnlyAndSequential(t *testing.T) {
 				if result, _ := a.REPL.Execute(context.Background(), `test -n "$x"`, time.Second); !result.Error {
 					t.Fatal("failed-stream call executed")
 				}
-			} else if calls[0].Meta.Usage.Input != 100 || calls[1].Meta.Usage.Input != 100 {
-				t.Fatal("request metadata missing")
+			} else {
+				if len(calls) != 2 || calls[0].Text != "x=10" || calls[1].Text != "echo $((x + 5))" {
+					t.Fatalf("calls mixed or duplicated: %+v", calls)
+				}
+				if calls[0].Meta.Usage.Input != 100 || calls[1].Meta.Usage.Input != 100 {
+					t.Fatal("request metadata missing")
+				}
 			}
 			b, err := New(a.REPL.Dir, a.SessionInfo()["id"].(string))
 			if err != nil {
