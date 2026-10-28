@@ -65,10 +65,10 @@ func TestSingleClickDoesNotCopy(t *testing.T) {
 	m := newModel(&agent.Agent{}, "/project")
 	m.add("user", "hello world")
 	m.refresh(true)
-	if cmd := m.mouseSelection(tea.MouseMsg{X: 2, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress}); cmd != nil {
+	if cmd, _ := m.mouseSelection(tea.MouseMsg{X: 2, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress}); cmd != nil {
 		t.Fatal("press should not copy")
 	}
-	if cmd := m.mouseSelection(tea.MouseMsg{X: 2, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionRelease}); cmd != nil {
+	if cmd, _ := m.mouseSelection(tea.MouseMsg{X: 2, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionRelease}); cmd != nil {
 		t.Fatal("click without drag copied to clipboard")
 	}
 }

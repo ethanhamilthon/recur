@@ -154,23 +154,23 @@ func (m model) pasteClipboard() (tea.Model, tea.Cmd) {
 		return clipboardResult{generation, image, text, err}
 	}
 }
-func (m *model) acceptClipboard(result clipboardResult) {
+func (m *model) acceptClipboard(result clipboardResult) tea.Cmd {
 	if result.generation != m.pasteGeneration {
 		if result.image.Path != "" {
 			_ = os.Remove(result.image.Path)
 		}
-		return
+		return nil
 	}
 	m.pasting = false
 	if result.err != nil {
 		m.add("error", result.err.Error())
-		return
+		return nil
 	}
 	if result.image.URL != "" {
 		if m.menuKind != "" {
 			_ = os.Remove(result.image.Path)
 			m.add("notice", "Images can only be pasted into a message draft.")
-			return
+			return nil
 		}
 		count := len(m.images) + len(m.turnImages)
 		for _, input := range m.queued {
@@ -182,7 +182,12 @@ func (m *model) acceptClipboard(result clipboardResult) {
 		} else {
 			m.images = append(m.images, result.image)
 		}
-	} else {
-		m.input.InsertString(result.text)
+		return nil
 	}
+	// Clipboard text replaces an active composer selection.
+	if _, _, ok := m.activeComposerSelection(); ok {
+		return m.replaceComposerSelection(result.text)
+	}
+	m.input.InsertString(result.text)
+	return nil
 }

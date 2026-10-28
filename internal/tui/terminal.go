@@ -13,11 +13,20 @@ import (
 // it has no native Kitty keyboard protocol API. Keep compatibility here.
 func normalizeTerminalKey(msg tea.Msg) tea.Msg {
 	if sequence, ok := msg.(fmt.Stringer); ok {
-		if paste, release := pasteSequence(sequence.String()); paste {
-			if release {
+		if action, super, release, ok := clipboardSequence(sequence.String()); ok {
+			switch {
+			case release:
 				return nil
+			case action == 'v':
+				return tea.KeyMsg{Type: tea.KeyCtrlV}
+			case super:
+				// Cmd/Meta+C and Cmd/Meta+X only act on a composer selection.
+				return composerShortcut{cut: action == 'x'}
+			case action == 'x':
+				return tea.KeyMsg{Type: tea.KeyCtrlX}
+			default:
+				return tea.KeyMsg{Type: tea.KeyCtrlC}
 			}
-			return tea.KeyMsg{Type: tea.KeyCtrlV}
 		}
 		if key, ok := kittyKey(sequence.String()); ok {
 			return key
@@ -73,22 +82,34 @@ func kittyKey(sequence string) (tea.Msg, bool) {
 	return tea.KeyMsg{Type: tea.KeyEsc}, true
 }
 
+// clipboardSequence decodes Kitty CSI-u Ctrl, Cmd or Meta shortcuts for V, C and X.
 // Kitty reports modifiers and optional base-layout keycodes even on Cyrillic layouts.
-func pasteSequence(sequence string) (bool, bool) {
-	codes, modifiers, ok := csiU(sequence)
-	if !ok || len(modifiers) == 0 {
-		return false, false
+// action is 'v', 'c' or 'x'; super reports Cmd/Meta without Ctrl.
+func clipboardSequence(sequence string) (action byte, super, release, ok bool) {
+	codes, modifiers, parsed := csiU(sequence)
+	if !parsed || len(modifiers) == 0 {
+		return 0, false, false, false
 	}
 	value, err := strconv.Atoi(modifiers[0])
 	if err != nil || value < 1 || (value-1)&(4|8|32) == 0 {
-		return false, false
+		return 0, false, false, false
 	}
 	for _, code := range codes {
-		if code == "118" || code == "86" || code == "1084" || code == "1052" {
-			return true, len(modifiers) > 1 && modifiers[1] != "1"
+		switch code {
+		case "118", "86", "1084", "1052":
+			action = 'v'
+		case "99", "67", "1089", "1057":
+			action = 'c'
+		case "120", "88", "1095", "1063":
+			action = 'x'
+		default:
+			continue
 		}
+		super = (value-1)&(8|32) != 0 && (value-1)&4 == 0
+		release = len(modifiers) > 1 && modifiers[1] != "1"
+		return action, super, release, true
 	}
-	return false, false
+	return 0, false, false, false
 }
 
 type keyboardProtocol struct{ enabled bool }

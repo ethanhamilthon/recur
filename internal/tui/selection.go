@@ -100,28 +100,56 @@ func copyText(text string) tea.Cmd {
 
 type clipboardCopied struct{ lines int }
 
-// mouseSelection handles drag selection; wheel and other buttons keep scrolling.
-func (m *model) mouseSelection(msg tea.MouseMsg) tea.Cmd {
+// mouseSelection handles left-button selection in the composer and the timeline. It reports
+// whether the event was consumed; the wheel and other buttons keep scrolling the viewport.
+// A drag that starts in the composer selects its text without copying. A drag that starts
+// elsewhere selects timeline text and copies it on release.
+func (m *model) mouseSelection(msg tea.MouseMsg) (tea.Cmd, bool) {
 	if msg.Button != tea.MouseButtonLeft {
-		return nil
+		return nil, false
 	}
 	cell := point{msg.X, msg.Y}
 	switch msg.Action {
 	case tea.MouseActionPress:
+		m.sel, m.inputSel, m.inputDrag = nil, nil, false
+		if offset, ok := m.composerOffset(msg.X, msg.Y, false); ok {
+			m.inputSel = &composerSelection{anchor: offset, head: offset, value: m.input.Value()}
+			m.inputDrag = true
+			return nil, true
+		}
 		m.sel = &selection{start: cell, end: cell}
 	case tea.MouseActionMotion:
-		if m.sel != nil {
+		if m.inputDrag && m.inputSel != nil {
+			if offset, ok := m.composerOffset(msg.X, msg.Y, true); ok {
+				m.inputSel.head = offset
+			}
+		} else if m.sel != nil {
 			m.sel.end = cell
 		}
 	case tea.MouseActionRelease:
+		if m.inputDrag {
+			m.inputDrag = false
+			if m.inputSel == nil {
+				return nil, true
+			}
+			if m.inputSel.anchor == m.inputSel.head {
+				// A click without drag only places the cursor.
+				offset := m.inputSel.head
+				m.inputSel = nil
+				return m.setCursorOffset(offset), true
+			}
+			// The cursor moves to the end of the drag so the next key starts from there.
+			return m.setCursorOffset(m.inputSel.head), true
+		}
 		if m.sel == nil {
-			return nil
+			return nil, true
 		}
 		text := m.sel.text(strings.Split(m.viewport.View(), "\n"), m.viewport.Width)
 		m.sel = nil
 		if strings.TrimSpace(text) != "" {
-			return copyText(text)
+			return copyText(text), true
 		}
+		return nil, true
 	}
-	return nil
+	return nil, true
 }

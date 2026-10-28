@@ -209,6 +209,7 @@ func (m *model) timeline() string {
 		label := fmt.Sprintf("  [Image %d: %s] Ctrl+X removes last", i+1, filepath.Base(image.Path))
 		out.WriteString(paint(ansi.Truncate(ansi.Strip(label), m.width, "…"), m.width, lipgloss.NoColor{}, muted) + "\n")
 	}
+	m.inputTop = strings.Count(out.String(), "\n") // every row above the composer ends with a newline
 	out.WriteString(m.inputBlock())
 	matches := m.completions()
 	start, rows := 0, min(8, max(1, m.height-m.input.Height()-5))
