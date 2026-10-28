@@ -18,12 +18,6 @@ type Provider struct {
 	APIKey  string `toml:"api_key"`
 }
 
-// colorNames lists the palette entries accepted from settings.
-var colorNames = map[string]struct{}{
-	"accent": {}, "foreground": {}, "muted": {}, "code": {}, "dim": {},
-	"input": {}, "assistant": {}, "error": {}, "warn": {}, "info": {},
-}
-
 type Settings struct {
 	AttachmentDir    string              `toml:"attachment_dir"`
 	MaxContextTokens int64               `toml:"max_context_tokens"`
@@ -36,7 +30,6 @@ type Settings struct {
 	Model            string              `toml:"model"`
 	ReasoningSummary string              `toml:"reasoning_summary"`
 	Effort           string              `toml:"effort"`
-	Colors           map[string]string   `toml:"colors"`
 	Providers        map[string]Provider `toml:"providers"`
 }
 
@@ -61,20 +54,6 @@ max_agent_steps = 0
 max_code_lines = 999
 max_result_lines = 4
 max_thinking_lines = 4
-
-# Colors are #rrggbb values; delete an entry to use the built-in default.
-# This table must stay after every top-level key.
-[colors]
-accent = "#79d9ff"
-foreground = "#d5ddeb"
-muted = "#8794a8"
-code = "#a0a0a0"
-dim = "#606060"
-input = "#8aadff"
-assistant = "#9bdef5"
-error = "#f09eac"
-warn = "#e5c07b"
-info = "#d7c38b"
 `
 
 func loadSettings(dir string) (Settings, error) {
@@ -111,19 +90,6 @@ func validateSettings(s Settings) error {
 		u, err := url.Parse(p.BaseURL)
 		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 			return fmt.Errorf("provider %q needs an HTTP(S) base_url", name)
-		}
-	}
-	for name, value := range s.Colors {
-		if _, ok := colorNames[name]; !ok {
-			return fmt.Errorf("unknown color %q; allowed: accent, foreground, muted, code, dim, input, assistant, error, warn, info", name)
-		}
-		if len(value) != 7 || value[0] != '#' {
-			return fmt.Errorf("color %q must be #rrggbb, got %q", name, value)
-		}
-		for _, digit := range value[1:] {
-			if !strings.ContainsRune("0123456789abcdefABCDEF", digit) {
-				return fmt.Errorf("color %q must be #rrggbb, got %q", name, value)
-			}
 		}
 	}
 	if s.ReasoningSummary != "" && s.ReasoningSummary != "auto" && s.ReasoningSummary != "off" {

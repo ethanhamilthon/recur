@@ -170,7 +170,6 @@ func (m model) runCommand(name string) (tea.Model, tea.Cmd) {
 		if err := m.a.Reload(); err != nil {
 			return m.stop("error", err.Error())
 		}
-		applyColors(m.a.Settings())
 		m.cache = nil
 		m.add("notice", "Settings reloaded; shell state was reset.")
 	case "/compact":
@@ -200,7 +199,6 @@ func (m model) runCommand(name string) (tea.Model, tea.Cmd) {
 			if err != nil {
 				m.add("error", err.Error())
 			} else {
-				applyColors(m.a.Settings())
 				m.pasteGeneration++
 				m.pasting = false
 				m.images = nil

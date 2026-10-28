@@ -83,7 +83,6 @@ func newModel(a *agent.Agent, cwd string) model {
 	style := textarea.Style{Base: base, CursorLine: base, Text: base, Placeholder: base.Foreground(muted), EndOfBuffer: base}
 	input.FocusedStyle = style
 	input.BlurredStyle = style
-	applyColors(a.Settings())
 	m := model{a: a, input: input, viewport: viewport.New(80, 24), width: 80, height: 24, cwd: cwd}
 	m.restoreHistory()
 	m.refresh(true)

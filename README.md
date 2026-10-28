@@ -65,7 +65,7 @@ Type `/` to open command completion. Use **Up/Down** to choose, **Tab** to compl
 | `/cancel` | Cancel the current turn |
 | `/resume` | Complete/select a saved session in the current project |
 | `/compact [prompt]` | Summarize everything but the last `compact_keep_turns` turns; an optional prompt guides the summary |
-| `/reload` | Re-read settings, prompt files and the palette, then restart the shell |
+| `/reload` | Re-read settings and prompt files, then restart the shell |
 
 `/new`, `/resume <id>`, and `/quit` also work during a turn: they cancel it first and wait for history to be saved before continuing.
 
@@ -208,28 +208,6 @@ request fails, history stays untouched and the error is reported; automatic comp
 lets the turn continue with the original history. `/compact` does the same on demand,
 and `/compact <prompt>` adds an instruction to the summary request. Compacted history
 is saved immediately; a save failure restores the in-memory history and display journal.
-
-### Colors
-
-Every color comes from `settings.toml`; the defaults are the built-in palette:
-
-```toml
-[colors]
-accent = "#79d9ff"
-foreground = "#d5ddeb"
-muted = "#8794a8"
-code = "#a0a0a0"
-dim = "#606060"
-input = "#8aadff"
-assistant = "#9bdef5"
-error = "#f09eac"
-warn = "#e5c07b"
-info = "#d7c38b"
-```
-
-Values must be `#rrggbb`; unknown names are rejected with the allowed list. Delete an entry
-to fall back to its default. Markdown headings, the header, notices and the status bar all
-follow this table. `/reload` applies a changed palette without restarting recur.
 
 ### Markdown, working status and steering
 

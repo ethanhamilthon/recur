@@ -403,3 +403,36 @@ func TestSingleLineNotifications(t *testing.T) {
 		t.Fatal("live and restored notifications differ")
 	}
 }
+
+// TestBuiltInColors pins the fixed palette: it is compiled in and cannot be changed by settings.
+func TestBuiltInColors(t *testing.T) {
+	previous := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(previous)
+	for name, pair := range map[string]struct {
+		got  lipgloss.Color
+		want string
+	}{
+		"accent":     {cyan, "#79d9ff"},
+		"foreground": {foreground, "#d5ddeb"},
+		"muted":      {muted, "#8794a8"},
+		"code":       {codeGray, "#a0a0a0"},
+		"dim":        {darkGray, "#606060"},
+		"input":      {inputBlue, "#8aadff"},
+		"assistant":  {assistantColor, "#9bdef5"},
+		"error":      {errorColor, "#f09eac"},
+		"warn":       {warnColor, "#e5c07b"},
+		"info":       {infoColor, "#d7c38b"},
+	} {
+		if string(pair.got) != pair.want {
+			t.Fatalf("%s = %s, want %s", name, pair.got, pair.want)
+		}
+	}
+	header := lipgloss.NewStyle().Foreground(cyan).Render("recur")
+	if !strings.Contains(header, "38;2;121;217;255") {
+		t.Fatalf("accent not rendered: %q", header)
+	}
+	if !strings.Contains(markdownStyle, "#9bdef5") || !strings.Contains(markdownStyle, "#79d9ff") || !strings.Contains(markdownStyle, "#8aadff") {
+		t.Fatal("markdown style must use the built-in palette")
+	}
+}
