@@ -115,8 +115,14 @@ func TestCrashDuringSecondToolKeepsFirstResult(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				t.Error(err)
 			}
-			if !strings.Contains(fmt.Sprint(request.Input), "not rerun") {
-				t.Error("missing interrupted tool output")
+			found := false
+			for _, item := range request.Input {
+				if strings.Contains(string(item), "not rerun") {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("missing interrupted tool output: %s", request.Input)
 			}
 			fmt.Fprint(w, `data: {"type":"response.completed","response":{"output":[]}}`+"\n\n")
 		}
@@ -158,8 +164,14 @@ func TestCrashDuringSecondToolKeepsFirstResult(t *testing.T) {
 	if err = a.Resume(sessions[0].ID); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(fmt.Sprint(a.History), "first-result") {
-		t.Fatal("first tool result lost after crash")
+	found := false
+	for _, item := range a.History {
+		if strings.Contains(string(item), "first-result") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("first tool result lost after crash: %s", a.History)
 	}
 	if err = a.Run(context.Background(), "continue", func(Event) {}); err != nil {
 		t.Fatal(err)
