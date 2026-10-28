@@ -184,7 +184,7 @@ func (a *Agent) compactIfNeeded(ctx context.Context, emit func(Event)) {
 		emit(Event{Kind: "error", Text: "Compaction failed: " + err.Error()})
 		return
 	}
-	emit(Event{Kind: "info", Text: result})
+	emit(Event{Kind: "notice", Text: result})
 	if estimateTokens(a.History) > limit {
 		emit(Event{Kind: "notice", Text: "Compaction could not reach max_context_tokens; raise it to leave room for the kept turns."})
 	}
@@ -198,6 +198,11 @@ func (a *Agent) Reload() error {
 	c, err := loadConfiguration(a.home)
 	if err != nil {
 		return err
+	}
+	// Session selection is independent of the defaults in settings.toml.
+	c.settings.Provider, c.settings.Model, c.settings.Effort = a.settings.Provider, a.settings.Model, a.settings.Effort
+	if err := validateSettings(c.settings); err != nil {
+		return fmt.Errorf("session selection: %w", err)
 	}
 	a.REPL.Close()
 	a.REPL.Prefix, a.REPL.PrefixOutput = c.prefix, ""

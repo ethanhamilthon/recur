@@ -64,7 +64,7 @@ func TestRetrySucceedsAfterTransientFailures(t *testing.T) {
 	}
 	found := false
 	for _, e := range events {
-		if e.Kind == "info" && len(e.Text) > 8 && e.Text[:8] == "Retrying" {
+		if e.Kind == "notice" && len(e.Text) > 8 && e.Text[:8] == "Retrying" {
 			found = true
 		}
 	}

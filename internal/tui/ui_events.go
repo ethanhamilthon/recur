@@ -68,7 +68,7 @@ func (m *model) requestCancel() {
 }
 func (m *model) queueSteering(text string) {
 	if m.cancelling {
-		m.add("info", "Cancellation in progress; your message remains in the input.")
+		m.add("notice", "Cancellation in progress; your message remains in the input.")
 		return
 	}
 	input := agent.Input{Text: text, Images: m.images}
@@ -77,7 +77,7 @@ func (m *model) queueSteering(text string) {
 		m.images = nil
 		m.input.Reset()
 	} else {
-		m.add("info", "Steering queue is full; your message remains in the input.")
+		m.add("notice", "Steering queue is full; your message remains in the input.")
 	}
 }
 func (m model) workingBlock() string {
@@ -150,7 +150,7 @@ func (m model) startTurn(text string) (tea.Model, tea.Cmd) {
 			ch <- agent.Event{Kind: "retry", Text: text}
 		}
 		if errors.Is(err, context.Canceled) {
-			ch <- agent.Event{Kind: "info", Text: "Turn cancelled."}
+			ch <- agent.Event{Kind: "notice", Text: "Turn cancelled."}
 		}
 		message := ""
 		if err != nil {

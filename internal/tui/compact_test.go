@@ -37,7 +37,7 @@ func TestCompactRunsInTheBackground(t *testing.T) {
 		t.Fatalf("compaction state was not cleared: busy=%v compacting=%v", m.busy, m.compacting)
 	}
 	last := m.entries[len(m.entries)-1]
-	if last.Kind != "info" || last.Text == "" {
+	if last.Kind != "notice" || last.Text == "" {
 		t.Fatalf("compaction result was not reported: %+v", last)
 	}
 }

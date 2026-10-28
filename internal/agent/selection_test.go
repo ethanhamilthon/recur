@@ -174,3 +174,53 @@ func TestLegacyHeaderPinsCurrentDefaultsAndCorruptSelectionPreservesState(t *tes
 		t.Fatal("failed read mutated selection")
 	}
 }
+
+func TestReloadPreservesSessionSelectionAndReloadsSettings(t *testing.T) {
+	t.Setenv("RECUR_HOME", t.TempDir())
+	a, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	s := a.Settings()
+	s.Providers = map[string]Provider{
+		"first":  {BaseURL: "https://first.example", APIKey: "old"},
+		"second": {BaseURL: "https://second.example"},
+	}
+	s.Provider, s.Model, s.Effort = "first", "session-model", "high"
+	configureTestAgent(t, a, s)
+	s.Provider, s.Model, s.Effort = "second", "global-model", "low"
+	s.Providers["first"] = Provider{BaseURL: "https://updated.example", APIKey: "new"}
+	s.MaxCodeLines = 17
+	data, err := toml.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(a.home, "settings.toml"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	got := a.Settings()
+	if got.Provider != "first" || got.Model != "session-model" || got.Effort != "high" {
+		t.Fatalf("session selection changed: %+v", got)
+	}
+	if got.Providers["first"].BaseURL != "https://updated.example" || got.MaxCodeLines != 17 {
+		t.Fatalf("other settings not reloaded: %+v", got)
+	}
+	delete(s.Providers, "first")
+	data, err = toml.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(a.home, "settings.toml"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Reload(); err == nil {
+		t.Fatal("reload accepted a missing session provider")
+	}
+	if a.Settings().Provider != "first" || a.Settings().Model != "session-model" {
+		t.Fatal("failed reload changed selection")
+	}
+}

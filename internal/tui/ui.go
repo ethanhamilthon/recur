@@ -260,18 +260,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
 	case clipboardCopied:
-		return m.stop("info", fmt.Sprintf("Copied %d lines to the clipboard.", v.lines))
+		return m.stop("notice", fmt.Sprintf("Copied %d lines to the clipboard.", v.lines))
 	case compactMsg:
 		m.busy, m.compacting, m.cancel = false, false, nil
 		if errors.Is(v.err, context.Canceled) {
-			return m.stop("info", "Compaction cancelled.")
+			return m.stop("notice", "Compaction cancelled.")
 		}
 		if v.err != nil {
 			return m.stop("error", v.err.Error())
 		}
 		m.entries, m.cache, m.contextInput = nil, nil, nil
 		m.restoreHistory()
-		return m.stop("info", v.text)
+		return m.stop("notice", v.text)
 	case agent.Event:
 		if v.Kind == "done" {
 			m.busy = false

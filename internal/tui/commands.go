@@ -219,7 +219,7 @@ func (m model) runCommand(name string) (tea.Model, tea.Cmd) {
 		if m.busy {
 			m.requestCancel()
 		} else {
-			return m.stop("info", "No turn is running.")
+			return m.stop("notice", "No turn is running.")
 		}
 	default:
 		return m.stop("error", "Unknown command: "+name+". Type /help.")
