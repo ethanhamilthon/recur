@@ -14,13 +14,13 @@ import (
 func TestGlobalHomeDefaultsAndMissingFiles(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("LOPY_HOME", "")
+	t.Setenv("RECUR_HOME", "")
 	a, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	if a.home != filepath.Join(home, ".lopy") {
+	if a.home != filepath.Join(home, ".recur") {
 		t.Fatal(a.home)
 	}
 	for _, name := range []string{"settings.toml", "prefix.py", "system.md"} {
@@ -46,7 +46,7 @@ func TestGlobalHomeDefaultsAndMissingFiles(t *testing.T) {
 }
 
 func TestScopedJSONLSessionsResumeAndCheckpoint(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	cwd := filepath.Join(t.TempDir(), "project")
 	if err := os.Mkdir(cwd, 0700); err != nil {
 		t.Fatal(err)
@@ -145,7 +145,7 @@ func TestScopedJSONLSessionsResumeAndCheckpoint(t *testing.T) {
 }
 
 func TestNewSessionResetsInterpreterState(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	a, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

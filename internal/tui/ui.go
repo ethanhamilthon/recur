@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -13,8 +14,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"lopy/internal/agent"
-	"lopy/internal/repl"
+	"recur/internal/agent"
+	"recur/internal/repl"
 )
 
 type entry = agent.Record
@@ -32,6 +33,7 @@ type model struct {
 	events                  chan agent.Event
 	busy                    bool
 	cancelling              bool
+	compacting              bool
 	workingSince            time.Time
 	steering                *agent.Steering
 	queued                  []agent.Input
@@ -259,6 +261,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case clipboardCopied:
 		return m.stop("info", fmt.Sprintf("Copied %d lines to the clipboard.", v.lines))
+	case compactMsg:
+		m.busy, m.compacting, m.cancel = false, false, nil
+		if errors.Is(v.err, context.Canceled) {
+			return m.stop("info", "Compaction cancelled.")
+		}
+		if v.err != nil {
+			return m.stop("error", v.err.Error())
+		}
+		m.entries, m.cache, m.contextInput = nil, nil, nil
+		m.restoreHistory()
+		return m.stop("info", v.text)
 	case agent.Event:
 		if v.Kind == "done" {
 			m.busy = false
@@ -417,6 +430,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.a.ReadOnly {
 				return m.stop("notice", "Session is read-only; use /new or /resume.")
+			}
+			if m.compacting {
+				return m.stop("notice", "Compaction is running; wait before sending.")
 			}
 			if m.busy {
 				m.queueSteering(text)

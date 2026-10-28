@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"lopy/internal/agent"
+	"recur/internal/agent"
 )
 
 func TestMultilineInputKeepsEarlierLinesVisible(t *testing.T) {

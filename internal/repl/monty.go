@@ -14,10 +14,10 @@ import (
 	monty "github.com/ewhauser/gomonty"
 )
 
-// Monty runs in a child copy of lopy, without CPython.
+// Monty runs in a child copy of recur, without CPython.
 // Keeping the VM in a process allows hard cancellation of infinite Python loops.
 func init() {
-	if len(os.Args) == 2 && os.Args[1] == "--lopy-worker" {
+	if len(os.Args) == 2 && os.Args[1] == "--recur-worker" {
 		if err := runMontyWorker(os.Stdin, os.NewFile(3, "protocol")); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -29,7 +29,7 @@ func init() {
 // Native execution stays in the existing disposable worker process. A Go
 // context cannot preempt native code; the parent still kills the process group.
 func runMontyWorker(input io.Reader, output io.Writer) error {
-	session, err := monty.NewRepl(monty.ReplOptions{ScriptName: "<lopy>", Limits: montyLimits()})
+	session, err := monty.NewRepl(monty.ReplOptions{ScriptName: "<recur>", Limits: montyLimits()})
 	if err != nil {
 		return err
 	}
@@ -39,7 +39,7 @@ func runMontyWorker(input io.Reader, output io.Writer) error {
 	var metadata map[string]any
 	options := monty.FeedOptions{Print: monty.WriterPrintCallback(capture), Functions: map[string]monty.ExternalFunction{
 		"docs": docs,
-		"__lopy_session": func(context.Context, monty.Call) (monty.Result, error) {
+		"__recur_session": func(context.Context, monty.Call) (monty.Result, error) {
 			tuple := monty.NamedTuple{TypeName: "Session", FieldNames: []string{"id", "model", "provider", "effort", "cwd", "ctx_size"}}
 			for _, key := range tuple.FieldNames {
 				value := metadata[key]
@@ -94,7 +94,7 @@ func runMontyWorker(input io.Reader, output io.Writer) error {
 		err = json.Unmarshal(scanner.Bytes(), &request)
 		if err == nil {
 			metadata = request.Session
-			_, err = session.FeedRun(context.Background(), "session = __lopy_session()", options)
+			_, err = session.FeedRun(context.Background(), "session = __recur_session()", options)
 		}
 		if err == nil {
 			prefixRun = request.Prefix
@@ -124,7 +124,7 @@ func pythonError(kind, message string) monty.Result {
 // lexical scan only locates a final top-level statement; it never validates
 // Python syntax or executes code. This preserves syntax-before-side-effects.
 func displayLastExpression(source string) string {
-	if _, err := monty.New(source, monty.CompileOptions{ScriptName: "<lopy>"}); err != nil {
+	if _, err := monty.New(source, monty.CompileOptions{ScriptName: "<recur>"}); err != nil {
 		return source
 	}
 	start, end := lastStatement(source)
@@ -132,11 +132,11 @@ func displayLastExpression(source string) string {
 		return source
 	}
 	expression := strings.TrimSpace(source[start:end])
-	probe := "__lopy_last_result__ = (\n" + expression + "\n)\n"
-	if _, err := monty.New(probe, monty.CompileOptions{ScriptName: "<lopy>"}); err != nil {
+	probe := "__recur_last_result__ = (\n" + expression + "\n)\n"
+	if _, err := monty.New(probe, monty.CompileOptions{ScriptName: "<recur>"}); err != nil {
 		return source
 	}
-	return source[:start] + probe + "if __lopy_last_result__ is not None:\n    _ = __lopy_last_result__\n    print(repr(__lopy_last_result__))\n__lopy_last_result__ = None\n"
+	return source[:start] + probe + "if __recur_last_result__ is not None:\n    _ = __recur_last_result__\n    print(repr(__recur_last_result__))\n__recur_last_result__ = None\n"
 }
 func lastStatement(source string) (int, int) {
 	end := len(source)

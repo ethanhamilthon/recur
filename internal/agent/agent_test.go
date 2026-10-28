@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"lopy/internal/repl"
+	"recur/internal/repl"
 )
 
 func TestTurnsPrefixAndReset(t *testing.T) {

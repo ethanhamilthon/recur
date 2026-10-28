@@ -1,4 +1,4 @@
-# Lopy documentation
+# Recur documentation
 
 Use docs(topic) with one of these topics:
 - runtime: interpreter, limits, state, prefix, and host functions.

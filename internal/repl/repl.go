@@ -61,7 +61,7 @@ func (r *REPL) Ensure(ctx context.Context) (bool, error) {
 		writer.Close()
 		return false, err
 	}
-	cmd := exec.Command(executable, "--lopy-worker")
+	cmd := exec.Command(executable, "--recur-worker")
 	cmd.Dir = r.Dir
 	cmd.ExtraFiles = []*os.File{writer}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"syscall"
 
-	"lopy/internal/cli"
-	"lopy/internal/tui"
+	"recur/internal/cli"
+	"recur/internal/tui"
 )
 
 //go:embed VERSION

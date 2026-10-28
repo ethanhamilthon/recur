@@ -9,8 +9,8 @@ import (
 
 func TestSettingsAndHome(t *testing.T) {
 	cwd := t.TempDir()
-	home := filepath.Join(t.TempDir(), ".lopy")
-	t.Setenv("LOPY_HOME", home)
+	home := filepath.Join(t.TempDir(), ".recur")
+	t.Setenv("RECUR_HOME", home)
 	a, err := New(cwd)
 	if err != nil {
 		t.Fatal(err)
@@ -19,8 +19,8 @@ func TestSettingsAndHome(t *testing.T) {
 	if !strings.HasPrefix(a.HistoryPath, filepath.Join(home, "sessions")+string(os.PathSeparator)) {
 		t.Fatal(a.HistoryPath)
 	}
-	if _, err := os.Stat(filepath.Join(cwd, ".lopy")); !os.IsNotExist(err) {
-		t.Fatal("must not use cwd config when LOPY_HOME is set")
+	if _, err := os.Stat(filepath.Join(cwd, ".recur")); !os.IsNotExist(err) {
+		t.Fatal("must not use cwd config when RECUR_HOME is set")
 	}
 	text := `provider = "other"
 model = "custom-model"
@@ -73,9 +73,9 @@ func TestInvalidSettings(t *testing.T) {
 
 func TestRelativeHome(t *testing.T) {
 	cwd := t.TempDir()
-	t.Setenv("LOPY_HOME", "custom/.lopy")
+	t.Setenv("RECUR_HOME", "custom/.recur")
 	dir, err := configDir(cwd)
-	if err != nil || dir != filepath.Join(cwd, "custom", ".lopy") {
+	if err != nil || dir != filepath.Join(cwd, "custom", ".recur") {
 		t.Fatalf("%s %v", dir, err)
 	}
 }

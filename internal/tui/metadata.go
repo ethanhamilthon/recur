@@ -2,12 +2,14 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
-	"lopy/internal/agent"
+	"recur/internal/agent"
 )
 
 const markdownTemplate = `{"document":{"margin":0},"heading":{"bold":true,"block_suffix":"\n"},"h1":{"prefix":"# ","color":"%s"},"h2":{"prefix":"## ","color":"%s"},"h3":{"prefix":"### ","color":"%s"},"h4":{"color":"%s"},"h5":{"color":"%s"},"h6":{"color":"%s"},"strong":{"bold":true},"emph":{"italic":true},"code":{"color":"%s","prefix":"` + "`" + `","suffix":"` + "`" + `"},"code_block":{"margin":0},"list":{"level_indent":2},"item":{"block_prefix":"• "},"enumeration":{"block_prefix":". "},"block_quote":{"indent":1,"indent_token":"│ "},"link":{"underline":true,"color":"%s","format":"\u2063{{.text}}\u2064"},"link_text":{"bold":true},"table":{"center_separator":"┼","column_separator":"│","row_separator":"─"}}`
@@ -57,6 +59,21 @@ func formatContext(n int64) string {
 	}
 	return fmt.Sprint(n)
 }
+
+// shortPath writes the home directory as ~ so the status bar stays compact.
+func shortPath(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" || home == string(filepath.Separator) {
+		return path
+	}
+	if path == home {
+		return "~"
+	}
+	if strings.HasPrefix(path, home+string(filepath.Separator)) {
+		return "~" + path[len(home):]
+	}
+	return path
+}
 func (m model) bottomBar() string {
 	settings := m.a.Settings()
 	model := settings.Model
@@ -74,7 +91,7 @@ func (m model) bottomBar() string {
 	if m.a.ReadOnly {
 		left = "READ-ONLY · " + left
 	}
-	right := ansi.Strip(strings.ReplaceAll(m.cwd, "\n", " "))
+	right := ansi.Strip(strings.ReplaceAll(shortPath(m.cwd), "\n", " "))
 	left = ansi.Strip(strings.ReplaceAll(left, "\n", " "))
 	width := max(1, m.width)
 	if ansi.StringWidth(left)+ansi.StringWidth(right)+1 > width {

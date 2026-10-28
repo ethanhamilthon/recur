@@ -49,9 +49,9 @@ type Settings struct {
 	Providers        map[string]Provider `toml:"providers"`
 }
 
-const defaultSettings = `# Empty uses the platform temporary directory/lopy-images. Relative paths use project cwd.
+const defaultSettings = `# Empty uses the platform temporary directory/recur-images. Relative paths use project cwd.
 attachment_dir = ""
-# No provider or model is configured by default. In lopy, use /login to add a
+# No provider or model is configured by default. In recur, use /login to add a
 # provider, then /model to choose a model.
 provider = ""
 model = ""
@@ -117,7 +117,7 @@ func validateSettings(s Settings) error {
 		return fmt.Errorf("max_context_tokens, compact_keep_turns and max_agent_steps must be non-negative")
 	}
 	// An empty provider and model mean nothing has been selected yet; that is
-	// valid and lopy asks the user to /login and choose a /model.
+	// valid and recur asks the user to /login and choose a /model.
 	if s.Provider != "" {
 		if _, ok := s.Providers[s.Provider]; !ok {
 			return fmt.Errorf("selected provider %q is not configured", s.Provider)
@@ -154,13 +154,13 @@ func validateSettings(s Settings) error {
 }
 
 func configDir(cwd string) (string, error) {
-	dir := os.Getenv("LOPY_HOME")
+	dir := os.Getenv("RECUR_HOME")
 	if dir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
 		}
-		dir = filepath.Join(home, ".lopy")
+		dir = filepath.Join(home, ".recur")
 	} else if !filepath.IsAbs(dir) {
 		dir = filepath.Join(cwd, dir)
 	}

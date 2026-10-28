@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"lopy/internal/repl"
+	"recur/internal/repl"
 )
 
 func TestPromptFilesAndNewSession(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	dir := t.TempDir()
 	a, err := New(dir)
 	if err != nil {
@@ -75,7 +75,7 @@ func TestPromptFailureDoesNotLeaveInterpreterAlive(t *testing.T) {
 }
 
 func TestReloadFailurePreservesSession(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	a, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +104,7 @@ func TestReloadFailurePreservesSession(t *testing.T) {
 	}
 }
 func TestSaveFailurePreservesSession(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	a, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

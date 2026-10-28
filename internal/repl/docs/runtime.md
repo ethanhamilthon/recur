@@ -1,6 +1,6 @@
 # Python runtime
 
-Lopy runs Monty through gomonty v0.0.14 in a disposable worker process, not
+Recur runs Monty through gomonty v0.0.14 in a disposable worker process, not
 CPython. Functions, lists, dicts, sets, tuples, builtins and f-strings work. Full
 Python compatibility is not guaranteed and imports never grant host access.
 
@@ -15,7 +15,7 @@ all third-party packages.
 
 The supported modules are partial. Their OS-backed calls, such as
 Path.exists(), os.environ and datetime.now(), raise NotImplementedError because
-Lopy provides no OS handler: use sh, read and write instead. sys.platform
+Recur provides no OS handler: use sh, read and write instead. sys.platform
 reports "monty" and sys.version reports "3.14.0 (Monty)", not CPython.
 
 Unsupported syntax and builtins: class definitions, del, the @ operator, input(),

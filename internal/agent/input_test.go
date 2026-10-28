@@ -12,11 +12,11 @@ import (
 	"sync"
 	"testing"
 
-	"lopy/internal/repl"
+	"recur/internal/repl"
 )
 
 func TestImageInputAndSteeringPersist(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++

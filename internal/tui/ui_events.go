@@ -12,8 +12,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"lopy/internal/agent"
-	"lopy/internal/selfupdate"
+	"recur/internal/agent"
+	"recur/internal/selfupdate"
 )
 
 // Version is shown on the start screen; main sets it from the VERSION file.
@@ -91,6 +91,9 @@ func (m model) workingBlock() string {
 		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 		elapsed := max(time.Duration(0), time.Since(m.workingSince))
 		label := "working"
+		if m.compacting {
+			label = "compacting"
+		}
 		if m.cancelling {
 			label = "cancelling"
 		}
@@ -99,6 +102,28 @@ func (m model) workingBlock() string {
 		out.WriteString(ansi.Truncate(line, max(1, m.width), "…") + "\n\n")
 	}
 	return out.String()
+}
+
+// compactMsg carries the result of the background summary started by /compact.
+type compactMsg struct {
+	text string
+	err  error
+}
+
+// startCompact summarizes the old turns in the background so the interface keeps
+// responding and the summary request can still be cancelled.
+func (m model) startCompact(prompt string) (tea.Model, tea.Cmd) {
+	m.busy, m.cancelling, m.compacting = true, false, true
+	m.workingSince = time.Now()
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+	a := m.a
+	m.refresh(true)
+	return m, tea.Batch(func() tea.Msg {
+		defer cancel()
+		text, err := a.Compact(ctx, prompt)
+		return compactMsg{text: text, err: err}
+	}, workingPulse(m.workingSince))
 }
 
 func (m model) startTurn(text string) (tea.Model, tea.Cmd) {

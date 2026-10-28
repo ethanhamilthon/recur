@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"lopy/internal/agent"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"recur/internal/agent"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +20,7 @@ func TestHeadlessTransportsAndExplicitResume(t *testing.T) {
 	for _, mode := range []string{"stdio", "jsonl"} {
 		t.Run(mode, func(t *testing.T) {
 			home := t.TempDir()
-			t.Setenv("LOPY_HOME", home)
+			t.Setenv("RECUR_HOME", home)
 			count := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				count++
@@ -89,7 +89,7 @@ func TestHeadlessRejectsInvalidInputAndModes(t *testing.T) {
 			t.Fatalf("accepted %v", args)
 		}
 	}
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	var out, diagnostics bytes.Buffer
 	if err := Run(context.Background(), []string{"--mode", "jsonl"}, strings.NewReader("bad-json\n"), &out, &diagnostics); err == nil {
 		t.Fatal("invalid JSONL accepted")
@@ -98,7 +98,7 @@ func TestHeadlessRejectsInvalidInputAndModes(t *testing.T) {
 
 func TestIdleHeadlessNotificationStartsTurn(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("LOPY_HOME", home)
+	t.Setenv("RECUR_HOME", home)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n")
@@ -152,7 +152,7 @@ func TestIdleHeadlessNotificationStartsTurn(t *testing.T) {
 }
 
 func TestHeadlessCancellationWhileWaitingForInput(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	in, writer := io.Pipe()
 	defer in.Close()
 	defer writer.Close()
@@ -171,7 +171,7 @@ func TestHeadlessCancellationWhileWaitingForInput(t *testing.T) {
 }
 
 func TestHeadlessReadOnlyFollowerPublishesCommittedSnapshots(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)

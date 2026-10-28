@@ -4,16 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"lopy/internal/repl"
-	"lopy/prompts"
 	"net/http"
 	"net/http/httptest"
+	"recur/internal/repl"
+	"recur/prompts"
 	"strings"
 	"testing"
 )
 
 func TestRuntimeContractOnlyInToolDescription(t *testing.T) {
-	if prompts.System != "You are Lopy, a coding agent" {
+	if prompts.System != "You are Recur, a coding agent" {
 		t.Fatalf("unexpected default system: %q", prompts.System)
 	}
 	for _, system := range []string{"", "Custom instructions retained verbatim."} {

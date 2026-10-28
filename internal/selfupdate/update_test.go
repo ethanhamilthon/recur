@@ -46,11 +46,11 @@ func TestNewer(t *testing.T) {
 }
 
 func TestChecksumAndArchive(t *testing.T) {
-	listing := []byte("abc  lopy_darwin_arm64.tar.gz\ndef *lopy_linux_amd64.tar.gz\n")
-	if got := checksum(listing, "lopy_linux_amd64.tar.gz"); got != "def" {
+	listing := []byte("abc  recur_darwin_arm64.tar.gz\ndef *recur_linux_amd64.tar.gz\n")
+	if got := checksum(listing, "recur_linux_amd64.tar.gz"); got != "def" {
 		t.Fatalf("checksum = %q", got)
 	}
-	if got := checksum(listing, "lopy_windows_amd64.tar.gz"); got != "" {
+	if got := checksum(listing, "recur_windows_amd64.tar.gz"); got != "" {
 		t.Fatalf("unexpected checksum %q", got)
 	}
 	var archive bytes.Buffer
@@ -60,7 +60,7 @@ func TestChecksumAndArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	tarWriter.Write([]byte("hi"))
-	if err := tarWriter.WriteHeader(&tar.Header{Name: "lopy", Mode: 0o755, Size: 6, Typeflag: tar.TypeReg}); err != nil {
+	if err := tarWriter.WriteHeader(&tar.Header{Name: "recur", Mode: 0o755, Size: 6, Typeflag: tar.TypeReg}); err != nil {
 		t.Fatal(err)
 	}
 	tarWriter.Write([]byte("binary"))
@@ -74,7 +74,7 @@ func TestChecksumAndArchive(t *testing.T) {
 
 func TestAvailableUsesCacheAndFetchesOnce(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("LOPY_HOME", home)
+	t.Setenv("RECUR_HOME", home)
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -107,7 +107,7 @@ func TestInstallReplacesBinary(t *testing.T) {
 	var archive bytes.Buffer
 	gzipWriter := gzip.NewWriter(&archive)
 	tarWriter := tar.NewWriter(gzipWriter)
-	tarWriter.WriteHeader(&tar.Header{Name: "lopy", Mode: 0o755, Size: 4, Typeflag: tar.TypeReg})
+	tarWriter.WriteHeader(&tar.Header{Name: "recur", Mode: 0o755, Size: 4, Typeflag: tar.TypeReg})
 	tarWriter.Write([]byte("next"))
 	tarWriter.Close()
 	gzipWriter.Close()
@@ -130,7 +130,7 @@ func TestInstallReplacesBinary(t *testing.T) {
 	defer server.Close()
 	stubEndpoints(t, server)
 
-	target := filepath.Join(t.TempDir(), "lopy")
+	target := filepath.Join(t.TempDir(), "recur")
 	if err := os.WriteFile(target, []byte("old"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestInstallReplacesBinary(t *testing.T) {
 
 func TestCacheFileHonorsRelativeHome(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("LOPY_HOME", "relative-home")
+	t.Setenv("RECUR_HOME", "relative-home")
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)

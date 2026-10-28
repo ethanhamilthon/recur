@@ -8,7 +8,7 @@ import (
 	"strings"
 	"syscall"
 
-	"lopy/prompts"
+	"recur/prompts"
 )
 
 func (a *Agent) acquire() error {

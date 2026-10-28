@@ -14,7 +14,7 @@ import (
 )
 
 func (a *Agent) listenNotifications() error {
-	dir, err := os.MkdirTemp("", "lopy-notify-")
+	dir, err := os.MkdirTemp("", "recur-notify-")
 	if err != nil {
 		return err
 	}

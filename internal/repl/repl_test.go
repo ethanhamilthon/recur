@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"lopy/prompts"
+	"recur/prompts"
 )
 
 func TestPersistentInterpreter(t *testing.T) {

@@ -14,7 +14,7 @@ import (
 
 func retryAgent(t *testing.T, handler http.HandlerFunc) (*Agent, *int, func()) {
 	t.Helper()
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++

@@ -1,4 +1,4 @@
-// Package selfupdate checks GitHub releases and installs the lopy binary.
+// Package selfupdate checks GitHub releases and installs the recur binary.
 package selfupdate
 
 import (
@@ -21,8 +21,8 @@ import (
 	"time"
 )
 
-// Repo is the GitHub repository that publishes lopy releases.
-const Repo = "ethanhamilthon/lopy"
+// Repo is the GitHub repository that publishes recur releases.
+const Repo = "ethanhamilthon/recur"
 
 const (
 	cacheTTL = 6 * time.Hour
@@ -47,7 +47,7 @@ func fetch(ctx context.Context, url string, limit int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("User-Agent", "lopy-selfupdate")
+	request.Header.Set("User-Agent", "recur-selfupdate")
 	request.Header.Set("Accept", "application/vnd.github+json")
 	response, err := client.Do(request)
 	if err != nil {
@@ -117,13 +117,13 @@ func Newer(current, latest string) bool {
 }
 
 func cacheFile() string {
-	home := os.Getenv("LOPY_HOME")
+	home := os.Getenv("RECUR_HOME")
 	if home == "" {
 		dir, err := os.UserHomeDir()
 		if err != nil {
 			return ""
 		}
-		return filepath.Join(dir, ".lopy", "update.json")
+		return filepath.Join(dir, ".recur", "update.json")
 	}
 	if !filepath.IsAbs(home) {
 		cwd, err := os.Getwd()
@@ -138,7 +138,7 @@ func cacheFile() string {
 // Available returns the newer version tag, using a cached answer to keep startup cheap.
 // It returns an empty string when the installation is current, unknown, or the check is off.
 func Available(ctx context.Context, current string) string {
-	if _, ok := parse(current); !ok || os.Getenv("LOPY_NO_UPDATE_CHECK") != "" {
+	if _, ok := parse(current); !ok || os.Getenv("RECUR_NO_UPDATE_CHECK") != "" {
 		return ""
 	}
 	path := cacheFile()
@@ -170,7 +170,7 @@ func assetName() (string, error) {
 	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" || runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
 		return "", fmt.Errorf("no prebuilt binary for %s/%s; build from source", runtime.GOOS, runtime.GOARCH)
 	}
-	return fmt.Sprintf("lopy_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH), nil
+	return fmt.Sprintf("recur_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH), nil
 }
 
 func checksum(listing []byte, asset string) string {
@@ -183,7 +183,7 @@ func checksum(listing []byte, asset string) string {
 	return ""
 }
 
-// binaryFromArchive returns the lopy executable stored in a release tarball.
+// binaryFromArchive returns the recur executable stored in a release tarball.
 func binaryFromArchive(archive []byte) ([]byte, error) {
 	reader, err := gzip.NewReader(strings.NewReader(string(archive)))
 	if err != nil {
@@ -194,12 +194,12 @@ func binaryFromArchive(archive []byte) ([]byte, error) {
 	for {
 		header, err := entries.Next()
 		if errors.Is(err, io.EOF) {
-			return nil, errors.New("release archive has no lopy binary")
+			return nil, errors.New("release archive has no recur binary")
 		}
 		if err != nil {
 			return nil, err
 		}
-		if header.Typeflag != tar.TypeReg || filepath.Base(header.Name) != "lopy" {
+		if header.Typeflag != tar.TypeReg || filepath.Base(header.Name) != "recur" {
 			continue
 		}
 		return io.ReadAll(io.LimitReader(entries, maxAsset))
@@ -213,7 +213,7 @@ func Install(ctx context.Context, current string, out io.Writer) error {
 		return err
 	}
 	if _, known := parse(current); known && !Newer(current, latest) {
-		fmt.Fprintf(out, "lopy %s is the latest release.\n", current)
+		fmt.Fprintf(out, "recur %s is the latest release.\n", current)
 		return nil
 	}
 	asset, err := assetName()
@@ -251,13 +251,13 @@ func Install(ctx context.Context, current string, out io.Writer) error {
 	if err := replace(target, binary); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "Updated lopy %s -> %s at %s. Restart lopy to use it.\n", strings.TrimPrefix(current, "v"), latest, target)
+	fmt.Fprintf(out, "Updated recur %s -> %s at %s. Restart recur to use it.\n", strings.TrimPrefix(current, "v"), latest, target)
 	return nil
 }
 
 // replace writes data beside target and renames it into place, so a failed update keeps the old binary.
 func replace(target string, data []byte) error {
-	temp, err := os.CreateTemp(filepath.Dir(target), ".lopy-update-*")
+	temp, err := os.CreateTemp(filepath.Dir(target), ".recur-update-*")
 	if err != nil {
 		return fmt.Errorf("cannot write next to %s: %w", target, err)
 	}
@@ -279,7 +279,7 @@ func replace(target string, data []byte) error {
 	return nil
 }
 
-// Run implements the lopy update command. With check only, it reports without installing.
+// Run implements the recur update command. With check only, it reports without installing.
 func Run(ctx context.Context, current string, args []string, out io.Writer) error {
 	flags := flag.NewFlagSet("update", flag.ContinueOnError)
 	flags.SetOutput(out)
@@ -299,7 +299,7 @@ func Run(ctx context.Context, current string, args []string, out io.Writer) erro
 	}
 	fmt.Fprintf(out, "installed v%s, latest %s\n", strings.TrimPrefix(current, "v"), latest)
 	if Newer(current, latest) {
-		fmt.Fprintln(out, "run lopy update to install it")
+		fmt.Fprintln(out, "run recur update to install it")
 	}
 	return nil
 }

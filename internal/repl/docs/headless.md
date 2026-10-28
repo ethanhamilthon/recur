@@ -1,11 +1,11 @@
 # Headless transports and notifications
 
-lopy -prompt 'request' runs a single turn. Without --resume ID, headless mode
+recur -prompt 'request' runs a single turn. Without --resume ID, headless mode
 creates a new project session. --resume accepts a full existing session ID from
 this project; an unknown ID is an error, not a new session.
 
-lopy --mode stdio reads one text prompt per input line and prints answer text to
-stdout with diagnostics/tool output on stderr. lopy --mode jsonl reads one
+recur --mode stdio reads one text prompt per input line and prints answer text to
+stdout with diagnostics/tool output on stderr. recur --mode jsonl reads one
 {"prompt":"text"} object per line. JSON strings can contain escaped newlines.
 JSONL stdout contains session, display events, and done records. Events have
 type, text, id, meta, and provisional fields. done includes ok and session
@@ -14,7 +14,7 @@ ends the process; keep stdin open for an idle long-lived client. A failed turn,
 invalid input or cancellation ends processing with nonzero exit status and full
 diagnostics on stderr. Stdout has no terminal escape sequences added by the TUI.
 
-lopy notify -s ID 'message' sends to the active project session owner. Without
+recur notify -s ID 'message' sends to the active project session owner. Without
 message arguments it reads stdin. Use -- before message arguments starting with
 a dash. The text is XML-escaped and wrapped in a notify block, then queued for
 the next safe model request boundary. No extra user-authored message or tool

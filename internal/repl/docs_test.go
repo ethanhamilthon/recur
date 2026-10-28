@@ -14,7 +14,7 @@ func TestDocsThroughWorker(t *testing.T) {
 	if _, err := r.Ensure(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(r.PrefixOutput, "Lopy documentation") {
+	if !strings.Contains(r.PrefixOutput, "Recur documentation") {
 		t.Fatal(r.PrefixOutput)
 	}
 	for _, topic := range []string{"index", "runtime", "sessions", "steering", "interface", "files", "images", "models", "headless", "clipboard"} {

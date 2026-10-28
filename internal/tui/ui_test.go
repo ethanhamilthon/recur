@@ -12,8 +12,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
-	"lopy/internal/agent"
-	"lopy/internal/repl"
+	"recur/internal/agent"
+	"recur/internal/repl"
 )
 
 func TestInputBorderGrows(t *testing.T) {
@@ -219,7 +219,7 @@ func TestInputHeightMatchesWrappedRows(t *testing.T) {
 func TestCommandsWaitForTurnCompletion(t *testing.T) {
 	for _, name := range []string{"/new", "/quit"} {
 		t.Run(name, func(t *testing.T) {
-			t.Setenv("LOPY_HOME", t.TempDir())
+			t.Setenv("RECUR_HOME", t.TempDir())
 			a, err := agent.New(t.TempDir())
 			if err != nil {
 				t.Fatal(err)

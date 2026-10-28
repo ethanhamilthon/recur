@@ -32,9 +32,9 @@ jobs:
           for target in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64; do
             os=${target%/*}
             arch=${target#*/}
-            out="dist/lopy_${os}_${arch}"
+            out="dist/recur_${os}_${arch}"
             GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$out" .
-            (cd dist && tar czf "lopy_${os}_${arch}.tar.gz" "lopy_${os}_${arch}" && rm "lopy_${os}_${arch}")
+            (cd dist && tar czf "recur_${os}_${arch}.tar.gz" "recur_${os}_${arch}" && rm "recur_${os}_${arch}")
           done
           (cd dist && shasum -a 256 *.tar.gz > checksums.txt)
 

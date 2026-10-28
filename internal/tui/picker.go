@@ -8,7 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"lopy/internal/agent"
+	"recur/internal/agent"
 )
 
 type modelChoices struct {

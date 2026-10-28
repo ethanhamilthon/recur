@@ -1,4 +1,4 @@
-module lopy
+module recur
 
 go 1.26.0
 

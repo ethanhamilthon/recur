@@ -1,12 +1,12 @@
 # Sessions and configuration
 
-LOPY_HOME defaults to ~/.lopy; an explicit relative override is resolved against
+RECUR_HOME defaults to ~/.recur; an explicit relative override is resolved against
 the project directory. This does not change the working directory of shell
 commands. settings.toml, system.md, and prefix.py are created only when missing;
 existing editable configuration is never overwritten automatically.
 
 Each project has independent JSONL session files below
-$LOPY_HOME/sessions/<project-key>/. The key combines a sanitized basename and
+$RECUR_HOME/sessions/<project-key>/. The key combines a sanitized basename and
 path hash. Files are atomic, count-checked snapshots, not an append-only event
 stream. They preserve API history, display records, metadata, and notifications.
 Saving happens at turn completion. Startup opens a new session and creates its

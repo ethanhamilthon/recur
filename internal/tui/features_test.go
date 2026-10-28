@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
-	"lopy/internal/agent"
+	"recur/internal/agent"
 )
 
 func TestErrorNoticeStyleAndVisibility(t *testing.T) {
@@ -69,7 +69,7 @@ func TestUpRecallsOnlyPendingSteeringOnEmptyInput(t *testing.T) {
 }
 
 func TestResumeAutocompleteIsScopedAndExecutesSelectedSession(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	cwd := t.TempDir()
 	a, err := agent.New(cwd)
 	if err != nil {
@@ -124,7 +124,7 @@ func TestResumeAutocompleteIsScopedAndExecutesSelectedSession(t *testing.T) {
 }
 
 func TestResumeWaitsAndUIErrorsStayOutOfAPIHistory(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	a, err := agent.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -162,7 +162,7 @@ func TestResumeWaitsAndUIErrorsStayOutOfAPIHistory(t *testing.T) {
 }
 
 func TestResumeCompletionWindowKeepsSelectionVisible(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	a, err := agent.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -200,7 +200,7 @@ func TestResumeCompletionWindowKeepsSelectionVisible(t *testing.T) {
 }
 
 func TestPrefixFailureRecoversOriginalThenSteeringAndDraft(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	a, err := agent.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

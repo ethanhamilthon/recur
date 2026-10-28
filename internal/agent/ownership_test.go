@@ -12,11 +12,11 @@ import (
 )
 
 func TestOwnershipChild(t *testing.T) {
-	mode := os.Getenv("LOPY_OWNERSHIP_CHILD")
+	mode := os.Getenv("RECUR_OWNERSHIP_CHILD")
 	if mode == "" {
 		return
 	}
-	a, err := New(os.Getenv("LOPY_TEST_CWD"), os.Getenv("LOPY_TEST_SESSION"))
+	a, err := New(os.Getenv("RECUR_TEST_CWD"), os.Getenv("RECUR_TEST_SESSION"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestOwnershipChild(t *testing.T) {
 }
 func TestOwnershipAcrossProcessesAndCrashRelease(t *testing.T) {
 	home, cwd := t.TempDir(), t.TempDir()
-	t.Setenv("LOPY_HOME", home)
+	t.Setenv("RECUR_HOME", home)
 	a, err := New(cwd)
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +55,7 @@ func TestOwnershipAcrossProcessesAndCrashRelease(t *testing.T) {
 	}
 	child := func(mode string) *exec.Cmd {
 		cmd := exec.Command(executable, "-test.run=^TestOwnershipChild$")
-		cmd.Env = append(os.Environ(), "LOPY_OWNERSHIP_CHILD="+mode, "LOPY_TEST_CWD="+cwd, "LOPY_TEST_SESSION="+id)
+		cmd.Env = append(os.Environ(), "RECUR_OWNERSHIP_CHILD="+mode, "RECUR_TEST_CWD="+cwd, "RECUR_TEST_SESSION="+id)
 		return cmd
 	}
 	output, err := child("reader").CombinedOutput()
@@ -108,7 +108,7 @@ func TestOwnershipAcrossProcessesAndCrashRelease(t *testing.T) {
 	}
 }
 func TestReadOnlyRefreshAndSessionSwitch(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	cwd := t.TempDir()
 	writer, err := New(cwd)
 	if err != nil {

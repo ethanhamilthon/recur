@@ -30,7 +30,7 @@ func configureTestAgent(t *testing.T, a *Agent, s Settings) {
 }
 
 func TestSessionSelectionDefaultsAndRestoration(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	a, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func TestSessionSelectionDefaultsAndRestoration(t *testing.T) {
 }
 
 func TestSessionGlobalAndContextMatchesRecords(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	a, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +130,7 @@ func TestModelListUsesSelectedProvider(t *testing.T) {
 }
 
 func TestLegacyHeaderPinsCurrentDefaultsAndCorruptSelectionPreservesState(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	a, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

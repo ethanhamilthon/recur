@@ -18,7 +18,7 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
 
-	"lopy/internal/repl"
+	"recur/internal/repl"
 )
 
 var codeField = regexp.MustCompile(`"code"\s*:\s*"`)

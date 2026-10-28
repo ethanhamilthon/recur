@@ -43,7 +43,7 @@ File helpers operate relative to the project cwd; read/write/patch accept files 
   Up to four images per execution, 2 MiB and 20 megapixels each; unavailable in prefix code.
 - session: immutable metadata snapshot with id, model, provider, effort, cwd, ctx_size.
   ctx_size is the status bar context estimate (latest request input tokens), or None if unknown.
-- docs(topic): return built-in Lopy documentation. docs("index") lists available topics.
+- docs(topic): return built-in Recur documentation. docs("index") lists available topics.
 The interpreter is not an OS security sandbox; do not perform destructive actions unless requested.
 Prefix source stays in system instructions and executes once per new interpreter before the API request.
 Captured prefix output arrives separately in a service-generated user <notify>, never as system

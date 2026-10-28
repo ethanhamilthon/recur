@@ -15,5 +15,5 @@ preserved for recovery after cancellation or a late continuation.
 Cancellation stops the active turn and can destroy interpreter state. A later
 request initializes a new interpreter and reports the restart explicitly.
 view(path) queues captured images at the same safe request boundary;
-docs("images") describes limits and persistence. External lopy notify delivery is available; docs("headless") describes
+docs("images") describes limits and persistence. External recur notify delivery is available; docs("headless") describes
 acknowledgements, limits, and delivery semantics.

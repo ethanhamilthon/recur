@@ -3,7 +3,7 @@ package tui
 import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
-	"lopy/internal/agent"
+	"recur/internal/agent"
 	"strings"
 	"testing"
 )

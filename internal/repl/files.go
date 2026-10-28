@@ -115,7 +115,7 @@ func atomicText(path, content string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".lopy-edit-*")
+	f, err := os.CreateTemp(filepath.Dir(path), ".recur-edit-*")
 	if err != nil {
 		return err
 	}

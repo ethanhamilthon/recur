@@ -1,13 +1,12 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"lopy/internal/agent"
+	"recur/internal/agent"
 )
 
 type command struct{ name, icon, description, label string }
@@ -170,20 +169,13 @@ func (m model) runCommand(name string) (tea.Model, tea.Cmd) {
 		if m.busy || m.a.ReadOnly {
 			return m.stop("notice", "Wait for the active turn before compacting.")
 		}
-		result, err := m.a.Compact(context.Background(), strings.TrimSpace(strings.TrimPrefix(name, "/compact")))
-		if err != nil {
-			return m.stop("error", err.Error())
-		}
-		m.entries = nil
-		m.contextInput = nil
-		m.restoreHistory()
-		m.add("info", result)
+		return m.startCompact(strings.TrimSpace(strings.TrimPrefix(name, "/compact")))
 	case "/help":
 		var help strings.Builder
 		for _, cmd := range commands {
 			fmt.Fprintf(&help, "%-9s %s\n", cmd.name, cmd.description)
 		}
-		help.WriteString("\nEnter: execute selected completion or send / steer while working · Shift+Enter / Alt+Enter / Ctrl+J: newline\nClipboard: Ctrl+V (Cmd+V when forwarded) · Ctrl+X: remove last image\nTab: complete · Up/Down: select completion · unmatched slash text: send normally · Up on empty input: recall queued steering\nPgUp/PgDn or mouse wheel: scroll timeline\nEsc / Ctrl+C: cancel current turn\n\nConfig files: $LOPY_HOME (default: ~/.lopy): settings.toml, prefix.py, system.md\nEdit them, then /reload to apply them to this chat.\nHost access: sh(command) in python_repl; not an OS security sandbox.")
+		help.WriteString("\nEnter: execute selected completion or send / steer while working · Shift+Enter / Alt+Enter / Ctrl+J: newline\nClipboard: Ctrl+V (Cmd+V when forwarded) · Ctrl+X: remove last image\nTab: complete · Up/Down: select completion · unmatched slash text: send normally · Up on empty input: recall queued steering\nPgUp/PgDn or mouse wheel: scroll timeline\nEsc / Ctrl+C: cancel current turn\n\nConfig files: $RECUR_HOME (default: ~/.recur): settings.toml, prefix.py, system.md\nEdit them, then /reload to apply them to this chat.\nHost access: sh(command) in python_repl; not an OS security sandbox.")
 		m.add("info", help.String())
 	case "/new", "/resume":
 		if m.busy {

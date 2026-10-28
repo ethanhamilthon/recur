@@ -15,7 +15,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
-	"lopy/internal/agent"
+	"recur/internal/agent"
 )
 
 func TestTimelineCacheAndResize(t *testing.T) {
@@ -240,7 +240,7 @@ func TestBlockLineLimits(t *testing.T) {
 }
 
 func TestTimelineLimitsReloadAndHiddenSpacing(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	a, err := agent.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -258,7 +258,7 @@ func TestTimelineLimitsReloadAndHiddenSpacing(t *testing.T) {
 	if !strings.Contains(ansi.Strip(m.cache[0].Text), "fifth") {
 		t.Fatal("default code limit too short")
 	}
-	path := filepath.Join(os.Getenv("LOPY_HOME"), "settings.toml")
+	path := filepath.Join(os.Getenv("RECUR_HOME"), "settings.toml")
 	text, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

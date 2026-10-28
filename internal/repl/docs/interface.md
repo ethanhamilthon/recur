@@ -21,7 +21,7 @@ remains in history. Code argument streaming previews code generation, not tool
 stdout while it runs. The status bar context estimate is the latest request's
 input-token count, including cached input, not accumulated usage or capacity.
 
-lopy -prompt 'your request' runs one turn without the TUI. Diagnostics go to
+recur -prompt 'your request' runs one turn without the TUI. Diagnostics go to
 stderr; answer text goes to stdout. /model selects a model and effort; /login selects or creates providers.
 docs("models") explains both. docs("headless") covers stdio/JSONL, resume,
 external notifications and read-only followers. docs("clipboard") describes image attachments and terminal shortcut limitations;

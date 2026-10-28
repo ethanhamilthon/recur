@@ -5,7 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"lopy/internal/agent"
+	"recur/internal/agent"
 )
 
 // defaultColors is the built-in palette; settings may override any entry by name.

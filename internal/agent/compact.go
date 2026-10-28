@@ -10,7 +10,7 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
 
-	"lopy/prompts"
+	"recur/prompts"
 )
 
 const (
@@ -147,7 +147,7 @@ func (a *Agent) Compact(ctx context.Context, prompt string) (string, error) {
 	old := append([]json.RawMessage(nil), a.History[:cut]...)
 	summary, err := a.summarize(ctx, old, prompt)
 	if err != nil {
-		if strings.TrimSpace(prompt) != "" {
+		if ctx.Err() != nil || strings.TrimSpace(prompt) != "" {
 			return "", err
 		}
 		summary = "Earlier conversation was removed to fit the context limit."

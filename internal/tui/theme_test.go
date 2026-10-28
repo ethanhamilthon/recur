@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
-	"lopy/internal/agent"
+	"recur/internal/agent"
 )
 
 func TestDefaultPaletteMatchesBuiltInColors(t *testing.T) {
@@ -21,7 +21,7 @@ func TestDefaultPaletteMatchesBuiltInColors(t *testing.T) {
 	if got := string(foreground); got != "#d5ddeb" {
 		t.Fatalf("foreground = %s", got)
 	}
-	header := lipgloss.NewStyle().Foreground(cyan).Render("lopy")
+	header := lipgloss.NewStyle().Foreground(cyan).Render("recur")
 	if !strings.Contains(header, "38;2;121;217;255") {
 		t.Fatalf("accent not applied: %q", header)
 	}

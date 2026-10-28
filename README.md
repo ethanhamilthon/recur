@@ -1,8 +1,8 @@
-# lopy
+# recur
 
 A terminal coding agent built in Go, with a persistent **Monty** Python REPL. No CPython installation or `python3` executable is required. The official OpenAI Go SDK handles Responses and Chat Completions requests and streaming.
 
-Providers use the Responses protocol and are configured in `~/.lopy/settings.toml`:
+Providers use the Responses protocol and are configured in `~/.recur/settings.toml`:
 
 ```toml
 provider = "clipd"
@@ -20,37 +20,37 @@ api_key = "another-key"
 
 `provider` selects one of the configured providers. `effort` accepts `none`, `minimal`, `low`, `medium`, `high`, or `xhigh` (support depends on the provider/model); an empty string omits the effort field (reasoning summaries are configured separately). Missing settings are created with defaults; existing files are never overwritten. There is no default provider or model: on first start `provider` and `model` are empty, the start screen tells you to run `/login` to add a provider and then `/model` to choose a model, and messages are not sent until both are set. The current version is in the `VERSION` file and is shown on the start screen. Settings no longer come from `~/.meno/provider.json`.
 
-Set `LOPY_HOME=/path/to/.lopy` to use that directory **directly** for settings, prompts, and history. The default is `~/.lopy`; relative paths are resolved from the working directory. This does not change the project working directory. `/new` reloads settings and prompts. Configuration may contain API keys; keep it private.
+Set `RECUR_HOME=/path/to/.recur` to use that directory **directly** for settings, prompts, and history. The default is `~/.recur`; relative paths are resolved from the working directory. This does not change the project working directory. `/new` reloads settings and prompts. Configuration may contain API keys; keep it private.
 
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ethanhamilthon/lopy/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/ethanhamilthon/recur/main/scripts/install.sh | sh
 ```
 
-The script downloads the latest GitHub release for the current OS and architecture, verifies it against `checksums.txt`, and installs `lopy` into `$LOPY_BINDIR` (default: `~/.local/bin`). Set `LOPY_VERSION=v0.2.2` to pin a release.
+The script downloads the latest GitHub release for the current OS and architecture, verifies it against `checksums.txt`, and installs `recur` into `$RECUR_BINDIR` (default: `~/.local/bin`). Set `RECUR_VERSION=v0.3.0` to pin a release.
 
 ## Update
 
 ```sh
-lopy update          # download and replace the running binary
-lopy update -check   # only report the latest release
-lopy version
+recur update          # download and replace the running binary
+recur update -check   # only report the latest release
+recur version
 ```
 
-The start screen checks GitHub once every six hours in the background and shows `vX.Y.Z available — run lopy update` when a newer release exists. Set `LOPY_NO_UPDATE_CHECK=1` to disable that check; the cache lives in `$LOPY_HOME/update.json`.
+The start screen checks GitHub once every six hours in the background and shows `vX.Y.Z available — run recur update` when a newer release exists. Set `RECUR_NO_UPDATE_CHECK=1` to disable that check; the cache lives in `$RECUR_HOME/update.json`.
 
 ## Run
 
 ```sh
-CGO_ENABLED=0 go build -o lopy .
-./lopy
+CGO_ENABLED=0 go build -o recur .
+./recur
 ```
 
 Build requires Go 1.26+ (the release workflow uses the `go` directive in `go.mod`). Monty is pinned through `github.com/ewhauser/gomonty v0.0.14` (upstream Monty commit `c9802b5f30d11fecf9f153feb1dfdab3abda070e`). Normal builds use bundled native libraries through purego, without Rust, CPython or cgo. Run from the project directory the agent should work in. A single non-interactive turn is also supported:
 
 ```sh
-./lopy -prompt 'Inspect this project'
+./recur -prompt 'Inspect this project'
 ```
 
 ## Commands
@@ -80,9 +80,9 @@ Defaults are separate source files, embedded into the binary:
 - `prompts/system.md` — agent instructions
 - `prompts/prefix.py` — interpreter initialization code
 
-On first run, editable copies are created in `~/.lopy/system.md` and `~/.lopy/prefix.py` (or the explicit `LOPY_HOME`). Existing copies are never overwritten. Edit those copies and use `/new` (or restart) to reload them.
+On first run, editable copies are created in `~/.recur/system.md` and `~/.recur/prefix.py` (or the explicit `RECUR_HOME`). Existing copies are never overwritten. Edit those copies and use `/new` (or restart) to reload them.
 
-The default system prompt is exactly `You are Lopy, a coding agent`. Final system instructions contain **system prompt + prefix source**, never the executed prefix output. The Python environment contract, host functions, usage and limits are supplied in the `python_repl` tool description, not an additional system runtime block. Before the first request, a separate service-generated user notification contains the captured output, followed by the actual user message as a separate item. Empty output is marked explicitly. After REPL state loss, the prefix executes again and a new notification supplies its output before work continues. Ordinary turns do not rerun it. A failed/cancelled initialization does not send the user's request; the TUI returns it to the composer for retry.
+The default system prompt is exactly `You are Recur, a coding agent`. Final system instructions contain **system prompt + prefix source**, never the executed prefix output. The Python environment contract, host functions, usage and limits are supplied in the `python_repl` tool description, not an additional system runtime block. Before the first request, a separate service-generated user notification contains the captured output, followed by the actual user message as a separate item. Empty output is marked explicitly. After REPL state loss, the prefix executes again and a new notification supplies its output before work continues. Ordinary turns do not rerun it. A failed/cancelled initialization does not send the user's request; the TUI returns it to the composer for retry.
 
 ## Timeline, usage and context
 
@@ -107,7 +107,7 @@ Completed entries are cached; streaming updates only reformat the changing entry
 
 Variables and functions persist across tool calls **and user turns**. Restarting the app, `/new`, `/resume`, a worker crash, or cancelling active Python execution loses interpreter state. A separate user message in `<notify>` tells the model when previous variables are unavailable.
 
-Monty supports a restricted Python subset, not all of CPython. Functions, lists, dicts, sets, tuples, ordinary builtins, `print()` and f-strings are supported. The only importable modules are `json`, `math`, `re`, `os`, `sys`, `pathlib`, `datetime`, `typing` and `asyncio`; everything else (for example `collections`, `dataclasses`, `enum`, `itertools`, `random`, `time`, `io`) raises `ModuleNotFoundError`, and there are no third-party packages. Those modules are partial: OS-backed calls such as `Path.exists()`, `os.environ` and `datetime.now()` raise `NotImplementedError` because Lopy provides no OS handler, so use `sh`, `read` and `write` instead. `class` definitions, `del`, `@`, `input()`, `open()` and `print(..., file=)` are unsupported; importing a module never grants host access. Unsupported syntax and operations return errors. Monty's `repr` is not always CPython-identical (a one-element tuple can display as `(1)` instead of `(1,)`).
+Monty supports a restricted Python subset, not all of CPython. Functions, lists, dicts, sets, tuples, ordinary builtins, `print()` and f-strings are supported. The only importable modules are `json`, `math`, `re`, `os`, `sys`, `pathlib`, `datetime`, `typing` and `asyncio`; everything else (for example `collections`, `dataclasses`, `enum`, `itertools`, `random`, `time`, `io`) raises `ModuleNotFoundError`, and there are no third-party packages. Those modules are partial: OS-backed calls such as `Path.exists()`, `os.environ` and `datetime.now()` raise `NotImplementedError` because Recur provides no OS handler, so use `sh`, `read` and `write` instead. `class` definitions, `del`, `@`, `input()`, `open()` and `print(..., file=)` are unsupported; importing a module never grants host access. Unsupported syntax and operations return errors. Monty's `repr` is not always CPython-identical (a one-element tuple can display as `(1)` instead of `(1,)`).
 
 Tool results include captured print output and Monty's `repr` of the final top-level expression unless it is `None`; `_` retains the last non-None value. Ordinary runtime exceptions preserve state, including earlier assignments. Syntax errors execute nothing. The prefix executes once per new interpreter, with print output but without implicit expression display.
 
@@ -138,7 +138,7 @@ and locations; each old string must match exactly once (mismatch errors report
 the match count). It validates all edits first and rolls back earlier
 replacements on a write failure. Individual file writes are atomic; a multi-file
 patch is not crash-atomic. Searching is done through `sh` with the system `grep`
-or `rg`, narrowed by `-n`, a path and a match limit; lopy does not provide its
+or `rg`, narrowed by `-n`, a path and a match limit; recur does not provide its
 own search helper. File helpers support UTF-8 files up to 4 MiB; paths resolve
 relative to the project directory.
 
@@ -154,17 +154,17 @@ an error. These documents describe implemented behavior, not planned features.
 
 ### Native runtime platforms
 
-The pinned Go binding bundles native libraries for macOS arm64, Linux amd64/arm64 (glibc), Windows amd64, and Linux musl variants. However, **lopy itself currently targets macOS/Linux** because process-group cancellation uses Unix syscalls. macOS amd64 is not bundled by this binding. Alpine/musl builds require `-tags musl`. On first use the binding extracts its embedded library into the user cache (temporary-directory fallback); this location must allow native library loading. Changing runtime or platform may require revisiting the binding. Only macOS arm64 was exercised for this change.
+The pinned Go binding bundles native libraries for macOS arm64, Linux amd64/arm64 (glibc), Windows amd64, and Linux musl variants. However, **recur itself currently targets macOS/Linux** because process-group cancellation uses Unix syscalls. macOS amd64 is not bundled by this binding. Alpine/musl builds require `-tags musl`. On first use the binding extracts its embedded library into the user cache (temporary-directory fallback); this location must allow native library loading. Changing runtime or platform may require revisiting the binding. Only macOS arm64 was exercised for this change.
 
 ### Saved history and upgrading
 
-Session files live at `$LOPY_HOME/sessions/<cwd>/<date>-<id>.jsonl` (default: `~/.lopy/sessions/...`). `<cwd>` is a sanitized directory basename plus a SHA-256 path hash, derived from the cleaned absolute working directory; same-named projects stay separate. IDs use a UTC timestamp and random suffix. Settings/prompts are shared in the home; session histories remain project-scoped.
+Session files live at `$RECUR_HOME/sessions/<cwd>/<date>-<id>.jsonl` (default: `~/.recur/sessions/...`). `<cwd>` is a sanitized directory basename plus a SHA-256 path hash, derived from the cleaned absolute working directory; same-named projects stay separate. IDs use a UTC timestamp and random suffix. Settings/prompts are shared in the home; session histories remain project-scoped.
 
 `/new` retains previous sessions and starts a fresh interpreter. Type `/resume` or `/resume ` to see this project's session completions; Up/Down selects, Tab completes, and Enter executes a completed selection. Prefixes filter full session IDs. The visible completion window is bounded and follows the selected row. There is no separate session-list command. Startup opens a fresh session and only creates its `.jsonl` file on disk after the first message (use `--resume ID` or `/resume` to open an existing session). Switching sessions saves a non-empty chat first and reloads settings/prompts; a failed save/load leaves the active chat and interpreter intact. Read-only TUI followers can still use `/new`, `/resume`, `/help`, and `/quit`.
 
 JSONL version 2 stores a project/version header, one API item per line, one display record per line, and a final count-checked completion checkpoint. Metadata and provisional display records are never sent as API input. Each save writes a complete snapshot through a private temporary file, file sync, and atomic rename, rather than appending partial records to the active file. Interrupted temporary writes leave the last committed session intact. Malformed, wrong-project, missing-checkpoint, and unterminated session files are rejected without truncating or silently repairing them; preserve a copy and restore a known-good backup. Session data is saved at turn completion, not durably on every streamed delta. Only one writer can own a session; other clients are read-only followers. Cross-process history merging is not performed.
 
-**Upgrading from project-local configuration:** existing project `.lopy` files are not moved or overwritten. Copy any desired provider settings and custom prompts to `~/.lopy` yourself, or explicitly set `LOPY_HOME` to the existing config directory. Missing files are created with defaults; existing files remain unchanged.
+**Upgrading from project-local configuration:** existing project `.recur` files are not moved or overwritten. Copy any desired provider settings and custom prompts to `~/.recur` yourself, or explicitly set `RECUR_HOME` to the existing config directory. Missing files are created with defaults; existing files remain unchanged.
 
 Existing editable prompts are **never overwritten**. Update obsolete instructions from `prompts/system.md` if needed. The Python tool description independently identifies the actual Monty tool contract and separate prefix-output notifications. Older binaries cannot load the new JSONL sessions; keep old history files/backups if downgrading.
 
@@ -186,7 +186,7 @@ go vet ./...
 
 ### Timeline visibility settings
 
-Set these top-level values in `~/.lopy/settings.toml` (or `$LOPY_HOME/settings.toml`):
+Set these top-level values in `~/.recur/settings.toml` (or `$RECUR_HOME/settings.toml`):
 
 ```toml
 max_code_lines = 999
@@ -219,7 +219,7 @@ max_agent_steps = 0           # model/tool round trips per turn; 0 means no limi
 The estimate charges 4 bytes per token and 1,200 tokens per image; inline base64 image
 payloads are excluded from the byte count so one screenshot cannot trigger compaction on
 its own. The status bar keeps showing the provider's real input-token count. If the kept
-turns alone exceed the budget, lopy reports it instead of compacting again on every
+turns alone exceed the budget, recur reports it instead of compacting again on every
 request, and an existing `<compact_summary>` is never summarized a second time. Before a request that would exceed the
 budget, everything older than the last `compact_keep_turns` turns is summarized into one
 `<compact_summary>` item, using the same system prompt and prefix as normal turns. Cuts
@@ -249,7 +249,7 @@ info = "#d7c38b"
 
 Values must be `#rrggbb`; unknown names are rejected with the allowed list. Delete an entry
 to fall back to its default. Markdown headings, the header, notices and the status bar all
-follow this table. `/reload` applies a changed palette without restarting lopy.
+follow this table. `/reload` applies a changed palette without restarting recur.
 
 ### Markdown, working status and steering
 
@@ -328,11 +328,11 @@ when unknown. It is not model context capacity.
 ## Headless transports
 
 ```sh
-lopy --prompt 'Inspect this project'                # new session, single turn
-lopy --prompt 'Continue' --resume FULL_SESSION_ID   # explicit continuation
-printf 'First request\nSecond request\n' | lopy --mode stdio
-printf '{"prompt":"Inspect this project"}\n' | lopy --mode jsonl
-lopy --mode jsonl --resume FULL_SESSION_ID
+recur --prompt 'Inspect this project'                # new session, single turn
+recur --prompt 'Continue' --resume FULL_SESSION_ID   # explicit continuation
+printf 'First request\nSecond request\n' | recur --mode stdio
+printf '{"prompt":"Inspect this project"}\n' | recur --mode jsonl
+recur --mode jsonl --resume FULL_SESSION_ID
 ```
 
 Stdio accepts one prompt per line. JSONL accepts one `{"prompt":"..."}` object
@@ -347,8 +347,8 @@ resume, headless runs create new sessions, not continuations of the last one.
 ### External notifications
 
 ```sh
-lopy notify -s FULL_SESSION_ID 'Please also check the tests'
-printf 'A message from another process' | lopy notify -s FULL_SESSION_ID
+recur notify -s FULL_SESSION_ID 'Please also check the tests'
+printf 'A message from another process' | recur notify -s FULL_SESSION_ID
 ```
 
 Notifications are project-scoped, XML-escaped and wrapped in `<notify>` before
@@ -396,7 +396,7 @@ megapixels after conversion. At most eight clipboard images may be pending acros
 the current turn, composer and queued instructions.
 
 ```toml
-# Empty (default): platform temporary directory/lopy-images.
+# Empty (default): platform temporary directory/recur-images.
 # Relative paths resolve against the project directory.
 attachment_dir = ""
 ```
@@ -414,7 +414,7 @@ manual cleanup. Removing a draft attachment deletes that captured file; rejected
 and stale captures are also cleaned up. Unsubmitted drafts are not durable across
 application exit. Both retained files and saved image history can be sensitive.
 
-**Terminal limitations:** many terminals intercept Cmd+V before Lopy can see it.
+**Terminal limitations:** many terminals intercept Cmd+V before Recur can see it.
 Use Ctrl+V or map Cmd+V to send Ctrl+V (`0x16`) in that terminal. English V and
 Russian М/м are recognized when the terminal reports modified/alternate-layout
 keys through Kitty/CSI-u; plain Russian letters remain ordinary input. A legacy

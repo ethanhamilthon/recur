@@ -15,7 +15,7 @@ import (
 )
 
 func TestViewDeliveredAfterAllToolOutputsAndPersists(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	dir := t.TempDir()
 	path := filepath.Join(dir, "image.png")
 	f, err := os.Create(path)

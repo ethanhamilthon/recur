@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"lopy/internal/agent"
+	"recur/internal/agent"
 )
 
 var (
@@ -164,10 +164,10 @@ func (m model) setupHint() string {
 
 func (m *model) timeline() string {
 	var out strings.Builder
-	out.WriteString(lipgloss.NewStyle().Foreground(cyan).Bold(true).Render("lopy. minimal coding agent."))
+	out.WriteString(lipgloss.NewStyle().Foreground(cyan).Bold(true).Render("recur. minimal coding agent."))
 	out.WriteString(lipgloss.NewStyle().Foreground(muted).Render(" v" + strings.TrimPrefix(Version, "v")))
 	if m.latest != "" {
-		out.WriteString(lipgloss.NewStyle().Foreground(warnColor).Render(" · v" + strings.TrimPrefix(m.latest, "v") + " available — run lopy update"))
+		out.WriteString(lipgloss.NewStyle().Foreground(warnColor).Render(" · v" + strings.TrimPrefix(m.latest, "v") + " available — run recur update"))
 	}
 	out.WriteString("\n" + lipgloss.NewStyle().Foreground(muted).Render("Enter to send · Shift+Enter for newline · / for commands") + "\n")
 	if s := m.a.Settings(); s.Provider == "" || s.Model == "" {

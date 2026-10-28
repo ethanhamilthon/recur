@@ -14,7 +14,7 @@ no download/install step. Missing helpers and clipboard failures produce a
 notice/error rather than clearing drafts. Ordinary terminal/bracketed text paste
 continues to work. Text pasted into provider-key entry stays masked.
 
-Cmd+V works when the terminal forwards it to Lopy. Many terminals consume it
+Cmd+V works when the terminal forwards it to Recur. Many terminals consume it
 before applications see a key; in that case use Ctrl+V, or map Cmd+V to send
 Ctrl+V (0x16). Supporting Cyrillic М/м on the physical V key requires a terminal
 that reports modifier/key codes, such as Kitty CSI-u. Both English and Russian
@@ -23,7 +23,7 @@ remains text, not a paste shortcut. Key release/repeat events do not duplicate
 attachments. A legacy terminal cannot communicate modifiers it does not send.
 
 attachment_dir in settings.toml selects the captured-image directory. Empty
-uses the platform temporary directory/lopy-images (often /var/folders/... on
+uses the platform temporary directory/recur-images (often /var/folders/... on
 macOS). Relative configured paths resolve against the project cwd. New
 directories use 0700 and files 0600. Images use the shared view validator: PNG or
 JPEG, at most 2 MiB and 20 megapixels after clipboard conversion. At most eight

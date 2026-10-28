@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"lopy/internal/agent"
-	"lopy/internal/selfupdate"
-	"lopy/internal/tui"
+	"recur/internal/agent"
+	"recur/internal/selfupdate"
+	"recur/internal/tui"
 )
 
 func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.Writer) error {
@@ -32,7 +32,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 			return nil
 		}
 	}
-	flags := flag.NewFlagSet("lopy", flag.ContinueOnError)
+	flags := flag.NewFlagSet("recur", flag.ContinueOnError)
 	flags.SetOutput(diagnostics)
 	prompt := flags.String("prompt", "", "run one turn without TUI")
 	mode := flags.String("mode", "", "headless transport: stdio or jsonl")

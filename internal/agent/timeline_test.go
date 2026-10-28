@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"lopy/internal/repl"
+	"recur/internal/repl"
 )
 
 func TestRecordsForLegacyItems(t *testing.T) {
@@ -36,7 +36,7 @@ func TestRecordsForLegacyItems(t *testing.T) {
 	}
 }
 func TestFullTurnLiveAndHistory(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	dir := t.TempDir()
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -134,7 +134,7 @@ func TestHistoryFallbackAndUnknownUsage(t *testing.T) {
 }
 
 func TestItemContentIsLiveAndSurvivesFailedStream(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"intermediate\"}]}}\n\n")
@@ -167,7 +167,7 @@ func TestItemContentIsLiveAndSurvivesFailedStream(t *testing.T) {
 }
 
 func TestUnavailableUsageStaysUnknown(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}\n\n")

@@ -173,7 +173,7 @@ func TestCompactDisabledByZeroThreshold(t *testing.T) {
 
 func summaryAgent(t *testing.T, summary http.HandlerFunc) (*Agent, func()) {
 	t.Helper()
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	server := httptest.NewServer(summary)
 	cwd := t.TempDir()
 	a, err := New(cwd)

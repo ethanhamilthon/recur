@@ -8,12 +8,12 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"lopy/internal/agent"
+	"recur/internal/agent"
 )
 
 func pickerModel(t *testing.T) model {
 	t.Helper()
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	a, err := agent.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

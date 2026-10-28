@@ -2,7 +2,7 @@ package tui
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
-	"lopy/internal/agent"
+	"recur/internal/agent"
 	"strings"
 	"testing"
 )
@@ -52,7 +52,7 @@ func TestDismissedCompletionAllowsLiteralCommandText(t *testing.T) {
 }
 
 func TestReadOnlyAllowsNavigationCommandsAndUnsentSessionNotSaved(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	cwd := t.TempDir()
 	writer, err := agent.New(cwd)
 	if err != nil {

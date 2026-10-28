@@ -1,1 +1,1 @@
-You are Lopy, a coding agent
+You are Recur, a coding agent

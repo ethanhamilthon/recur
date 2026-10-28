@@ -14,16 +14,16 @@ import (
 )
 
 func TestNotifyChild(t *testing.T) {
-	if os.Getenv("LOPY_NOTIFY_CHILD") == "" {
+	if os.Getenv("RECUR_NOTIFY_CHILD") == "" {
 		return
 	}
-	if err := Notify(os.Getenv("LOPY_TEST_CWD"), os.Getenv("LOPY_TEST_SESSION"), "from child </notify>"); err != nil {
+	if err := Notify(os.Getenv("RECUR_TEST_CWD"), os.Getenv("RECUR_TEST_SESSION"), "from child </notify>"); err != nil {
 		t.Fatal(err)
 	}
 	fmt.Println("QUEUED")
 }
 func TestNotifyCrossProcessQueueEscapingAndInactive(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	cwd := t.TempDir()
 	a, err := New(cwd)
 	if err != nil {
@@ -36,7 +36,7 @@ func TestNotifyCrossProcessQueueEscapingAndInactive(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(executable, "-test.run=^TestNotifyChild$")
-	cmd.Env = append(os.Environ(), "LOPY_NOTIFY_CHILD=1", "LOPY_TEST_CWD="+cwd, "LOPY_TEST_SESSION="+id)
+	cmd.Env = append(os.Environ(), "RECUR_NOTIFY_CHILD=1", "RECUR_TEST_CWD="+cwd, "RECUR_TEST_SESSION="+id)
 	output, err := cmd.CombinedOutput()
 	if err != nil || !strings.Contains(string(output), "QUEUED") {
 		t.Fatalf("notify subprocess: %s %v", output, err)
@@ -72,7 +72,7 @@ func TestNotifyCrossProcessQueueEscapingAndInactive(t *testing.T) {
 }
 
 func TestNotifyAcceptedAfterToolOutput(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	cwd := t.TempDir()
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

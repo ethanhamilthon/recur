@@ -17,8 +17,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"lopy/internal/agent"
-	"lopy/internal/repl"
+	"recur/internal/agent"
+	"recur/internal/repl"
 )
 
 func pngBytes(t *testing.T) []byte {

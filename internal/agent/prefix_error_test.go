@@ -11,11 +11,11 @@ import (
 	"strings"
 	"testing"
 
-	"lopy/internal/repl"
+	"recur/internal/repl"
 )
 
 func TestInitializationFailureRetryAndSaveErrors(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -61,7 +61,7 @@ func TestInitializationFailureRetryAndSaveErrors(t *testing.T) {
 }
 
 func TestCancelledInitializationDoesNotCommitRequest(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	a, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ func TestSaveFailurePropagatesAfterSuccessfulTurn(t *testing.T) {
 }
 
 func TestMidTurnAndRestoredPrefixNotifications(t *testing.T) {
-	t.Setenv("LOPY_HOME", t.TempDir())
+	t.Setenv("RECUR_HOME", t.TempDir())
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++

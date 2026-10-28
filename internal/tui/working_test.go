@@ -15,7 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
-	"lopy/internal/agent"
+	"recur/internal/agent"
 )
 
 func TestWorkingIndicatorLifecycleAndScrolling(t *testing.T) {
@@ -108,7 +108,7 @@ func TestLateSteeringContinuesWithoutLosingDraft(t *testing.T) {
 	}))
 	defer server.Close()
 	home := t.TempDir()
-	t.Setenv("LOPY_HOME", home)
+	t.Setenv("RECUR_HOME", home)
 	config := fmt.Sprintf("provider = 'p'\nmodel = 'm'\n[providers.p]\nbase_url = '%s'\n", server.URL)
 	if err := os.WriteFile(filepath.Join(home, "settings.toml"), []byte(config), 0600); err != nil {
 		t.Fatal(err)

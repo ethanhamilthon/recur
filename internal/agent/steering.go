@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"lopy/internal/repl"
+	"recur/internal/repl"
 )
 
 // Input keeps attachments with their instruction through acceptance and recall.

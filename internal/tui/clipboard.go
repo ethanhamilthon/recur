@@ -11,7 +11,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"lopy/internal/repl"
+	"recur/internal/repl"
 )
 
 type clipboardResult struct {
@@ -64,7 +64,7 @@ func readClipboard(ctx context.Context, directory string) (repl.Image, string, e
 }
 func readClipboardWith(ctx context.Context, directory, platform string, run clipboardRunner) (repl.Image, string, error) {
 	if directory == "" {
-		directory = filepath.Join(os.TempDir(), "lopy-images")
+		directory = filepath.Join(os.TempDir(), "recur-images")
 	}
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		return repl.Image{}, "", err

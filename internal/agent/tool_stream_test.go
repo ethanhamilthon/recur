@@ -25,7 +25,7 @@ func TestPartialCodeEscapes(t *testing.T) {
 func TestToolCallStreamingIsDisplayOnlyAndSequential(t *testing.T) {
 	for _, failed := range []bool{false, true} {
 		t.Run(fmt.Sprint(failed), func(t *testing.T) {
-			t.Setenv("LOPY_HOME", t.TempDir())
+			t.Setenv("RECUR_HOME", t.TempDir())
 			requests := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests++

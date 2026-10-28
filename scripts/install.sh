@@ -1,10 +1,10 @@
 #!/bin/sh
-# Install the latest lopy release.
-# Usage: curl -fsSL https://raw.githubusercontent.com/ethanhamilthon/lopy/main/scripts/install.sh | sh
+# Install the latest recur release.
+# Usage: curl -fsSL https://raw.githubusercontent.com/ethanhamilthon/recur/main/scripts/install.sh | sh
 set -eu
 
-repo="ethanhamilthon/lopy"
-bindir="${LOPY_BINDIR:-$HOME/.local/bin}"
+repo="ethanhamilthon/recur"
+bindir="${RECUR_BINDIR:-$HOME/.local/bin}"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
@@ -26,7 +26,7 @@ darwin | linux) ;;
 	;;
 esac
 
-version="${LOPY_VERSION:-}"
+version="${RECUR_VERSION:-}"
 if [ -z "$version" ]; then
 	version=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" |
 		sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
@@ -37,9 +37,9 @@ fi
 		exit 1
 	}
 
-asset="lopy_${os}_${arch}.tar.gz"
+asset="recur_${os}_${arch}.tar.gz"
 base="https://github.com/$repo/releases/download/$version"
-echo "downloading lopy $version ($os/$arch)"
+echo "downloading recur $version ($os/$arch)"
 curl -fsSL -o "$tmp/$asset" "$base/$asset"
 curl -fsSL -o "$tmp/checksums.txt" "$base/checksums.txt"
 
@@ -62,9 +62,9 @@ fi
 
 tar -xzf "$tmp/$asset" -C "$tmp"
 mkdir -p "$bindir"
-install -m 755 "$tmp/lopy_${os}_${arch}" "$bindir/lopy"
-echo "installed $bindir/lopy"
+install -m 755 "$tmp/recur_${os}_${arch}" "$bindir/recur"
+echo "installed $bindir/recur"
 case ":$PATH:" in
 *":$bindir:"*) ;;
-*) echo "add $bindir to PATH to run lopy" ;;
+*) echo "add $bindir to PATH to run recur" ;;
 esac

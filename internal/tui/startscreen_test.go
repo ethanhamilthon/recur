@@ -30,7 +30,7 @@ func TestStartScreenShowsUpdateHint(t *testing.T) {
 	Version = "0.2.2"
 	m.latest = "v0.2.3"
 	m.refresh(true)
-	if view := m.timeline(); !strings.Contains(view, "v0.2.3 available — run lopy update") {
+	if view := m.timeline(); !strings.Contains(view, "v0.2.3 available — run recur update") {
 		t.Fatalf("start screen missing update hint:\n%s", view)
 	}
 	next, _ := m.Update(updateCheckMsg{latest: "v0.2.3"})
