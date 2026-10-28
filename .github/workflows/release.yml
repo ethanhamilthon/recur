@@ -34,7 +34,8 @@ jobs:
             arch=${target#*/}
             out="dist/recur_${os}_${arch}"
             GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$out" .
-            (cd dist && tar czf "recur_${os}_${arch}.tar.gz" "recur_${os}_${arch}" && rm "recur_${os}_${arch}")
+            # The archive stores the binary as `recur` so `recur update` can find it.
+            (cd dist && mv "recur_${os}_${arch}" recur && tar czf "recur_${os}_${arch}.tar.gz" recur && rm recur)
           done
           (cd dist && shasum -a 256 *.tar.gz > checksums.txt)
 

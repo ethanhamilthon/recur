@@ -62,7 +62,7 @@ fi
 
 tar -xzf "$tmp/$asset" -C "$tmp"
 mkdir -p "$bindir"
-install -m 755 "$tmp/recur_${os}_${arch}" "$bindir/recur"
+install -m 755 "$tmp/recur" "$bindir/recur"
 echo "installed $bindir/recur"
 case ":$PATH:" in
 *":$bindir:"*) ;;
