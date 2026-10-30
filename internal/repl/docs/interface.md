@@ -2,7 +2,7 @@
 
 Commands: /new starts a new chat; /resume selects a project session; Esc or
 Ctrl+C cancels work; /quit saves/exits; /help shows commands and shortcuts; /compact
-[prompt] summarizes older turns; /reload re-reads settings and prompts and
+[prompt] summarizes older turns; /reload re-reads settings, prompts and hooks and
 restarts the shell without changing the session.
 Up/Down navigates completions, Tab completes, and Enter immediately executes
 the selected visible completion. Without a matching visible completion,

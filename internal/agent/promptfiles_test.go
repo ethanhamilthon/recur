@@ -27,7 +27,7 @@ func TestPromptFilesOverrideLocalAndSurviveReload(t *testing.T) {
 		t.Fatalf("local fallback: %q", a.System)
 	}
 	a.Close()
-	a, err = NewWith(cwd, PromptFiles{System: flagged})
+	a, err = NewWith(cwd, ConfigFiles{System: flagged})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestPromptFilesOverrideLocalAndSurviveReload(t *testing.T) {
 	if err = a.Reload(); err != nil || a.System != "flag" {
 		t.Fatalf("reload: %q %v", a.System, err)
 	}
-	if _, err = NewWith(cwd, PromptFiles{Prefix: "/nonexistent"}); err == nil {
+	if _, err = NewWith(cwd, ConfigFiles{Prefix: "/nonexistent"}); err == nil {
 		t.Fatal("missing --prefix file must fail")
 	}
 }

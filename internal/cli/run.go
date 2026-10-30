@@ -17,7 +17,7 @@ import (
 	"recur/internal/tui"
 )
 
-func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.Writer) error {
+func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.Writer) (err error) {
 	command := ""
 	if len(args) > 0 && (args[0] == "notify" || args[0] == "view") {
 		command, args = args[0], args[1:]
@@ -43,6 +43,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 	resume := flags.String("resume", "", "resume a project session ID")
 	system := flags.String("system", "", "system prompt file (overrides .recur/system.md)")
 	prefix := flags.String("prefix", "", "prefix script file (overrides .recur/prefix.sh)")
+	hooksFile := flags.String("hooks", "", "hooks file (overrides .recur/hooks.toml; headless runs use hooks only with this flag)")
 	if err := flags.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return nil
@@ -74,8 +75,8 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 		return agent.Notify(cwd, *sessionID, text)
 	}
 	headless := *mode != "" || *prompt != ""
-	files := agent.PromptFiles{System: *system, Prefix: *prefix}
-	for _, f := range []*string{&files.System, &files.Prefix} {
+	files := agent.ConfigFiles{System: *system, Prefix: *prefix, Hooks: *hooksFile, NoHooks: headless && *hooksFile == ""}
+	for _, f := range []*string{&files.System, &files.Prefix, &files.Hooks} {
 		if *f == "" {
 			continue
 		}
@@ -88,6 +89,15 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 		return err
 	}
 	defer a.Close()
+	a.SetMode(map[bool]string{false: "tui", true: "headless"}[headless])
+	a.Start(tui.Version)
+	defer func() {
+		code := 0
+		if err != nil {
+			code = 1
+		}
+		a.Finish(code)
+	}()
 	if !headless {
 		return tui.Run(a, cwd)
 	}
@@ -150,6 +160,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 		case <-ctx.Done():
 			return ctx.Err()
 		case message := <-a.Inbox():
+			a.Fire("notify_received", "RECUR_NOTIFY_FILE", message)
 			if err = run(message); err != nil {
 				return err
 			}

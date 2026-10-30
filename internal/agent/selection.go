@@ -55,6 +55,9 @@ func (a *Agent) Select(provider, model, effort string) error {
 		}
 		return err
 	}
+	if previous.Provider != provider || previous.Model != model || previous.Effort != effort {
+		a.Fire("model_change", "RECUR_PREV_PROVIDER", previous.Provider, "RECUR_PREV_MODEL", previous.Model, "RECUR_PREV_EFFORT", previous.Effort)
+	}
 	return nil
 }
 

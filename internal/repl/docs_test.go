@@ -6,7 +6,7 @@ import (
 )
 
 func TestDocs(t *testing.T) {
-	for _, topic := range []string{"index", "runtime", "sessions", "steering", "interface", "images", "models", "headless", "clipboard"} {
+	for _, topic := range []string{"index", "runtime", "sessions", "steering", "interface", "images", "models", "headless", "clipboard", "hooks"} {
 		var out strings.Builder
 		if err := Docs(&out, []string{topic}); err != nil || out.Len() < 50 {
 			t.Fatalf("%s: %v", topic, err)

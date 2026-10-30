@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -19,6 +20,7 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
 
+	"recur/internal/hooks"
 	"recur/internal/repl"
 )
 
@@ -71,21 +73,25 @@ type Agent struct {
 	History           []json.RawMessage
 	HistoryPath       string
 	System            string
-	LocalConfig       string // project .recur directory supplying prompts, or ""
+	LocalConfig       string // project .recur directory supplying config files, or ""
+	LocalIgnored      bool   // project .recur files exist but enable_local_recur is off
+	Sources           []Source
 	client            openai.Client
 	records           []Record
 	title             string // set by /rename; "" means the first user message
 	lastRequest       Metadata
-	files             PromptFiles
+	files             ConfigFiles
+	hooks             *hooks.Runner
+	lastTitle         string // last title reported by session_title_change
 	home, sessionsDir string
 }
 
 func New(dir string, target ...string) (*Agent, error) {
-	return NewWith(dir, PromptFiles{}, target...)
+	return NewWith(dir, ConfigFiles{}, target...)
 }
 
-// NewWith is New with explicit system/prefix files that override .recur lookup.
-func NewWith(dir string, files PromptFiles, target ...string) (*Agent, error) {
+// NewWith is New with explicit config files that override .recur lookup.
+func NewWith(dir string, files ConfigFiles, target ...string) (*Agent, error) {
 	config, err := configDir(dir)
 	if err != nil {
 		return nil, err
@@ -94,13 +100,15 @@ func NewWith(dir string, files PromptFiles, target ...string) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	a := &Agent{files: files, home: config, System: cfg.system, LocalConfig: cfg.local, REPL: &repl.REPL{Prefix: cfg.prefix, Dir: dir}}
+	a := &Agent{files: files, home: config, System: cfg.system, LocalConfig: cfg.local, LocalIgnored: cfg.ignored, Sources: cfg.sources,
+		hooks: &hooks.Runner{Log: filepath.Join(config, "hooks.log")}, REPL: &repl.REPL{Prefix: cfg.prefix, Dir: dir}}
 	a.applySettings(cfg.settings)
 	if err := a.openProject(dir, target...); err != nil {
 		a.release()
 		return nil, err
 	}
-	a.REPL.Env = a.shellEnv
+	a.REPL.Env, a.REPL.Observe = a.shellEnv, a.Fire
+	a.hooks.Set(cfg.hooks)
 	return a, nil
 }
 func raw(v any) json.RawMessage { data, _ := json.Marshal(v); return data }
@@ -125,7 +133,19 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 		a.records = a.Records()
 	}
 	forward := emit
-	emit = func(e Event) { a.records = ApplyEvent(a.records, e); forward(e) }
+	emit = func(e Event) {
+		if e.Kind == "error" {
+			a.Fire("error", "RECUR_ERROR", clip(e.Text))
+		}
+		a.records = ApplyEvent(a.records, e)
+		forward(e)
+	}
+	turnStart := time.Now()
+	source := "user"
+	if len(input.Images) == 0 && strings.HasPrefix(input.Text, "<notify>") {
+		source = "notify"
+	}
+	a.Fire("turn_start", "RECUR_TURN_SOURCE", source, "RECUR_MESSAGE_FILE", input.Display())
 	// A crash may leave calls without outputs. Their effects are unknown, so
 	// never rerun them; supply an explicit interrupted result on continuation.
 	for _, output := range interruptedOutputs(a.History) {
@@ -145,6 +165,14 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 				emit(Event{Kind: "error", Text: saveError.Error()})
 			}
 		}
+		status, problem := "ok", ""
+		if err != nil {
+			status, problem = "error", clip(err.Error())
+			if errors.Is(err, context.Canceled) {
+				status = "cancelled"
+			}
+		}
+		a.Fire("turn_end", "RECUR_TURN_STATUS", status, "RECUR_TURN_DURATION_MS", ms(time.Since(turnStart)), "RECUR_ERROR", problem)
 	}()
 	// Only the turn goroutine mutates history. Steering waits until all outputs
 	// for the current response have been committed, preserving call/output pairs.
@@ -157,6 +185,9 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 		if len(steering) > 0 {
 			instructions = steering[0].TakeInputs()
 		}
+		for _, instruction := range instructions {
+			a.Fire("steer_accepted", "RECUR_MESSAGE_FILE", instruction.Display())
+		}
 		for _, text := range a.Notifications() {
 			instructions = append(instructions, Input{Text: text})
 		}
@@ -168,7 +199,6 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 		}
 		return accepted
 	}
-	turnStart := time.Now()
 	userAdded := false
 	// Display the input before shell initialization so a slow prefix does not
 	// look like a frozen UI. It joins API history only after the prefix runs;
@@ -216,6 +246,7 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 		if !userAdded {
 			a.commitInput(input)
 			userAdded = true
+			a.titleChanged()
 		}
 
 		acceptSteering()
@@ -369,7 +400,11 @@ func (a *Agent) runTool(ctx context.Context, name, arguments string) repl.Result
 	}
 	if err == nil {
 		var result repl.Result
+		a.Fire("shell_start", "RECUR_COMMAND_FILE", args.Command, "RECUR_TIMEOUT", strconv.Itoa(int(timeout/time.Second)))
+		started := time.Now()
 		if result, err = a.REPL.ExecuteLimit(ctx, args.Command, timeout, limit); err == nil {
+			a.Fire("shell_end", "RECUR_EXIT_CODE", strconv.Itoa(result.ExitCode), "RECUR_DURATION_MS", ms(time.Since(started)),
+				"RECUR_TIMED_OUT", strconv.FormatBool(result.ExitCode == 124))
 			return result
 		}
 	}
@@ -413,6 +448,7 @@ func (a *Agent) request(ctx context.Context, emit func(Event), checkpoints ...fu
 		payload.Reasoning.Summary = shared.ReasoningSummaryAuto
 	}
 	started := time.Now()
+	a.Fire("model_request_start")
 	a.lastRequest = Metadata{RequestID: fmt.Sprintf("r-%d", len(a.History))}
 	stream := a.client.Responses.NewStreaming(ctx, payload)
 	defer stream.Close()
@@ -471,6 +507,12 @@ func (a *Agent) request(ctx context.Context, emit func(Event), checkpoints ...fu
 				}
 				a.lastRequest.Usage = &Usage{Input: event.Response.Usage.InputTokens, Output: event.Response.Usage.OutputTokens, Cached: cached}
 			}
+			usage := a.lastRequest.Usage
+			if usage == nil {
+				usage = &Usage{}
+			}
+			a.Fire("model_request_end", "RECUR_DURATION_MS", ms(a.lastRequest.Duration),
+				"RECUR_INPUT_TOKENS", strconv.FormatInt(usage.Input, 10), "RECUR_OUTPUT_TOKENS", strconv.FormatInt(usage.Output, 10))
 			completed = make([]json.RawMessage, len(event.Response.Output))
 			for i, item := range event.Response.Output {
 				completed[i] = json.RawMessage(item.RawJSON())

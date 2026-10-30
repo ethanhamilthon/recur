@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 
+	"recur/internal/hooks"
 	"recur/prompts"
 )
 
@@ -84,48 +85,93 @@ func loadOrCreateFile(path, fallback string) (string, error) {
 type configuration struct {
 	settings       Settings
 	prefix, system string
-	local          string // project .recur directory that supplied a prompt file
+	hooks          []hooks.Hook
+	local          string // project .recur directory that supplied a config file
+	ignored        bool   // project config exists but enable_local_recur is off
+	sources        []Source
 }
 
-// PromptFiles holds --system and --prefix paths; they win over .recur files.
-type PromptFiles struct{ System, Prefix string }
+// ConfigFiles holds --system, --prefix and --hooks paths; they win over .recur
+// files. NoHooks disables hooks (headless runs without --hooks).
+type ConfigFiles struct {
+	System, Prefix, Hooks string
+	NoHooks               bool
+}
 
-// loadConfiguration reads settings from home. system.md and prefix.sh come from
-// the given files, else (with enable_local_recur) from cwd/.recur when they
-// exist there and it is not home, else from home.
-func loadConfiguration(home, cwd string, files PromptFiles) (c configuration, err error) {
+// Source tells where one configuration file is read from. Origin is flag,
+// project or home; hooks.toml may also be absent (Origin "none", no Path).
+type Source struct{ Name, Path, Origin string }
+
+// loadConfiguration reads settings from home. system.md, prefix.sh and hooks.toml
+// come from the given files, else (with enable_local_recur) from cwd/.recur when
+// they exist there and it is not home, else from home.
+func loadConfiguration(home, cwd string, files ConfigFiles) (c configuration, err error) {
 	if c.settings, err = loadSettings(home); err != nil {
 		return c, err
 	}
 	local, err := filepath.Abs(filepath.Join(cwd, ".recur"))
-	if err != nil || !c.settings.EnableLocalRecur || !projectConfig(local, home) {
+	if err != nil || !projectConfig(local, home) {
 		local = ""
 	}
-	if c.prefix, err = c.pick(files.Prefix, home, local, "prefix.sh", prompts.Prefix); err != nil {
+	if local != "" && !c.settings.EnableLocalRecur {
+		for _, name := range []string{"system.md", "prefix.sh", "hooks.toml"} {
+			c.ignored = c.ignored || isFile(filepath.Join(local, name))
+		}
+		local = ""
+	}
+	if c.system, err = c.pick(files.System, home, local, "system.md", prompts.System, true); err != nil {
 		return c, err
 	}
-	c.system, err = c.pick(files.System, home, local, "system.md", prompts.System)
+	if c.prefix, err = c.pick(files.Prefix, home, local, "prefix.sh", prompts.Prefix, true); err != nil {
+		return c, err
+	}
+	if files.NoHooks {
+		c.sources = append(c.sources, Source{Name: "hooks.toml", Origin: "none"})
+		return c, nil
+	}
+	text, err := c.pick(files.Hooks, home, local, "hooks.toml", "", false)
+	if err == nil {
+		if c.hooks, err = hooks.Parse(text); err != nil {
+			err = fmt.Errorf("%s: %w", c.sources[len(c.sources)-1].Path, err)
+		}
+	}
 	return c, err
 }
 
-func (c *configuration) pick(file, home, local, name, fallback string) (string, error) {
-	if file == "" {
-		return c.load(home, local, name, fallback)
-	}
-	data, err := os.ReadFile(file)
-	return string(data), err
+func isFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
 }
 
-// load prefers the project copy, which is never created, over the global one.
-func (c *configuration) load(home, local, name, fallback string) (string, error) {
-	if local != "" {
-		if info, err := os.Stat(filepath.Join(local, name)); err == nil && info.Mode().IsRegular() {
-			c.local = local
-			data, err := os.ReadFile(filepath.Join(local, name))
-			return string(data), err
+// pick reads name from the flag file, else the project copy (never created),
+// else home. A missing home file is created from fallback when create is set;
+// otherwise it means the file is absent.
+func (c *configuration) pick(flag, home, local, name, fallback string, create bool) (string, error) {
+	src := Source{Name: name, Path: flag, Origin: "flag"}
+	if flag == "" {
+		src.Path, src.Origin = filepath.Join(local, name), "project"
+		if local == "" || !isFile(src.Path) {
+			src.Path, src.Origin = filepath.Join(home, name), "home"
 		}
 	}
-	return loadOrCreateFile(filepath.Join(home, name), fallback)
+	var text string
+	var err error
+	switch {
+	case src.Origin == "home" && create:
+		text, err = loadOrCreateFile(src.Path, fallback)
+	default:
+		var data []byte
+		data, err = os.ReadFile(src.Path)
+		text = string(data)
+		if os.IsNotExist(err) && src.Origin == "home" {
+			src.Path, src.Origin, err = "", "none", nil
+		}
+	}
+	if src.Origin == "project" {
+		c.local = local
+	}
+	c.sources = append(c.sources, src)
+	return text, err
 }
 
 // projectConfig reports whether local is a directory other than RECUR_HOME;
@@ -156,7 +202,8 @@ func (a *Agent) changeSession(id string) error {
 			return err
 		}
 	}
-	next := &Agent{files: a.files, home: a.home, sessionsDir: a.sessionsDir, REPL: a.REPL, System: c.system, LocalConfig: c.local}
+	next := &Agent{files: a.files, home: a.home, sessionsDir: a.sessionsDir, REPL: a.REPL, hooks: a.hooks,
+		System: c.system, LocalConfig: c.local, LocalIgnored: c.ignored, Sources: c.sources}
 	next.applySettings(c.settings)
 	if id == "" {
 		err = next.createSession()
@@ -167,8 +214,18 @@ func (a *Agent) changeSession(id string) error {
 		next.release()
 		return err
 	}
+	previous := strings.TrimSuffix(filepath.Base(a.HistoryPath), ".jsonl")
+	a.Fire("session_end", "RECUR_REASON", "switch")
 	a.Close()
 	next.REPL.Prefix, next.REPL.PrefixOutput = c.prefix, ""
 	*a = *next
+	a.hooks.Set(c.hooks)
+	source := "new"
+	if id != "" {
+		source = "resume"
+	}
+	a.Fire("session_start", "RECUR_SESSION_SOURCE", source, "RECUR_PREV_SESSION_ID", previous)
+	a.Fire("session_switch", "RECUR_PREV_SESSION_ID", previous)
+	a.titleChanged()
 	return nil
 }

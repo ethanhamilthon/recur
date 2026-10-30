@@ -100,15 +100,29 @@ func BenchmarkLongChatCachedDelta(b *testing.B) {
 	}
 }
 
-func TestProjectConfigHeader(t *testing.T) {
+func TestConfigSourcesHeader(t *testing.T) {
 	a := &agent.Agent{}
 	m := newModel(a, "/project")
-	if strings.Contains(ansi.Strip(m.timeline()), "Project config") {
-		t.Fatal("header shown without a project config")
+	if strings.Contains(ansi.Strip(m.timeline()), "system") {
+		t.Fatal("sources shown before the agent loaded any")
 	}
-	a.LocalConfig = "/work/repo/.recur"
-	if !strings.Contains(ansi.Strip(m.timeline()), "Project config: /work/repo/.recur") {
-		t.Fatal("project config path missing from header")
+	a.Sources = []agent.Source{
+		{Name: "system.md", Path: "/work/repo/.recur/system.md", Origin: "project"},
+		{Name: "prefix.sh", Path: "/home/u/.recur/prefix.sh", Origin: "home"},
+		{Name: "hooks.toml", Origin: "none"},
+	}
+	text := ansi.Strip(m.timeline())
+	for _, want := range []string{"system  /work/repo/.recur/system.md (project)", "prefix  /home/u/.recur/prefix.sh (home)", "hooks   none"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("header missing %q in:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "ignored") {
+		t.Fatal("ignored warning shown without ignored project config")
+	}
+	a.LocalIgnored = true
+	if !strings.Contains(ansi.Strip(m.timeline()), "Project .recur ignored: enable_local_recur = false") {
+		t.Fatal("ignored project config not reported")
 	}
 }
 

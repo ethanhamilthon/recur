@@ -175,8 +175,16 @@ func (m *model) timeline() string {
 	if s := m.a.Settings(); s.Provider == "" || s.Model == "" {
 		out.WriteString(lipgloss.NewStyle().Foreground(warnColor).Render(m.setupHint()) + "\n")
 	}
-	if m.a.LocalConfig != "" {
-		out.WriteString(lipgloss.NewStyle().Foreground(muted).Render("Project config: "+shortPath(m.a.LocalConfig)) + "\n")
+	for _, s := range m.a.Sources {
+		where := s.Origin
+		if s.Path != "" {
+			where = shortPath(s.Path) + " (" + s.Origin + ")"
+		}
+		row := fmt.Sprintf("%-7s %s", strings.TrimSuffix(s.Name, filepath.Ext(s.Name)), where)
+		out.WriteString(lipgloss.NewStyle().Foreground(muted).Render(ansi.Truncate(row, max(1, m.width), "…")) + "\n")
+	}
+	if m.a.LocalIgnored {
+		out.WriteString(lipgloss.NewStyle().Foreground(warnColor).Render("Project .recur ignored: enable_local_recur = false") + "\n")
 	}
 	out.WriteString("\n")
 	if len(m.cache) > len(m.entries) {

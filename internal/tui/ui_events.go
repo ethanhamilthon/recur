@@ -73,6 +73,7 @@ func (m *model) queueSteering(text string) {
 	input := agent.Input{Text: text, Images: m.images}
 	if m.steering.PushInput(input) {
 		m.queued = append(m.queued, input)
+		m.a.Fire("steer_queued", "RECUR_MESSAGE_FILE", input.Display())
 		m.images = nil
 		m.input.Reset()
 	} else {

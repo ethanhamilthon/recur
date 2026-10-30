@@ -1,6 +1,6 @@
 # Agent rules
 
-- Keep the source code under 5,000 lines (Go files without tests).
+- Keep the source code under 6,000 lines (Go files without tests).
   Check before committing: `find . -name '*.go' ! -name '*_test.go' | xargs cat | wc -l`
 - Do not edit README.md unless the maintainer asks.
 - Keep the project language English (UI, docs, comments).

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -42,6 +43,8 @@ type REPL struct {
 	PrefixOutput string
 	// Env returns variables exported before every call, such as session metadata.
 	Env func() map[string]string
+	// Observe, when set, is told about prefix_start and prefix_end.
+	Observe func(event string, kv ...string)
 }
 
 type call struct{ output cappedBuffer }
@@ -91,7 +94,14 @@ func (r *REPL) Ensure(ctx context.Context) (bool, error) {
 	}
 	r.runner = runner
 	r.jobs, r.stopJobs = context.WithCancel(context.Background())
+	started := time.Now()
+	if r.Observe != nil {
+		r.Observe("prefix_start")
+	}
 	result, broken := r.run(ctx, r.Prefix, DefaultTimeout, NoOutputLimit)
+	if r.Observe != nil {
+		r.Observe("prefix_end", "RECUR_PREFIX_OK", strconv.FormatBool(!broken), "RECUR_DURATION_MS", strconv.FormatInt(time.Since(started).Milliseconds(), 10))
+	}
 	if broken {
 		r.stop()
 		return false, fmt.Errorf("shell prefix failed: %s", result.Output)

@@ -283,6 +283,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.stop("notice", fmt.Sprintf("Copied %d lines to the clipboard.", v.lines))
 	case compactMsg:
 		m.busy, m.compacting, m.cancel = false, false, nil
+		m.a.Fire("idle")
 		if errors.Is(v.err, context.Canceled) {
 			return m.stop("notice", "Compaction cancelled.")
 		}
@@ -330,6 +331,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.steering = nil
 			m.retryInput = ""
 			m.cancelling = false
+			m.a.Fire("idle")
 
 			if m.pending != "" {
 				name := m.pending

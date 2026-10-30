@@ -146,6 +146,10 @@ func (a *Agent) summarize(ctx context.Context, old []json.RawMessage, prompt str
 // Compact replaces everything before the last CompactKeepTurns turns with one summary.
 // Callers ensure an idle session.
 func (a *Agent) Compact(ctx context.Context, prompt string) (string, error) {
+	return a.compact(ctx, prompt, "manual")
+}
+
+func (a *Agent) compact(ctx context.Context, prompt, reason string) (text string, err error) {
 	keep := max(1, a.settings.CompactKeepTurns)
 	cut := turnStart(a.History, keep)
 	// Compacting an existing summary would replace it with another summary.
@@ -154,6 +158,14 @@ func (a *Agent) Compact(ctx context.Context, prompt string) (string, error) {
 		return "Nothing to compact.", nil
 	}
 	old := a.History[:cut]
+	a.Fire("compact_start", "RECUR_COMPACT_REASON", reason)
+	defer func() {
+		status, problem := "ok", ""
+		if err != nil {
+			status, problem = "error", clip(err.Error())
+		}
+		a.Fire("compact_end", "RECUR_COMPACT_STATUS", status, "RECUR_ERROR", problem)
+	}()
 	summary, err := a.summarize(ctx, old, prompt)
 	if err != nil {
 		return "", err
@@ -176,7 +188,7 @@ func (a *Agent) compactIfNeeded(ctx context.Context, emit func(Event)) {
 	if limit <= 0 || estimateTokens(a.History) <= limit {
 		return
 	}
-	result, err := a.Compact(ctx, "")
+	result, err := a.compact(ctx, "", "auto")
 	if err != nil {
 		emit(Event{Kind: "error", Text: "Compaction failed: " + err.Error()})
 		return
@@ -200,7 +212,8 @@ func (a *Agent) Reload() error {
 	}
 	a.REPL.Close()
 	a.REPL.Prefix, a.REPL.PrefixOutput = c.prefix, ""
-	a.System, a.LocalConfig = c.system, c.local
+	a.System, a.LocalConfig, a.LocalIgnored, a.Sources = c.system, c.local, c.ignored, c.sources
+	a.hooks.Set(c.hooks)
 	a.applySettings(c.settings)
 	return nil
 }

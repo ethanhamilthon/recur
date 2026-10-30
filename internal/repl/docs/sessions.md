@@ -3,15 +3,19 @@
 RECUR_HOME defaults to ~/.recur; an explicit relative override is resolved against
 the project directory. This does not change the working directory of shell
 commands. settings.toml, system.md, and prefix.sh are created only when missing;
-existing editable configuration is never overwritten automatically.
+existing editable configuration is never overwritten automatically. hooks.toml
+is optional and never created (recur docs hooks).
 
 Project config: with enable_local_recur = true (the default), recur reads
-system.md and prefix.sh from .recur in the launch directory when they exist
-there; a missing file falls back to RECUR_HOME. A .recur that is RECUR_HOME
+system.md, prefix.sh and hooks.toml from .recur in the launch directory when they
+exist there; a missing file falls back to RECUR_HOME. The flags --system, --prefix
+and --hooks name a file that wins over both. A .recur that is RECUR_HOME
 itself is not treated as project config. settings.toml and sessions always come
-from RECUR_HOME, and recur never creates files in the project .recur. The TUI
-header shows "Project config: PATH" while one is active; /new, /resume and
-/reload re-read it.
+from RECUR_HOME, and recur never creates files in the project .recur. The start
+screen of the TUI shows, for system, prefix and hooks, the file that was read and
+whether it came from a flag, the project or RECUR_HOME (hooks: none when there is
+no file). When project files exist but enable_local_recur is false it says so.
+/new, /resume and /reload re-read all of them.
 
 Each project has independent JSONL session files below
 $RECUR_HOME/sessions/<project-key>/. The key combines a sanitized basename and
@@ -27,7 +31,7 @@ isolates shell state; restored chats get a new prefix notification.
 /compact replaces everything before the last compact_keep_turns turns with one
 model-written summary and saves immediately; max_context_tokens (default 400000,
 0 disables) triggers the same compaction automatically before an oversized
-request. /reload re-reads settings.toml, prefix.sh and system.md and restarts the
+request. /reload re-reads settings.toml, prefix.sh, system.md and hooks.toml and restarts the
 shell while keeping the current session and its history.
 
 One recur process owns a session at a time; opening it elsewhere fails with
