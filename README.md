@@ -9,7 +9,7 @@ Recur solves this by keeping the agent simple and visible. You control 100%: the
 - `settings.toml` — provider, model, UI, and compaction settings
 - `hooks.toml` (optional) — shell commands that run on events such as turn start, turn end or exit; see `recur docs hooks`
 
-That's all you need to make an AI agent that solves your tasks. Each file can also live in a project's `.recur/` folder, and `--system`, `--prefix` and `--hooks` point to a specific file; the start screen shows which ones were read.
+That's all you need to make an AI agent that solves your tasks. Each file can also live in a project's `.recur/` folder, and `--system`, `--prefix` and `--hooks` point to a specific file; project and `--hooks` hooks add to the global ones instead of replacing them. The start screen shows which files were read.
 
 ![How Recur works: system.md, prefix.sh and its stdout enter the agent's context; Recur runs commands in a stateful Bash and returns a response](docs/how-recur-works.png)
 

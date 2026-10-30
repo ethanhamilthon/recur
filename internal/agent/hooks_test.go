@@ -36,6 +36,17 @@ func source(a *Agent, name string) Source {
 	return Source{}
 }
 
+// hookOrigins lists the hooks.toml layers an agent read, in order.
+func hookOrigins(a *Agent) string {
+	var out []string
+	for _, s := range a.Sources {
+		if s.Name == "hooks.toml" {
+			out = append(out, s.Origin)
+		}
+	}
+	return strings.Join(out, "+")
+}
+
 func TestConfigSourcesPriority(t *testing.T) {
 	home, cwd := t.TempDir(), t.TempDir()
 	t.Setenv("RECUR_HOME", home)
@@ -64,27 +75,60 @@ func TestConfigSourcesPriority(t *testing.T) {
 	write(t, filepath.Join(local, "hooks.toml"), hookToml)
 	write(t, filepath.Join(local, "prefix.sh"), "echo local")
 	a = open(ConfigFiles{})
-	if source(a, "hooks.toml") != (Source{"hooks.toml", filepath.Join(local, "hooks.toml"), "project"}) ||
-		source(a, "prefix.sh").Origin != "project" || source(a, "system.md").Origin != "home" || a.LocalConfig != local {
+	if hookOrigins(a) != "home+project" || source(a, "prefix.sh").Origin != "project" || source(a, "system.md").Origin != "home" || a.LocalConfig != local {
 		t.Fatalf("project: %+v", a.Sources)
 	}
 	write(t, flagged, hookToml)
-	if a = open(ConfigFiles{Hooks: flagged}); source(a, "hooks.toml") != (Source{"hooks.toml", flagged, "flag"}) {
+	if a = open(ConfigFiles{Hooks: flagged}); hookOrigins(a) != "home+project+flag" {
 		t.Fatalf("flag: %+v", a.Sources)
 	}
-	if a = open(ConfigFiles{NoHooks: true}); source(a, "hooks.toml").Origin != "none" {
+	if a = open(ConfigFiles{Headless: true}); hookOrigins(a) != "none" {
 		t.Fatalf("headless: %+v", a.Sources)
+	}
+	if a = open(ConfigFiles{Headless: true, Hooks: flagged}); hookOrigins(a) != "flag" {
+		t.Fatalf("headless with --hooks: %+v", a.Sources)
 	}
 	if _, err := NewWith(cwd, ConfigFiles{Hooks: filepath.Join(cwd, "missing.toml")}); err == nil {
 		t.Fatal("a missing --hooks file must fail")
 	}
 	a = open(ConfigFiles{})
 	write(t, filepath.Join(home, "settings.toml"), "enable_local_recur = false\n")
-	if err := a.Reload(); err != nil || !a.LocalIgnored || source(a, "hooks.toml").Origin != "home" {
+	if err := a.Reload(); err != nil || !a.LocalIgnored || hookOrigins(a) != "home" {
 		t.Fatalf("reload must refresh sources: %v %+v", err, a.Sources)
 	}
-	if a = open(ConfigFiles{}); !a.LocalIgnored || source(a, "hooks.toml").Origin != "home" || source(a, "prefix.sh").Origin != "home" {
+	if a = open(ConfigFiles{}); !a.LocalIgnored || hookOrigins(a) != "home" || source(a, "prefix.sh").Origin != "home" {
 		t.Fatalf("disabled local config: ignored=%v %+v", a.LocalIgnored, a.Sources)
+	}
+}
+
+func TestHookLayersStackAndDeduplicate(t *testing.T) {
+	home, cwd := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(home, "settings.toml"), "enable_local_recur = true\n")
+	flagged := filepath.Join(t.TempDir(), "flag.toml")
+	write(t, filepath.Join(home, "hooks.toml"), hookToml+"[[hook]]\nevent = \"turn_end\"\ncommand = \"home\"\n")
+	write(t, filepath.Join(cwd, ".recur", "hooks.toml"), hookToml+"[[hook]]\nevents = [\"turn_end\"]\ncommand = \"project\"\n")
+	write(t, flagged, "[[hook]]\nevent = \"idle\"\ncommand = \"flag\"\n")
+	commands := func(files ConfigFiles) string {
+		t.Helper()
+		c, err := loadConfiguration(home, cwd, files)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, h := range c.hooks {
+			out = append(out, h.Command)
+		}
+		return strings.Join(out, ",")
+	}
+	if got := commands(ConfigFiles{Hooks: flagged}); got != "true,home,project,flag" {
+		t.Fatalf("interactive layers: %s", got)
+	}
+	if got := commands(ConfigFiles{Hooks: flagged, Headless: true}); got != "flag" {
+		t.Fatalf("headless layers: %s", got)
+	}
+	write(t, filepath.Join(cwd, ".recur", "hooks.toml"), "[[hook]]\nevent = \"nope\"\ncommand = \"x\"\n")
+	if _, err := loadConfiguration(home, cwd, ConfigFiles{}); err == nil || !strings.Contains(err.Error(), filepath.Join(cwd, ".recur", "hooks.toml")) {
+		t.Fatalf("invalid project layer must name its file: %v", err)
 	}
 }
 

@@ -43,7 +43,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 	resume := flags.String("resume", "", "resume a project session ID")
 	system := flags.String("system", "", "system prompt file (overrides .recur/system.md)")
 	prefix := flags.String("prefix", "", "prefix script file (overrides .recur/prefix.sh)")
-	hooksFile := flags.String("hooks", "", "hooks file (overrides .recur/hooks.toml; headless runs use hooks only with this flag)")
+	hooksFile := flags.String("hooks", "", "extra hooks file, added to home and .recur hooks.toml (headless runs use only this file)")
 	if err := flags.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return nil
@@ -75,7 +75,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 		return agent.Notify(cwd, *sessionID, text)
 	}
 	headless := *mode != "" || *prompt != ""
-	files := agent.ConfigFiles{System: *system, Prefix: *prefix, Hooks: *hooksFile, NoHooks: headless && *hooksFile == ""}
+	files := agent.ConfigFiles{System: *system, Prefix: *prefix, Hooks: *hooksFile, Headless: headless}
 	for _, f := range []*string{&files.System, &files.Prefix, &files.Hooks} {
 		if *f == "" {
 			continue

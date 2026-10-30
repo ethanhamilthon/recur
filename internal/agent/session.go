@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -91,20 +92,22 @@ type configuration struct {
 	sources        []Source
 }
 
-// ConfigFiles holds --system, --prefix and --hooks paths; they win over .recur
-// files. NoHooks disables hooks (headless runs without --hooks).
+// ConfigFiles holds --system, --prefix and --hooks paths. --system and --prefix
+// win over .recur files; --hooks adds to them. Headless runs read only --hooks.
 type ConfigFiles struct {
 	System, Prefix, Hooks string
-	NoHooks               bool
+	Headless              bool
 }
 
 // Source tells where one configuration file is read from. Origin is flag,
-// project or home; hooks.toml may also be absent (Origin "none", no Path).
+// project or home; hooks.toml may have several sources (one per layer) or be
+// absent (Origin "none", no Path).
 type Source struct{ Name, Path, Origin string }
 
-// loadConfiguration reads settings from home. system.md, prefix.sh and hooks.toml
-// come from the given files, else (with enable_local_recur) from cwd/.recur when
-// they exist there and it is not home, else from home.
+// loadConfiguration reads settings from home. system.md and prefix.sh come from
+// the given files, else (with enable_local_recur) from cwd/.recur when they
+// exist there and it is not home, else from home. hooks.toml layers stack (see
+// loadHooks).
 func loadConfiguration(home, cwd string, files ConfigFiles) (c configuration, err error) {
 	if c.settings, err = loadSettings(home); err != nil {
 		return c, err
@@ -125,17 +128,60 @@ func loadConfiguration(home, cwd string, files ConfigFiles) (c configuration, er
 	if c.prefix, err = c.pick(files.Prefix, home, local, "prefix.sh", prompts.Prefix, true); err != nil {
 		return c, err
 	}
-	if files.NoHooks {
-		c.sources = append(c.sources, Source{Name: "hooks.toml", Origin: "none"})
-		return c, nil
-	}
-	text, err := c.pick(files.Hooks, home, local, "hooks.toml", "", false)
-	if err == nil {
-		if c.hooks, err = hooks.Parse(text); err != nil {
-			err = fmt.Errorf("%s: %w", c.sources[len(c.sources)-1].Path, err)
+	c.hooks, err = c.loadHooks(home, local, files)
+	return c, err
+}
+
+// loadHooks stacks hooks.toml layers instead of picking one: home, then the
+// project copy, then --hooks. Headless runs read only --hooks (nothing without
+// it), so a recur started by an agent never runs the user's global hooks.
+// A hook repeated in several layers runs once. Missing home and project files
+// are skipped; a missing --hooks file is an error.
+func (c *configuration) loadHooks(home, local string, files ConfigFiles) ([]hooks.Hook, error) {
+	const name = "hooks.toml"
+	var layers []Source
+	if !files.Headless {
+		layers = append(layers, Source{name, filepath.Join(home, name), "home"})
+		if local != "" {
+			layers = append(layers, Source{name, filepath.Join(local, name), "project"})
 		}
 	}
-	return c, err
+	if files.Hooks != "" {
+		layers = append(layers, Source{name, files.Hooks, "flag"})
+	}
+	var list []hooks.Hook
+	found := false
+	for _, src := range layers {
+		if src.Origin != "flag" && !isFile(src.Path) {
+			continue
+		}
+		data, err := os.ReadFile(src.Path)
+		if err != nil {
+			return nil, err
+		}
+		parsed, err := hooks.Parse(string(data))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", src.Path, err)
+		}
+		for _, h := range parsed {
+			if !slices.ContainsFunc(list, func(x hooks.Hook) bool { return sameHook(x, h) }) {
+				list = append(list, h)
+			}
+		}
+		if src.Origin == "project" {
+			c.local = local
+		}
+		c.sources = append(c.sources, src)
+		found = true
+	}
+	if !found {
+		c.sources = append(c.sources, Source{Name: name, Origin: "none"})
+	}
+	return list, nil
+}
+
+func sameHook(a, b hooks.Hook) bool {
+	return a.Command == b.Command && a.Timeout == b.Timeout && slices.Equal(a.Events, b.Events)
 }
 
 func isFile(path string) bool {

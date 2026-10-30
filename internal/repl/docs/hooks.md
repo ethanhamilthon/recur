@@ -6,19 +6,22 @@ They observe Recur; they cannot block, change or veto anything.
 
 ## Files
 
-hooks.toml is read from the first of these that exists:
+Hooks stack: every hooks.toml below that exists is loaded, and all their hooks
+run. A project or --hooks file adds hooks; it never hides the global ones.
 
-1. `--hooks FILE`
+1. `$RECUR_HOME/hooks.toml` (default ~/.recur/hooks.toml)
 2. `./.recur/hooks.toml` in the launch directory (with enable_local_recur = true,
    unless that .recur is RECUR_HOME)
-3. `$RECUR_HOME/hooks.toml` (default ~/.recur/hooks.toml)
+3. `--hooks FILE`
 
-The first match replaces the others; files are never merged. Recur never creates
-hooks.toml. Without a file there are no hooks. The start screen lists where
-system.md, prefix.sh and hooks.toml were read from. /new, /resume and /reload
-re-read the file; if it is invalid, /reload fails and the running hooks stay.
-Headless runs (--prompt, --mode jsonl) use hooks only when --hooks is given, so
-a recur started by an agent never overwrites the status of its parent.
+A hook that appears in several files with the same events, command and timeout
+runs once. Recur never creates hooks.toml. Without any file there are no hooks.
+The start screen lists every hooks.toml that was read, next to system.md and
+prefix.sh. /new, /resume and /reload re-read the files; if one is invalid,
+/reload fails and the running hooks stay.
+Headless runs (--prompt, --mode jsonl) read only the --hooks file and no hooks
+without it, so a recur started by an agent never runs your global hooks and
+never overwrites the status of its parent.
 
 ## Format
 

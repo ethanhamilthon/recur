@@ -5,8 +5,9 @@ creates a new project session. --resume accepts a full existing session ID from
 this project; an unknown ID is an error, not a new session.
 
 Hooks (recur docs hooks) are off in headless runs unless --hooks FILE is given;
-then RECUR_MODE is headless and the interface-only events (idle, steer_queued,
-image_attached with source paste) never occur.
+then only that file is read (no home or project hooks), RECUR_MODE is headless
+and the interface-only events (idle, steer_queued, image_attached with source
+paste) never occur.
 
 Without --mode, --prompt prints only the completed assistant answers to stdout;
 errors go to stderr. recur --mode jsonl reads one
