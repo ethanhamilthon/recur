@@ -10,6 +10,8 @@ Recur solves this by keeping the agent simple and visible. You control 100%: the
 
 That's all you need to make an AI agent that solves your tasks.
 
+![How Recur works: system.md, prefix.sh and its stdout enter the agent's context; Recur runs commands in a stateful Bash and returns a response](docs/how-recur-works.png)
+
 This isn't a heavy agent like Claude Code or OMP that decides everything for you. It isn't Pi or OpenCode, where you can get lost in your own plugins.
 
 Recur is an AI agent you can make 100% your own, while keeping it simple and understandable. One Bash tool and fewer than 5,000 lines of source code.
@@ -30,9 +32,7 @@ Run from source with an isolated development home:
 make dev
 ```
 
-Keep the source code under 5,000 lines.
-Do not edit README.md file.
-Keep projects language English (UI, docs, comments)
+Rules for AI agents working on this repository are in [AGENTS.md](AGENTS.md).
 
 ## License
 
