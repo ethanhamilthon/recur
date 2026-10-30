@@ -175,6 +175,9 @@ func (m *model) timeline() string {
 	if s := m.a.Settings(); s.Provider == "" || s.Model == "" {
 		out.WriteString(lipgloss.NewStyle().Foreground(warnColor).Render(m.setupHint()) + "\n")
 	}
+	if m.a.LocalConfig != "" {
+		out.WriteString(lipgloss.NewStyle().Foreground(muted).Render("Project config: "+shortPath(m.a.LocalConfig)) + "\n")
+	}
 	out.WriteString("\n")
 	if len(m.cache) > len(m.entries) {
 		m.cache = m.cache[:len(m.entries)]

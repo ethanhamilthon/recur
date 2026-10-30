@@ -93,11 +93,12 @@ func (m model) workingBlock() string {
 		if m.compacting {
 			label = "compacting"
 		}
+		hint := " · esc to stop"
 		if m.cancelling {
-			label = "cancelling"
+			label, hint = "cancelling", ""
 		}
 		line := "  " + lipgloss.NewStyle().Foreground(inputBlue).Render(frames[int(elapsed/(80*time.Millisecond))%len(frames)]) +
-			lipgloss.NewStyle().Foreground(muted).Render(fmt.Sprintf(" %s · %s", label, formatDuration(elapsed)))
+			lipgloss.NewStyle().Foreground(muted).Render(fmt.Sprintf(" %s · %s%s", label, formatDuration(elapsed), hint))
 		out.WriteString(ansi.Truncate(line, max(1, m.width), "…") + "\n\n")
 	}
 	return out.String()

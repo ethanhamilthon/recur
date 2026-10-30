@@ -5,6 +5,14 @@ the project directory. This does not change the working directory of shell
 commands. settings.toml, system.md, and prefix.sh are created only when missing;
 existing editable configuration is never overwritten automatically.
 
+Project config: with enable_local_recur = true (the default), recur reads
+system.md and prefix.sh from .recur in the launch directory when they exist
+there; a missing file falls back to RECUR_HOME. A .recur that is RECUR_HOME
+itself is not treated as project config. settings.toml and sessions always come
+from RECUR_HOME, and recur never creates files in the project .recur. The TUI
+header shows "Project config: PATH" while one is active; /new, /resume and
+/reload re-read it.
+
 Each project has independent JSONL session files below
 $RECUR_HOME/sessions/<project-key>/. The key combines a sanitized basename and
 path hash. Files are atomic, count-checked snapshots, not an append-only event

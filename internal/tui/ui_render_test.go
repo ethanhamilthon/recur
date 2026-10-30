@@ -100,6 +100,18 @@ func BenchmarkLongChatCachedDelta(b *testing.B) {
 	}
 }
 
+func TestProjectConfigHeader(t *testing.T) {
+	a := &agent.Agent{}
+	m := newModel(a, "/project")
+	if strings.Contains(ansi.Strip(m.timeline()), "Project config") {
+		t.Fatal("header shown without a project config")
+	}
+	a.LocalConfig = "/work/repo/.recur"
+	if !strings.Contains(ansi.Strip(m.timeline()), "Project config: /work/repo/.recur") {
+		t.Fatal("project config path missing from header")
+	}
+}
+
 func TestUnavailableContextClearsOldEstimate(t *testing.T) {
 	m := newModel(&agent.Agent{}, "/project")
 	n := int64(1234)

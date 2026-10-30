@@ -12,9 +12,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/mod/semver"
 )
 
 // Repo is the GitHub repository that publishes recur releases.
@@ -71,42 +72,21 @@ func Latest(ctx context.Context) (string, error) {
 	return release.Tag, nil
 }
 
-func parse(value string) ([3]int, bool) {
-	var out [3]int
-	value = strings.TrimPrefix(strings.TrimSpace(value), "v")
-	if i := strings.IndexAny(value, "-+"); i >= 0 {
-		value = value[:i]
+// canonical returns value as a "vX.Y.Z" semantic version, or "" when invalid.
+func canonical(value string) string {
+	if value = strings.TrimSpace(value); !strings.HasPrefix(value, "v") {
+		value = "v" + value
 	}
-	parts := strings.Split(value, ".")
-	if len(parts) != len(out) {
-		return out, false
+	if !semver.IsValid(value) {
+		return ""
 	}
-	for i, part := range parts {
-		number, err := strconv.Atoi(part)
-		if err != nil || number < 0 {
-			return out, false
-		}
-		out[i] = number
-	}
-	return out, true
+	return value
 }
 
 // Newer reports whether latest is a later semantic version than current.
 func Newer(current, latest string) bool {
-	have, ok := parse(current)
-	if !ok {
-		return false
-	}
-	want, ok := parse(latest)
-	if !ok {
-		return false
-	}
-	for i := range have {
-		if have[i] != want[i] {
-			return want[i] > have[i]
-		}
-	}
-	return false
+	have, want := canonical(current), canonical(latest)
+	return have != "" && want != "" && semver.Compare(want, have) > 0
 }
 
 func cacheFile() string {
@@ -128,29 +108,25 @@ func cacheFile() string {
 // Available returns the newer version tag, using a cached answer to keep startup cheap.
 // It returns an empty string when the installation is current, unknown, or the check is off.
 func Available(ctx context.Context, current string) string {
-	if _, ok := parse(current); !ok || os.Getenv("RECUR_NO_UPDATE_CHECK") != "" {
+	if canonical(current) == "" || os.Getenv("RECUR_NO_UPDATE_CHECK") != "" {
 		return ""
 	}
 	path := cacheFile()
 	var cached checkCache
-	if data, err := os.ReadFile(path); err == nil && json.Unmarshal(data, &cached) == nil &&
-		cached.Latest != "" && time.Since(cached.Checked) < cacheTTL {
-		return newerTag(current, cached.Latest)
+	if data, err := os.ReadFile(path); err != nil || json.Unmarshal(data, &cached) != nil ||
+		cached.Latest == "" || time.Since(cached.Checked) >= cacheTTL {
+		latest, err := Latest(ctx)
+		if err != nil {
+			return ""
+		}
+		cached = checkCache{Checked: time.Now(), Latest: latest}
+		if data, err := json.Marshal(cached); err == nil {
+			_ = os.MkdirAll(filepath.Dir(path), 0o755)
+			_ = os.WriteFile(path, append(data, '\n'), 0o644)
+		}
 	}
-	latest, err := Latest(ctx)
-	if err != nil {
-		return ""
-	}
-	if data, err := json.Marshal(checkCache{Checked: time.Now(), Latest: latest}); err == nil {
-		_ = os.MkdirAll(filepath.Dir(path), 0o755)
-		_ = os.WriteFile(path, append(data, '\n'), 0o644)
-	}
-	return newerTag(current, latest)
-}
-
-func newerTag(current, latest string) string {
-	if Newer(current, latest) {
-		return latest
+	if Newer(current, cached.Latest) {
+		return cached.Latest
 	}
 	return ""
 }
@@ -162,7 +138,7 @@ func Install(ctx context.Context, current string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if _, known := parse(current); known && !Newer(current, latest) {
+	if canonical(current) != "" && !Newer(current, latest) {
 		fmt.Fprintf(out, "recur %s is the latest release.\n", current)
 		return nil
 	}

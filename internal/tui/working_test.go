@@ -28,9 +28,14 @@ func TestWorkingIndicatorLifecycleAndScrolling(t *testing.T) {
 		m.add("user", "history")
 	}
 	m.refresh(true)
-	if !strings.Contains(ansi.Strip(m.View()), "working") {
-		t.Fatal("missing indicator")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "working") || !strings.Contains(view, "esc to stop") {
+		t.Fatal("missing indicator or stop hint")
 	}
+	m.cancelling = true
+	if block := ansi.Strip(m.workingBlock()); !strings.Contains(block, "cancelling") || strings.Contains(block, "esc to stop") {
+		t.Fatalf("cancelling must replace the stop hint: %q", block)
+	}
+	m.cancelling = false
 	m.viewport.GotoTop()
 	offset := m.viewport.YOffset
 	next, cmd := m.Update(workingTick{m.workingSince})

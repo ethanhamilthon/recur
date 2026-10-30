@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -141,13 +142,7 @@ func (m model) runCommand(name string) (tea.Model, tea.Cmd) {
 			m.refresh(true)
 			return m, nil
 		}
-		found := false
-		for _, session := range sessions {
-			if len(verb) == 2 && session.ID == verb[1] {
-				found = true
-			}
-		}
-		if !found {
+		if len(verb) != 2 || !slices.ContainsFunc(sessions, func(s agent.SessionSummary) bool { return s.ID == verb[1] }) {
 			return m.stop("error", "choose a session from /resume completions")
 		}
 	}
@@ -178,7 +173,7 @@ func (m model) runCommand(name string) (tea.Model, tea.Cmd) {
 		for _, cmd := range commands {
 			fmt.Fprintf(&help, "%-9s %s\n", cmd.name, cmd.description)
 		}
-		help.WriteString("\nEnter: execute selected completion or send / steer while working · Shift+Enter / Alt+Enter / Ctrl+J: newline\nClipboard: Ctrl+V (Cmd+V when forwarded) · Ctrl+X: remove last image\nTab: complete · Up/Down: select completion · unmatched slash text: send normally · Up on empty input: recall queued steering\nPgUp/PgDn or mouse wheel: scroll timeline\nEsc / Ctrl+C: cancel current turn\n\nConfig files: $RECUR_HOME (default: ~/.recur): settings.toml, prefix.sh, system.md\nEdit them, then /reload to apply them to this chat.\nHost access: the bash tool runs commands with your permissions; not an OS security sandbox.")
+		help.WriteString("\nEnter: execute selected completion or send / steer while working · Shift+Enter / Alt+Enter / Ctrl+J: newline\nClipboard: Ctrl+V (Cmd+V when forwarded) · Ctrl+X: remove last image\nTab: complete · Up/Down: select completion · unmatched slash text: send normally · Up on empty input: recall queued steering\nPgUp/PgDn or mouse wheel: scroll timeline\nEsc / Ctrl+C: cancel current turn\n\nConfig files: $RECUR_HOME (default: ~/.recur): settings.toml, prefix.sh, system.md\nProject config: ./.recur/system.md and ./.recur/prefix.sh override them (enable_local_recur)\nEdit them, then /reload to apply them to this chat.\nHost access: the bash tool runs commands with your permissions; not an OS security sandbox.")
 		m.add("info", help.String())
 	case "/new", "/resume":
 		if m.busy {

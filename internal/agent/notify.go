@@ -136,10 +136,8 @@ func Endpoint(cwd, id string) (string, error) {
 }
 
 // Notify acknowledges enqueueing by the active owner, not acceptance by the model.
+// The owner validates the text size.
 func Notify(cwd, id, text string) error {
-	if strings.TrimSpace(text) == "" || len(text) > 128*1024 {
-		return fmt.Errorf("notify requires 1..131072 bytes of message text")
-	}
 	endpoint, err := Endpoint(cwd, id)
 	if err != nil {
 		return err

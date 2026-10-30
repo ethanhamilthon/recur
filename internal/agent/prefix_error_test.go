@@ -32,8 +32,7 @@ func TestInitializationFailureRetryAndSaveErrors(t *testing.T) {
 	a.REPL.Prefix = "if then"
 	var events []Event
 	err = a.Run(context.Background(), "keep request", func(e Event) { events = append(events, e) })
-	var init *InitializationError
-	if !errors.As(err, &init) || requests != 0 || len(a.History) != 0 {
+	if err == nil || requests != 0 || len(a.History) != 0 {
 		t.Fatalf("failed init sent/committed user request: %v", err)
 	}
 	// The input is shown immediately, then withdrawn when the prefix fails.
@@ -65,7 +64,7 @@ func TestInitializationFailureRetryAndSaveErrors(t *testing.T) {
 	a.REPL.Close()
 	a.REPL.Prefix = "if then"
 	err = a.Run(context.Background(), "retry me", func(Event) {})
-	if !errors.As(err, &init) || !strings.Contains(err.Error(), "prefix failed") || !strings.Contains(err.Error(), "save history") {
+	if err == nil || !strings.Contains(err.Error(), "prefix failed") || !strings.Contains(err.Error(), "save history") {
 		t.Fatalf("lost combined errors: %v", err)
 	}
 }
@@ -115,9 +114,9 @@ func TestCancelledInitializationDoesNotCommitRequest(t *testing.T) {
 	defer a.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err = a.Run(ctx, "unsent", func(Event) {})
-	var initialization *InitializationError
-	if !errors.Is(err, context.Canceled) || !errors.As(err, &initialization) || len(a.History) != 0 {
+	withdrawn := false
+	err = a.Run(ctx, "unsent", func(e Event) { withdrawn = withdrawn || e.Kind == "withdraw" && e.Text == "unsent" })
+	if !errors.Is(err, context.Canceled) || !withdrawn || len(a.History) != 0 {
 		t.Fatal("cancelled request cannot be retried safely")
 	}
 }

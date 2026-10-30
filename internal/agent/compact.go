@@ -189,7 +189,7 @@ func (a *Agent) compactIfNeeded(ctx context.Context, emit func(Event)) {
 
 // Reload re-reads settings and prompts and restarts the shell while keeping the history.
 func (a *Agent) Reload() error {
-	c, err := loadConfiguration(a.home)
+	c, err := loadConfiguration(a.home, a.REPL.Dir)
 	if err != nil {
 		return err
 	}
@@ -200,7 +200,7 @@ func (a *Agent) Reload() error {
 	}
 	a.REPL.Close()
 	a.REPL.Prefix, a.REPL.PrefixOutput = c.prefix, ""
-	a.System = c.system
+	a.System, a.LocalConfig = c.system, c.local
 	a.applySettings(c.settings)
 	return nil
 }

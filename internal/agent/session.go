@@ -84,21 +84,47 @@ func loadOrCreateFile(path, fallback string) (string, error) {
 type configuration struct {
 	settings       Settings
 	prefix, system string
+	local          string // project .recur directory that supplied a prompt file
 }
 
-func loadConfiguration(dir string) (configuration, error) {
-	var c configuration
-	var err error
-	c.settings, err = loadSettings(dir)
-	if err != nil {
+// loadConfiguration reads settings from home. With enable_local_recur, system.md
+// and prefix.sh come from cwd/.recur when they exist there and it is not home.
+func loadConfiguration(home, cwd string) (c configuration, err error) {
+	if c.settings, err = loadSettings(home); err != nil {
 		return c, err
 	}
-	c.prefix, err = loadOrCreateFile(filepath.Join(dir, "prefix.sh"), prompts.Prefix)
-	if err != nil {
+	local, err := filepath.Abs(filepath.Join(cwd, ".recur"))
+	if err != nil || !c.settings.EnableLocalRecur || !projectConfig(local, home) {
+		local = ""
+	}
+	if c.prefix, err = c.load(home, local, "prefix.sh", prompts.Prefix); err != nil {
 		return c, err
 	}
-	c.system, err = loadOrCreateFile(filepath.Join(dir, "system.md"), prompts.System)
+	c.system, err = c.load(home, local, "system.md", prompts.System)
 	return c, err
+}
+
+// load prefers the project copy, which is never created, over the global one.
+func (c *configuration) load(home, local, name, fallback string) (string, error) {
+	if local != "" {
+		if info, err := os.Stat(filepath.Join(local, name)); err == nil && info.Mode().IsRegular() {
+			c.local = local
+			data, err := os.ReadFile(filepath.Join(local, name))
+			return string(data), err
+		}
+	}
+	return loadOrCreateFile(filepath.Join(home, name), fallback)
+}
+
+// projectConfig reports whether local is a directory other than RECUR_HOME;
+// os.SameFile also matches symlinked and differently cased paths.
+func projectConfig(local, home string) bool {
+	info, err := os.Stat(local)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	homeInfo, err := os.Stat(home)
+	return err != nil || !os.SameFile(info, homeInfo)
 }
 
 // Session changes are called only after the active turn has finished.
@@ -109,7 +135,7 @@ func (a *Agent) changeSession(id string) error {
 	if id != "" && id == strings.TrimSuffix(filepath.Base(a.HistoryPath), ".jsonl") {
 		return nil
 	}
-	c, err := loadConfiguration(a.home)
+	c, err := loadConfiguration(a.home, a.REPL.Dir)
 	if err != nil {
 		return err
 	}
@@ -118,7 +144,7 @@ func (a *Agent) changeSession(id string) error {
 			return err
 		}
 	}
-	next := &Agent{home: a.home, sessionsDir: a.sessionsDir, REPL: a.REPL, System: c.system}
+	next := &Agent{home: a.home, sessionsDir: a.sessionsDir, REPL: a.REPL, System: c.system, LocalConfig: c.local}
 	next.applySettings(c.settings)
 	if id == "" {
 		err = next.createSession()

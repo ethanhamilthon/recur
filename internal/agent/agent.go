@@ -60,11 +60,6 @@ func partialCode(arguments string) string {
 	return ""
 }
 
-type InitializationError struct{ Err error }
-
-func (e *InitializationError) Error() string { return e.Err.Error() }
-func (e *InitializationError) Unwrap() error { return e.Err }
-
 type Agent struct {
 	listener          net.Listener
 	socketDir         string
@@ -76,6 +71,7 @@ type Agent struct {
 	History           []json.RawMessage
 	HistoryPath       string
 	System            string
+	LocalConfig       string // project .recur directory supplying prompts, or ""
 	client            openai.Client
 	records           []Record
 	lastRequest       Metadata
@@ -87,11 +83,11 @@ func New(dir string, target ...string) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := loadConfiguration(config)
+	cfg, err := loadConfiguration(config, dir)
 	if err != nil {
 		return nil, err
 	}
-	a := &Agent{home: config, System: cfg.system, REPL: &repl.REPL{Prefix: cfg.prefix, Dir: dir}}
+	a := &Agent{home: config, System: cfg.system, LocalConfig: cfg.local, REPL: &repl.REPL{Prefix: cfg.prefix, Dir: dir}}
 	a.applySettings(cfg.settings)
 	if err := a.openProject(dir, target...); err != nil {
 		a.release()
@@ -178,7 +174,7 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 	initFailed := func(cause error) error {
 		a.records = recordsBefore
 		forward(Event{Kind: "withdraw", ID: shown.ID, Text: input.Text})
-		return &InitializationError{cause}
+		return cause
 	}
 
 	var total Usage

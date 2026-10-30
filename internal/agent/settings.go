@@ -32,6 +32,7 @@ type Settings struct {
 	Model            string              `toml:"model"`
 	ReasoningSummary string              `toml:"reasoning_summary"`
 	Effort           string              `toml:"effort"`
+	EnableLocalRecur bool                `toml:"enable_local_recur"`
 	Providers        map[string]Provider `toml:"providers"`
 }
 
@@ -56,6 +57,9 @@ max_agent_steps = 0
 max_code_lines = 999
 max_result_lines = 4
 max_thinking_lines = 4
+# Read system.md and prefix.sh from .recur in the launch directory when present
+# there (unless it is RECUR_HOME). Settings and sessions always stay in RECUR_HOME.
+enable_local_recur = true
 `
 
 func loadSettings(dir string) (Settings, error) {

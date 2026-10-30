@@ -40,7 +40,8 @@ Every call exports session metadata: RECUR_SESSION_ID, RECUR_MODEL,
 RECUR_PROVIDER, RECUR_EFFORT, RECUR_CTX_SIZE and RECUR_ENDPOINT (the session
 socket used by recur notify and recur view).
 
-Prefix source (prefix.sh) remains in system instructions. It runs once per new
+Prefix source (prefix.sh, or .recur/prefix.sh of the project, see recur docs
+sessions) remains in system instructions. It runs once per new
 shell: at startup, after /new, /resume, /reload, or when shell state was lost.
 Its output arrives in a separate user <notify> before the actual user message.
 Only a syntax error, timeout or cancellation fails the prefix and prevents the

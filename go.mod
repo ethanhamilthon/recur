@@ -12,6 +12,7 @@ require (
 	github.com/muesli/termenv v0.16.0
 	github.com/openai/openai-go/v3 v3.89.0
 	github.com/pelletier/go-toml/v2 v2.2.4
+	golang.org/x/mod v0.42.0
 	mvdan.cc/sh/v3 v3.14.1
 )
 

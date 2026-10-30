@@ -148,3 +148,68 @@ func TestDefaultFilesPrivateAndNeverOverwritten(t *testing.T) {
 		t.Fatalf("directory permissions: %v %v", info, err)
 	}
 }
+
+func TestProjectLocalPrompts(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("RECUR_HOME", home)
+	cwd := t.TempDir()
+	local := filepath.Join(cwd, ".recur")
+	write := func(path, text string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(home, "system.md"), "global system")
+	write(filepath.Join(home, "prefix.sh"), "echo global")
+	write(filepath.Join(local, "system.md"), "local system")
+	write(filepath.Join(local, "settings.toml"), "model = 'local-model'\n")
+	write(filepath.Join(home, "settings.toml"), "max_result_lines = 4\n") // no key: default on
+	a, err := New(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	// A missing local file falls back to the global copy; local settings are ignored.
+	if a.System != "local system" || a.REPL.Prefix != "echo global" || a.LocalConfig != local {
+		t.Fatalf("system=%q prefix=%q local=%q", a.System, a.REPL.Prefix, a.LocalConfig)
+	}
+	if a.Settings().Model == "local-model" || !a.Settings().EnableLocalRecur || !strings.HasPrefix(a.sessionsDir, home) {
+		t.Fatal("settings and sessions must stay global")
+	}
+	write(filepath.Join(local, "prefix.sh"), "echo local")
+	if err = a.Reload(); err != nil || a.REPL.Prefix != "echo local" {
+		t.Fatalf("reload ignored local prefix: %q %v", a.REPL.Prefix, err)
+	}
+	write(filepath.Join(local, "system.md"), "changed")
+	if err = a.NewSession(); err != nil || a.System != "changed" || a.LocalConfig != local {
+		t.Fatalf("new session ignored local system: %q %v", a.System, err)
+	}
+	entries, _ := os.ReadDir(local)
+	if len(entries) != 3 {
+		t.Fatalf("recur must not create files in the project .recur: %v", entries)
+	}
+	write(filepath.Join(home, "settings.toml"), "enable_local_recur = false\n")
+	if err = a.Reload(); err != nil || a.System != "global system" || a.LocalConfig != "" {
+		t.Fatalf("disabled local config still used: %q %v", a.System, err)
+	}
+}
+
+func TestLocalConfigIgnoredWhenItIsHome(t *testing.T) {
+	cwd := t.TempDir()
+	t.Setenv("RECUR_HOME", ".recur") // relative to cwd: the project .recur is the home
+	if err := os.MkdirAll(filepath.Join(cwd, ".recur"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	a, err := New(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if a.LocalConfig != "" {
+		t.Fatalf("home treated as project config: %q", a.LocalConfig)
+	}
+}
