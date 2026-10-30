@@ -61,3 +61,23 @@ func TestSendDuringCompactionIsRefused(t *testing.T) {
 		t.Fatalf("expected a notice, got %+v", got)
 	}
 }
+
+// TestCompactWithGuidanceRunsFromEnter: text after /compact is the guidance,
+// not an ordinary chat message.
+func TestCompactWithGuidanceRunsFromEnter(t *testing.T) {
+	a, err := agent.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	m := newModel(a, "/project")
+	m.input.SetValue("/compact keep the API decisions")
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if cmd == nil || !m.compacting || m.steering != nil {
+		t.Fatalf("/compact with guidance did not start compaction: compacting=%v steering=%v", m.compacting, m.steering != nil)
+	}
+	if m.input.Value() != "" {
+		t.Fatalf("composer not cleared: %q", m.input.Value())
+	}
+}

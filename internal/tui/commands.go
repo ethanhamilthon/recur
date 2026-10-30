@@ -89,13 +89,22 @@ func (m model) completions() []command {
 		return matches
 	}
 
-	if !m.hideCompletion && strings.HasPrefix(text, "/rename ") && !strings.ContainsAny(text, "\n\t") {
-		name := strings.TrimSpace(strings.TrimPrefix(text, "/rename"))
-		label := "Rename session to: " + name
-		if name == "" {
-			label = "Type a name; Enter on empty restores the default title"
+	// Commands with a free-text argument: Enter runs the typed text as is.
+	if !m.hideCompletion && !strings.ContainsAny(text, "\n\t") {
+		if name, ok := strings.CutPrefix(text, "/rename "); ok {
+			label := "Rename session to: " + strings.TrimSpace(name)
+			if strings.TrimSpace(name) == "" {
+				label = "Type a name; Enter on empty restores the default title"
+			}
+			return []command{{name: text, icon: "#", label: label}}
 		}
-		return []command{{name: text, icon: "#", label: label}}
+		if prompt, ok := strings.CutPrefix(text, "/compact "); ok {
+			label := "Compact with guidance: " + strings.TrimSpace(prompt)
+			if strings.TrimSpace(prompt) == "" {
+				label = "Type guidance for the summary, or Enter to compact"
+			}
+			return []command{{name: text, icon: "=", label: label}}
+		}
 	}
 	if m.hideCompletion || !strings.HasPrefix(text, "/") || strings.ContainsAny(text, " \n\t") {
 		return nil
