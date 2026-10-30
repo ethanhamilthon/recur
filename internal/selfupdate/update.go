@@ -2,11 +2,7 @@
 package selfupdate
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -14,8 +10,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -24,15 +20,12 @@ import (
 // Repo is the GitHub repository that publishes recur releases.
 const Repo = "ethanhamilthon/recur"
 
-const (
-	cacheTTL = 6 * time.Hour
-	maxAsset = 64 << 20
-)
+const cacheTTL = 6 * time.Hour
 
 // Release endpoints are variables so tests can serve them locally.
 var (
-	apiURL  = "https://api.github.com/" + "repos/" + Repo + "/releases/latest"
-	downURL = "https://github.com/" + Repo + "/releases/download/"
+	apiURL    = "https://api.github.com/" + "repos/" + Repo + "/releases/latest"
+	scriptURL = "https://raw.githubusercontent.com/" + Repo + "/"
 )
 
 var client = &http.Client{Timeout: 60 * time.Second}
@@ -162,47 +155,8 @@ func newerTag(current, latest string) string {
 	return ""
 }
 
-func assetName() (string, error) {
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" || runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
-		return "", fmt.Errorf("no prebuilt binary for %s/%s; build from source", runtime.GOOS, runtime.GOARCH)
-	}
-	return fmt.Sprintf("recur_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH), nil
-}
-
-func checksum(listing []byte, asset string) string {
-	for _, line := range strings.Split(string(listing), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 2 && strings.TrimPrefix(fields[1], "*") == asset {
-			return strings.ToLower(fields[0])
-		}
-	}
-	return ""
-}
-
-// binaryFromArchive returns the recur executable stored in a release tarball.
-func binaryFromArchive(archive []byte) ([]byte, error) {
-	reader, err := gzip.NewReader(strings.NewReader(string(archive)))
-	if err != nil {
-		return nil, err
-	}
-	defer reader.Close()
-	entries := tar.NewReader(reader)
-	for {
-		header, err := entries.Next()
-		if errors.Is(err, io.EOF) {
-			return nil, errors.New("release archive has no recur binary")
-		}
-		if err != nil {
-			return nil, err
-		}
-		if header.Typeflag != tar.TypeReg || filepath.Base(header.Name) != "recur" {
-			continue
-		}
-		return io.ReadAll(io.LimitReader(entries, maxAsset))
-	}
-}
-
-// Install replaces the running binary with the newest release.
+// Install runs the release's install.sh for the directory of the running binary,
+// so checksum verification and extraction live in one place.
 func Install(ctx context.Context, current string, out io.Writer) error {
 	latest, err := Latest(ctx)
 	if err != nil {
@@ -212,31 +166,6 @@ func Install(ctx context.Context, current string, out io.Writer) error {
 		fmt.Fprintf(out, "recur %s is the latest release.\n", current)
 		return nil
 	}
-	asset, err := assetName()
-	if err != nil {
-		return err
-	}
-	base := downURL + latest + "/"
-	archive, err := fetch(ctx, base+asset, maxAsset)
-	if err != nil {
-		return err
-	}
-	sums, err := fetch(ctx, base+"checksums.txt", 1<<20)
-	if err != nil {
-		return err
-	}
-	want := checksum(sums, asset)
-	if want == "" {
-		return fmt.Errorf("checksums.txt does not list %s", asset)
-	}
-	digest := sha256.Sum256(archive)
-	if got := hex.EncodeToString(digest[:]); got != want {
-		return fmt.Errorf("checksum mismatch for %s: got %s, want %s", asset, got, want)
-	}
-	binary, err := binaryFromArchive(archive)
-	if err != nil {
-		return err
-	}
 	target, err := os.Executable()
 	if err != nil {
 		return err
@@ -244,34 +173,14 @@ func Install(ctx context.Context, current string, out io.Writer) error {
 	if resolved, err := filepath.EvalSymlinks(target); err == nil {
 		target = resolved
 	}
-	if err := replace(target, binary); err != nil {
-		return err
+	// The script is pinned to the release tag, not to the moving main branch.
+	cmd := exec.CommandContext(ctx, "sh", "-c", `curl -fsSL "$0" | sh`, scriptURL+latest+"/scripts/install.sh")
+	cmd.Env = append(os.Environ(), "RECUR_BINDIR="+filepath.Dir(target), "RECUR_VERSION="+latest)
+	cmd.Stdout, cmd.Stderr = out, out
+	if err = cmd.Run(); err != nil {
+		return fmt.Errorf("install.sh failed: %w", err)
 	}
-	fmt.Fprintf(out, "Updated recur %s -> %s at %s. Restart recur to use it.\n", strings.TrimPrefix(current, "v"), latest, target)
-	return nil
-}
-
-// replace writes data beside target and renames it into place, so a failed update keeps the old binary.
-func replace(target string, data []byte) error {
-	temp, err := os.CreateTemp(filepath.Dir(target), ".recur-update-*")
-	if err != nil {
-		return fmt.Errorf("cannot write next to %s: %w", target, err)
-	}
-	name := temp.Name()
-	defer os.Remove(name)
-	_, err = temp.Write(data)
-	if closeErr := temp.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return err
-	}
-	if err := os.Chmod(name, 0o755); err != nil {
-		return err
-	}
-	if err := os.Rename(name, target); err != nil {
-		return fmt.Errorf("cannot replace %s: %w", target, err)
-	}
+	fmt.Fprintf(out, "Updated recur %s -> %s. Restart recur to use it.\n", strings.TrimPrefix(current, "v"), latest)
 	return nil
 }
 

@@ -89,6 +89,7 @@ func TestScopedJSONLSessionsResumeAndCheckpoint(t *testing.T) {
 		t.Fatal("startup must open an unsaved new session before first message")
 	}
 	b.Close()
+	a.Close() // release ownership so the session can be reopened
 	resumed, err := New(cwd, id)
 	if err != nil {
 		t.Fatal(err)

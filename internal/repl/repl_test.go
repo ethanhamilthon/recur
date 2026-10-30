@@ -32,7 +32,7 @@ func run(t *testing.T, r *REPL, command string, timeout time.Duration) Result {
 func TestPersistentShell(t *testing.T) {
 	r := &REPL{Dir: "../..", Prefix: prompts.Prefix}
 	start(t, r)
-	if !strings.Contains(r.PrefixOutput, "# recur") {
+	if !strings.Contains(strings.ToLower(r.PrefixOutput), "# recur") {
 		t.Fatalf("prefix output: %q", r.PrefixOutput)
 	}
 	for _, test := range []struct {

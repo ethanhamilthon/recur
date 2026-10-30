@@ -4,8 +4,8 @@ recur -prompt 'request' runs a single turn. Without --resume ID, headless mode
 creates a new project session. --resume accepts a full existing session ID from
 this project; an unknown ID is an error, not a new session.
 
-recur --mode stdio reads one text prompt per input line and prints answer text to
-stdout with diagnostics/tool output on stderr. recur --mode jsonl reads one
+Without --mode, --prompt prints only the completed assistant answers to stdout;
+errors go to stderr. recur --mode jsonl reads one
 {"prompt":"text"} object per line. JSON strings can contain escaped newlines.
 JSONL stdout contains session, display events, and done records. Events have
 type, text, id, meta, and provisional fields. done includes ok and session
@@ -32,11 +32,7 @@ in-memory and can be lost on exit/crash or session switching; do not assume
 exactly-once delivery after an ambiguous connection failure. There is no
 automatic retry. Accepted notifications are persisted with normal history.
 
-Only one client owns a session's writer lock. Other clients are read-only and
-reload committed snapshots once per second, without starting a shell or
-API request. TUI followers preserve scroll position. JSONL followers emit
-snapshot records when display records change; stdio followers print the full
-text snapshot on changes. Input/prompts are not submitted in read-only mode, though TUI followers can still
-use /new, /resume, /help, and /quit. Followers do not promote themselves
-automatically; reopen the session after the owner exits to acquire ownership. OS locks are released even when a process
-crashes. Separate sessions can be used concurrently.
+Only one client owns a session's writer lock. Opening a session that another
+recur process owns fails with "session is in use"; reopen it after the owner
+exits. OS locks are released even when a process crashes. Separate sessions can
+be used concurrently.

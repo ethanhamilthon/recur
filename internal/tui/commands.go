@@ -15,7 +15,6 @@ var commands = []command{
 	{name: "/new", icon: "+", description: "Start a new chat and shell; reload prompt files"},
 	{name: "/help", icon: "?", description: "Show commands and keyboard shortcuts"},
 	{name: "/quit", icon: "->", description: "Save the chat and exit"},
-	{name: "/cancel", icon: "!", description: "Cancel the current turn"},
 	{name: "/resume", icon: "<", description: "Resume a saved session in this project"},
 	{name: "/compact", icon: "=", description: "Summarize older turns; add a prompt to guide it"},
 	{name: "/reload", icon: "*", description: "Reload settings and prompts; restart the shell"},
@@ -93,9 +92,6 @@ func (m model) completions() []command {
 	}
 	var result []command
 	for _, cmd := range commands {
-		if m.a.ReadOnly && cmd.name != "/new" && cmd.name != "/help" && cmd.name != "/quit" && cmd.name != "/resume" {
-			continue
-		}
 		if strings.HasPrefix(cmd.name, text) {
 			result = append(result, cmd)
 		}
@@ -157,14 +153,14 @@ func (m model) runCommand(name string) (tea.Model, tea.Cmd) {
 	}
 	switch verb[0] {
 	case "/model", "/login":
-		if m.busy || m.a.ReadOnly {
+		if m.busy {
 			return m.stop("notice", "Wait for the active turn before changing settings.")
 		}
 		cmd := m.openPicker(strings.TrimPrefix(verb[0], "/"))
 		m.refresh(true)
 		return m, cmd
 	case "/reload":
-		if m.busy || m.a.ReadOnly {
+		if m.busy {
 			return m.stop("notice", "Wait for the active turn before reloading settings.")
 		}
 		if err := m.a.Reload(); err != nil {
@@ -173,7 +169,7 @@ func (m model) runCommand(name string) (tea.Model, tea.Cmd) {
 		m.cache = nil
 		m.add("notice", "Settings reloaded; shell state was reset.")
 	case "/compact":
-		if m.busy || m.a.ReadOnly {
+		if m.busy {
 			return m.stop("notice", "Wait for the active turn before compacting.")
 		}
 		return m.startCompact(strings.TrimSpace(strings.TrimPrefix(name, "/compact")))
@@ -211,18 +207,12 @@ func (m model) runCommand(name string) (tea.Model, tea.Cmd) {
 			m.requestCancel()
 		} else {
 			m.a.RememberDisplay(m.entries)
-			if !m.a.ReadOnly && m.a.HasSavedSession() {
+			if m.a.HasSavedSession() {
 				if err := m.a.Save(); err != nil {
 					return m.stop("error", err.Error())
 				}
 			}
 			return m, tea.Quit
-		}
-	case "/cancel":
-		if m.busy {
-			m.requestCancel()
-		} else {
-			return m.stop("notice", "No turn is running.")
 		}
 	default:
 		return m.stop("error", "Unknown command: "+name+". Type /help.")

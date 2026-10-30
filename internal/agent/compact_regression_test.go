@@ -91,21 +91,6 @@ func TestCompactSaveFailureRestoresHistoryAndJournal(t *testing.T) {
 	}
 }
 
-func TestCompactReadOnlyDoesNotRequestSummary(t *testing.T) {
-	a, closeAll := summaryAgent(t, func(w http.ResponseWriter, r *http.Request) {
-		t.Error("read-only compaction must not request a summary")
-	})
-	defer closeAll()
-	a.History = compactHistory(t, 5)
-	a.ReadOnly = true
-	if _, err := a.Compact(context.Background(), ""); err == nil {
-		t.Fatal("read-only compaction succeeded")
-	}
-	if len(a.History) != 20 {
-		t.Fatal("read-only compaction changed history")
-	}
-}
-
 func TestEstimateTokensCountsEachImageNotTextMentions(t *testing.T) {
 	image := map[string]string{"type": "input_image", "image_url": "data:image/png;base64,AAAA"}
 	estimate := func(parts ...any) int64 {

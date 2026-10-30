@@ -88,9 +88,6 @@ func (m model) bottomBar() string {
 	if settings.Provider == "" || settings.Model == "" {
 		left = "no model selected · " + ctx
 	}
-	if m.a.ReadOnly {
-		left = "READ-ONLY · " + left
-	}
 	right := ansi.Strip(strings.ReplaceAll(shortPath(m.cwd), "\n", " "))
 	left = ansi.Strip(strings.ReplaceAll(left, "\n", " "))
 	width := max(1, m.width)

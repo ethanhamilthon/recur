@@ -121,7 +121,7 @@ func TestModelListUsesSelectedProvider(t *testing.T) {
 	defer server.Close()
 	a := &Agent{}
 	a.applySettings(Settings{Provider: "p", Model: "m", Providers: map[string]Provider{"p": {BaseURL: server.URL, APIKey: "selected"}}})
-	models, errs := a.AllModels(context.Background())
+	models, errs := AllModels(context.Background(), a.Settings().Providers)
 	if len(errs) != 0 || len(models) != 2 || models[0].Model != "a" || models[1].Model != "z" {
 		t.Fatalf("%v %v", models, errs)
 	}

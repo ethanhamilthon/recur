@@ -146,9 +146,6 @@ func (a *Agent) summarize(ctx context.Context, old []json.RawMessage, prompt str
 // Compact replaces everything before the last CompactKeepTurns turns with one summary.
 // Callers ensure an idle session.
 func (a *Agent) Compact(ctx context.Context, prompt string) (string, error) {
-	if err := a.Writable(); err != nil {
-		return "", err
-	}
 	keep := max(1, a.settings.CompactKeepTurns)
 	cut := turnStart(a.History, keep)
 	// Compacting an existing summary would replace it with another summary.
@@ -192,9 +189,6 @@ func (a *Agent) compactIfNeeded(ctx context.Context, emit func(Event)) {
 
 // Reload re-reads settings and prompts and restarts the shell while keeping the history.
 func (a *Agent) Reload() error {
-	if err := a.Writable(); err != nil {
-		return err
-	}
 	c, err := loadConfiguration(a.home)
 	if err != nil {
 		return err

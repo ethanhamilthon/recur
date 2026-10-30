@@ -270,11 +270,6 @@ func TestPendingImagesPreventDestructiveSessionSwitch(t *testing.T) {
 	if cmd != nil || m.input.Value() != "caption" || len(m.images) != 1 {
 		t.Fatal("session switch discarded unsent attachment")
 	}
-	m.a.ReadOnly = true
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlV})
-	if cmd != nil || next.(model).pasting {
-		t.Fatal("read-only client read clipboard")
-	}
 }
 func TestClipboardPendingLimitAndPickerRejection(t *testing.T) {
 	m := newModel(&agent.Agent{}, "/project")

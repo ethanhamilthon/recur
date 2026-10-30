@@ -109,6 +109,7 @@ func TestViewDeliveredAfterAllToolOutputsAndPersists(t *testing.T) {
 	if requests != 2 || captured == "" {
 		t.Fatalf("image not delivered: requests=%d", requests)
 	}
+	a.Close() // release ownership so the session can be reopened
 	restored, err := New(dir, a.SessionInfo()["id"].(string))
 	if err != nil {
 		t.Fatal(err)

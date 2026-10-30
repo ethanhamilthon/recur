@@ -25,20 +25,29 @@ func (input Input) Display() string {
 	return strings.TrimSpace(text)
 }
 func (a *Agent) addInput(input Input, emit func(Event), steering bool) {
+	a.commitInput(input)
+	emit(inputEvent(input, steering))
+}
+
+// commitInput appends the input to API history without displaying it.
+func (a *Agent) commitInput(input Input) {
 	if len(input.Images) == 0 {
 		a.message("user", input.Text)
-	} else {
-		parts := []any{map[string]any{"type": "input_text", "text": input.Display()}}
-		for _, img := range input.Images {
-			parts = append(parts, map[string]any{"type": "input_image", "image_url": img.URL, "detail": "auto"})
-		}
-		a.History = append(a.History, raw(map[string]any{"role": "user", "content": parts}))
+		return
 	}
+	parts := []any{map[string]any{"type": "input_text", "text": input.Display()}}
+	for _, img := range input.Images {
+		parts = append(parts, map[string]any{"type": "input_image", "image_url": img.URL, "detail": "auto"})
+	}
+	a.History = append(a.History, raw(map[string]any{"role": "user", "content": parts}))
+}
+
+func inputEvent(input Input, steering bool) Event {
 	kind := "user"
 	if len(input.Images) == 0 && strings.HasPrefix(input.Text, "<notify>") {
 		kind = "notice"
 	}
-	emit(Event{Kind: kind, Text: input.Display(), Steering: steering})
+	return Event{Kind: kind, Text: input.Display(), Steering: steering}
 }
 
 // Steering serializes acceptance and recall; taken instructions cannot be recalled.

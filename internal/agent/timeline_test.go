@@ -89,7 +89,7 @@ func TestFullTurnLiveAndHistory(t *testing.T) {
 	for _, r := range live {
 		kinds = append(kinds, r.Kind)
 	}
-	want := []string{"notice", "user", "reasoning", "assistant", "code", "code", "output", "error", "assistant"}
+	want := []string{"user", "notice", "reasoning", "assistant", "code", "code", "output", "error", "assistant"}
 	if !reflect.DeepEqual(kinds, want) {
 		t.Fatalf("kinds: %v", kinds)
 	}
@@ -105,6 +105,7 @@ func TestFullTurnLiveAndHistory(t *testing.T) {
 	if *final.Meta.Usage != (Usage{Input: 2100, Output: 120, Cached: 600}) || *final.Meta.ContextInput != 1100 || final.Meta.Duration <= 0 {
 		t.Fatalf("summary or context wrong: %+v", final.Meta)
 	}
+	a.Close() // release ownership so the session can be reopened
 	restored, err := New(dir, a.SessionInfo()["id"].(string))
 	if err != nil {
 		t.Fatal(err)
@@ -155,6 +156,7 @@ func TestItemContentIsLiveAndSurvivesFailedStream(t *testing.T) {
 	if err == nil || len(live) != 4 || live[2].Text != "intermediate complete" {
 		t.Fatalf("live=%+v err=%v", live, err)
 	}
+	a.Close() // release ownership so the session can be reopened
 	restored, err := New(dir, a.SessionInfo()["id"].(string))
 	if err != nil {
 		t.Fatal(err)

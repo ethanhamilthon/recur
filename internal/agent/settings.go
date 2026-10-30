@@ -2,9 +2,11 @@ package agent
 
 import (
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -57,7 +59,10 @@ max_thinking_lines = 4
 `
 
 func loadSettings(dir string) (Settings, error) {
-	s := Settings{MaxCodeLines: 999, MaxResultLines: 4, MaxThinkingLines: 4, MaxContextTokens: 400000, CompactKeepTurns: 4}
+	var s Settings
+	if err := toml.Unmarshal([]byte(defaultSettings), &s); err != nil {
+		return s, err
+	}
 	path := filepath.Join(dir, "settings.toml")
 	text, err := loadOrCreateFile(path, defaultSettings)
 	if err != nil {
@@ -71,6 +76,9 @@ func loadSettings(dir string) (Settings, error) {
 	}
 	return s, nil
 }
+
+// Efforts are the reasoning efforts offered by /model; empty uses the provider default.
+var Efforts = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 
 func validateSettings(s Settings) error {
 	if s.MaxCodeLines < 0 || s.MaxResultLines < 0 || s.MaxThinkingLines < 0 {
@@ -95,9 +103,7 @@ func validateSettings(s Settings) error {
 	if s.ReasoningSummary != "" && s.ReasoningSummary != "auto" && s.ReasoningSummary != "off" {
 		return fmt.Errorf("reasoning_summary must be auto or off")
 	}
-	switch s.Effort {
-	case "", "none", "minimal", "low", "medium", "high", "xhigh", "max":
-	default:
+	if s.Effort != "" && !slices.Contains(Efforts, s.Effort) {
 		return fmt.Errorf("unsupported effort %q", s.Effort)
 	}
 	return nil
@@ -120,10 +126,7 @@ func configDir(cwd string) (string, error) {
 // Settings returns the selected configuration without exposing mutable provider state.
 func (a *Agent) Settings() Settings {
 	s := a.settings
-	s.Providers = make(map[string]Provider, len(a.settings.Providers))
-	for name, provider := range a.settings.Providers {
-		s.Providers[name] = provider
-	}
+	s.Providers = maps.Clone(a.settings.Providers)
 	return s
 }
 
@@ -141,4 +144,24 @@ func newClient(p Provider) openai.Client {
 		option.WithMaxRetries(0),
 		option.WithRequestTimeout(10*time.Minute),
 	)
+}
+
+// editSettings applies change to settings.toml and returns the validated result
+// with its encoding; the caller decides when to write it.
+func (a *Agent) editSettings(change func(*Settings) error) (Settings, []byte, error) {
+	s, err := loadSettings(a.home)
+	if err != nil {
+		return s, nil, err
+	}
+	if err = change(&s); err != nil {
+		return s, nil, err
+	}
+	if err = validateSettings(s); err != nil {
+		return s, nil, err
+	}
+	data, err := toml.Marshal(s)
+	return s, data, err
+}
+func (a *Agent) writeSettings(data []byte) error {
+	return writePrivate(filepath.Join(a.home, "settings.toml"), data)
 }

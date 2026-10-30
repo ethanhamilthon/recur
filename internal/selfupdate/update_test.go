@@ -1,18 +1,14 @@
 package selfupdate
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -21,9 +17,9 @@ import (
 // stubEndpoints points the package at a local release server for the test's duration.
 func stubEndpoints(t *testing.T, server *httptest.Server) {
 	t.Helper()
-	api, down := apiURL, downURL
-	apiURL, downURL = server.URL+"/latest", server.URL+"/download/"
-	t.Cleanup(func() { apiURL, downURL = api, down })
+	api, script := apiURL, scriptURL
+	apiURL, scriptURL = server.URL+"/latest", server.URL+"/"
+	t.Cleanup(func() { apiURL, scriptURL = api, script })
 }
 
 func TestNewer(t *testing.T) {
@@ -42,33 +38,6 @@ func TestNewer(t *testing.T) {
 		if got := Newer(c.current, c.latest); got != c.want {
 			t.Fatalf("Newer(%q, %q) = %v, want %v", c.current, c.latest, got, c.want)
 		}
-	}
-}
-
-func TestChecksumAndArchive(t *testing.T) {
-	listing := []byte("abc  recur_darwin_arm64.tar.gz\ndef *recur_linux_amd64.tar.gz\n")
-	if got := checksum(listing, "recur_linux_amd64.tar.gz"); got != "def" {
-		t.Fatalf("checksum = %q", got)
-	}
-	if got := checksum(listing, "recur_windows_amd64.tar.gz"); got != "" {
-		t.Fatalf("unexpected checksum %q", got)
-	}
-	var archive bytes.Buffer
-	gzipWriter := gzip.NewWriter(&archive)
-	tarWriter := tar.NewWriter(gzipWriter)
-	if err := tarWriter.WriteHeader(&tar.Header{Name: "README.md", Mode: 0o644, Size: 2, Typeflag: tar.TypeReg}); err != nil {
-		t.Fatal(err)
-	}
-	tarWriter.Write([]byte("hi"))
-	if err := tarWriter.WriteHeader(&tar.Header{Name: "recur", Mode: 0o755, Size: 6, Typeflag: tar.TypeReg}); err != nil {
-		t.Fatal(err)
-	}
-	tarWriter.Write([]byte("binary"))
-	tarWriter.Close()
-	gzipWriter.Close()
-	binary, err := binaryFromArchive(archive.Bytes())
-	if err != nil || string(binary) != "binary" {
-		t.Fatalf("binaryFromArchive = %q, %v", binary, err)
 	}
 }
 
@@ -100,48 +69,31 @@ func TestAvailableUsesCacheAndFetchesOnce(t *testing.T) {
 	}
 }
 
-func TestInstallReplacesBinary(t *testing.T) {
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
-		t.Skip("no release assets for this platform")
-	}
-	var archive bytes.Buffer
-	gzipWriter := gzip.NewWriter(&archive)
-	tarWriter := tar.NewWriter(gzipWriter)
-	tarWriter.WriteHeader(&tar.Header{Name: "recur", Mode: 0o755, Size: 4, Typeflag: tar.TypeReg})
-	tarWriter.Write([]byte("next"))
-	tarWriter.Close()
-	gzipWriter.Close()
-	asset, err := assetName()
-	if err != nil {
-		t.Fatal(err)
-	}
-	digest := sha256.Sum256(archive.Bytes())
-	sums := hex.EncodeToString(digest[:]) + "  " + asset + "\n"
+func TestInstallRunsPinnedScriptForBinaryDirectory(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "ran")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/latest"):
+		switch r.URL.Path {
+		case "/latest":
 			json.NewEncoder(w).Encode(map[string]string{"tag_name": "v9.9.9"})
-		case strings.HasSuffix(r.URL.Path, "checksums.txt"):
-			w.Write([]byte(sums))
+		case "/v9.9.9/scripts/install.sh":
+			fmt.Fprintf(w, "echo \"$RECUR_VERSION $RECUR_BINDIR\" > %q\n", marker)
 		default:
-			w.Write(archive.Bytes())
+			http.NotFound(w, r)
 		}
 	}))
 	defer server.Close()
 	stubEndpoints(t, server)
-
-	target := filepath.Join(t.TempDir(), "recur")
-	if err := os.WriteFile(target, []byte("old"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := replace(target, []byte("new")); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(target)
-	if err != nil || string(data) != "new" {
-		t.Fatalf("replace left %q, %v", data, err)
-	}
 	var out bytes.Buffer
+	if err := Install(context.Background(), "0.2.1", &out); err != nil {
+		t.Fatalf("%v: %s", err, out.String())
+	}
+	executable, _ := os.Executable()
+	executable, _ = filepath.EvalSymlinks(executable)
+	data, err := os.ReadFile(marker)
+	if err != nil || strings.TrimSpace(string(data)) != "v9.9.9 "+filepath.Dir(executable) {
+		t.Fatalf("script env = %q, %v", data, err)
+	}
+	out.Reset()
 	if err := Run(context.Background(), "0.2.1", []string{"-check"}, &out); err != nil {
 		t.Fatal(err)
 	}

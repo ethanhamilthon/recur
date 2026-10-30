@@ -115,6 +115,7 @@ func TestToolCallStreamingIsDisplayOnlyAndSequential(t *testing.T) {
 					t.Fatal("request metadata missing")
 				}
 			}
+			a.Close() // release ownership so the session can be reopened
 			b, err := New(a.REPL.Dir, a.SessionInfo()["id"].(string))
 			if err != nil {
 				t.Fatal(err)

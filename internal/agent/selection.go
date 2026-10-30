@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"github.com/pelletier/go-toml/v2"
 )
 
 type Selection struct {
@@ -15,8 +13,6 @@ type Selection struct {
 	Model    string `json:"model"`
 	Effort   string `json:"effort"`
 }
-
-var Efforts = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 
 func (a *Agent) selection() *Selection {
 	return &Selection{a.settings.Provider, a.settings.Model, a.settings.Effort}
@@ -37,19 +33,11 @@ func (a *Agent) SessionInfo() map[string]any {
 
 // Select updates this session and new-session defaults; callers must wait for an idle turn.
 func (a *Agent) Select(provider, model, effort string) error {
-	if err := a.Writable(); err != nil {
-		return err
-	}
-	s, err := loadSettings(a.home)
+	s, data, err := a.editSettings(func(s *Settings) error {
+		s.Provider, s.Model, s.Effort = provider, model, effort
+		return nil
+	})
 	if err != nil {
-		return err
-	}
-	s.Provider, s.Model, s.Effort = provider, model, effort
-	data, err := toml.Marshal(s)
-	if err != nil {
-		return err
-	}
-	if err = validateSettings(s); err != nil {
 		return err
 	}
 	previous := a.settings
@@ -60,7 +48,7 @@ func (a *Agent) Select(provider, model, effort string) error {
 			return err
 		}
 	}
-	if err = writePrivate(filepath.Join(a.home, "settings.toml"), data); err != nil {
+	if err = a.writeSettings(data); err != nil {
 		a.applySettings(previous)
 		if a.HasSavedSession() {
 			return fmt.Errorf("saving defaults: %w; session rollback: %v", err, a.Save())
@@ -75,8 +63,7 @@ type ModelChoice struct{ Provider, Model string }
 
 // AllModels lists models from every configured provider concurrently. A
 // provider that fails is reported in errs and does not hide the others.
-func (a *Agent) AllModels(ctx context.Context) (choices []ModelChoice, errs map[string]error) {
-	providers := a.Settings().Providers
+func AllModels(ctx context.Context, providers map[string]Provider) (choices []ModelChoice, errs map[string]error) {
 	type result struct {
 		name   string
 		models []string
@@ -115,31 +102,23 @@ func (a *Agent) AllModels(ctx context.Context) (choices []ModelChoice, errs map[
 }
 
 func (a *Agent) AddProvider(name string, provider Provider) error {
-	if err := a.Writable(); err != nil {
-		return err
-	}
-	s, err := loadSettings(a.home)
+	s, data, err := a.editSettings(func(s *Settings) error {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("provider name is required")
+		}
+		if _, exists := s.Providers[name]; exists {
+			return fmt.Errorf("provider already exists: %s", name)
+		}
+		if s.Providers == nil {
+			s.Providers = map[string]Provider{}
+		}
+		s.Providers[name] = provider
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(name) == "" {
-		return fmt.Errorf("provider name is required")
-	}
-	if _, exists := s.Providers[name]; exists {
-		return fmt.Errorf("provider already exists: %s", name)
-	}
-	if s.Providers == nil {
-		s.Providers = map[string]Provider{}
-	}
-	s.Providers[name] = provider
-	if err = validateSettings(s); err != nil {
-		return err
-	}
-	data, err := toml.Marshal(s)
-	if err != nil {
-		return err
-	}
-	if err = writePrivate(filepath.Join(a.home, "settings.toml"), data); err != nil {
+	if err = a.writeSettings(data); err != nil {
 		return err
 	}
 	current := a.Settings()

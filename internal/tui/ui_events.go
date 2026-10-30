@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"time"
 
@@ -145,10 +144,6 @@ func (m model) startTurn(text string) (tea.Model, tea.Cmd) {
 	go func() {
 		defer cancel()
 		err := a.RunInput(ctx, submission, func(e agent.Event) { ch <- e }, steering)
-		var initialization *agent.InitializationError
-		if errors.As(err, &initialization) {
-			ch <- agent.Event{Kind: "retry", Text: text}
-		}
 		if errors.Is(err, context.Canceled) {
 			ch <- agent.Event{Kind: "notice", Text: "Turn cancelled."}
 		}
@@ -169,70 +164,4 @@ func (m *model) applyAgentEvent(e agent.Event) {
 		m.contextInput = e.Meta.ContextInput
 	}
 	m.entries = agent.ApplyEvent(m.entries, e)
-}
-
-// NewEventPrinter prints headless deltas immediately and fills missing snapshot content.
-// Repeated added/done/completed snapshots must not duplicate the answer.
-func NewEventPrinter(stdout, stderr io.Writer) func(agent.Event) {
-	streamed := map[string]string{}
-	ended := map[string]bool{}
-	lastID := ""
-	var lastOut io.Writer
-	boundary := func(id string, out io.Writer) {
-		if lastOut != nil && lastID != id && !ended[lastID] {
-			fmt.Fprintln(lastOut)
-			ended[lastID] = true
-		}
-		lastID, lastOut = id, out
-	}
-	return func(e agent.Event) {
-		if (e.Provisional && e.Kind == "code") || e.Kind == "user" {
-			return
-		}
-		switch e.Kind {
-		case "delta", "refusal_delta", "reasoning_delta":
-			out := stdout
-			if e.Kind == "reasoning_delta" {
-				out = stderr
-			}
-			boundary(e.ID, out)
-			fmt.Fprint(out, e.Text)
-			streamed[e.ID] += e.Text
-			ended[e.ID] = false
-		case "assistant", "reasoning":
-			out := stdout
-			if e.Kind == "reasoning" {
-				out = stderr
-			}
-			boundary(e.ID, out)
-			prior := streamed[e.ID]
-			suffix := e.Text
-			if strings.HasPrefix(e.Text, prior) {
-				suffix = strings.TrimPrefix(e.Text, prior)
-			} else if prior != "" {
-				fmt.Fprintln(out)
-			}
-			if suffix != "" {
-				fmt.Fprint(out, suffix)
-				ended[e.ID] = false
-			}
-			streamed[e.ID] = e.Text
-			if (e.Meta != nil || e.ID == "") && !ended[e.ID] {
-				fmt.Fprintln(out)
-				ended[e.ID] = true
-			}
-		default:
-			if e.ID != "" {
-				if prior, ok := streamed[e.ID]; ok && prior == e.Text {
-					return
-				}
-				streamed[e.ID] = e.Text
-			}
-			if lastOut != nil && !ended[lastID] {
-				fmt.Fprintln(lastOut)
-				ended[lastID] = true
-			}
-			fmt.Fprintln(stderr, e.Text)
-		}
-	}
 }

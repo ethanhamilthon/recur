@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"recur/internal/repl"
 )
 
 func TestCompletedItemSavedBeforeResponseFinishes(t *testing.T) {
@@ -47,9 +49,9 @@ func TestCompletedItemSavedBeforeResponseFinishes(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("stream stalled")
 	}
-	// Open the committed snapshot while the writer is still in the response.
-	b, err := New(dir, strings.TrimSuffix(filepath.Base(a.HistoryPath), ".jsonl"))
-	if err != nil {
+	// Read the committed snapshot while the writer is still in the response.
+	b := &Agent{HistoryPath: a.HistoryPath, REPL: &repl.REPL{Dir: a.REPL.Dir}, settings: a.settings}
+	if err = b.readSession(); err != nil {
 		close(release)
 		t.Fatal(err)
 	}

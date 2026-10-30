@@ -45,6 +45,14 @@ func ApplyEvent(records []Record, e Event) []Record {
 	case "refusal_delta":
 		kind = "assistant"
 	}
+	if kind == "withdraw" {
+		for i := len(records) - 1; i >= 0; i-- {
+			if e.ID != "" && records[i].ID == e.ID {
+				return append(records[:i:i], records[i+1:]...)
+			}
+		}
+		return records
+	}
 	if e.ID != "" {
 		for i := len(records) - 1; i >= 0; i-- {
 			if records[i].ID == e.ID {

@@ -40,10 +40,10 @@ func (m *model) openPicker(kind string) tea.Cmd {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	m.menuCancel = cancel
-	generation, snapshot := m.menuGeneration, *m.a
+	generation, providers := m.menuGeneration, m.a.Settings().Providers
 	return func() tea.Msg {
 		defer cancel()
-		models, errs := snapshot.AllModels(ctx)
+		models, errs := agent.AllModels(ctx, providers)
 		return modelChoices{generation, models, errs}
 	}
 }

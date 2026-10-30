@@ -51,7 +51,7 @@ func TestDismissedCompletionAllowsLiteralCommandText(t *testing.T) {
 	}
 }
 
-func TestReadOnlyAllowsNavigationCommandsAndUnsentSessionNotSaved(t *testing.T) {
+func TestNavigationCommandsAndUnsentSessionNotSaved(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
 	cwd := t.TempDir()
 	writer, err := agent.New(cwd)
@@ -66,13 +66,7 @@ func TestReadOnlyAllowsNavigationCommandsAndUnsentSessionNotSaved(t *testing.T) 
 	if err = writer.Save(); err != nil {
 		t.Fatal(err)
 	}
-	id := writer.SessionInfo()["id"].(string)
-	follower, err := agent.New(cwd, id)
-	if err != nil || !follower.ReadOnly {
-		t.Fatalf("expected read-only follower: %v %v", follower.ReadOnly, err)
-	}
-	defer follower.Close()
-	m := newModel(follower, cwd)
+	m := newModel(writer, cwd)
 	for _, r := range "/help" {
 		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 		m = next.(model)
@@ -80,20 +74,11 @@ func TestReadOnlyAllowsNavigationCommandsAndUnsentSessionNotSaved(t *testing.T) 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
 	if len(m.entries) == 0 || !strings.Contains(m.entries[len(m.entries)-1].Text, "/new") {
-		t.Fatalf("help failed in read-only mode: %+v", m.entries)
-	}
-	m.input.SetValue("ordinary message")
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = next.(model)
-	if m.busy || !strings.Contains(m.entries[len(m.entries)-1].Text, "read-only") {
-		t.Fatalf("read-only mode submitted message: %+v", m.entries)
+		t.Fatalf("help failed: %+v", m.entries)
 	}
 	m.input.SetValue("/new")
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
-	if m.a.ReadOnly {
-		t.Fatal("/new did not leave read-only mode")
-	}
 	m.input.SetValue("/quit")
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)

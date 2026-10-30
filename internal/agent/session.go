@@ -19,14 +19,13 @@ func (a *Agent) acquire() error {
 	err = syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 	if errors.Is(err, syscall.EWOULDBLOCK) {
 		file.Close()
-		a.ReadOnly = true
-		return nil
+		return fmt.Errorf("session is in use by another recur process: %s", strings.TrimSuffix(filepath.Base(a.HistoryPath), ".jsonl"))
 	}
 	if err != nil {
 		file.Close()
 		return err
 	}
-	a.owner, a.ReadOnly = file, false
+	a.owner = file
 	if err := a.listenNotifications(); err != nil {
 		a.release()
 		return err
@@ -54,20 +53,6 @@ func (a *Agent) HasSavedSession() bool {
 	return len(a.History) > 0 || err == nil
 }
 func (a *Agent) Close() { a.REPL.Close(); a.release() }
-func (a *Agent) Writable() error {
-	if a.ReadOnly {
-		return fmt.Errorf("session is read-only: another client owns it")
-	}
-	return nil
-}
-
-// Refresh reloads only committed snapshots; read failures leave the current view intact.
-func (a *Agent) Refresh() error {
-	if !a.ReadOnly {
-		return nil
-	}
-	return a.readSession()
-}
 
 // loadOrCreateFile materializes the editable defaults without overwriting user changes.
 func loadOrCreateFile(path, fallback string) (string, error) {
@@ -128,7 +113,7 @@ func (a *Agent) changeSession(id string) error {
 	if err != nil {
 		return err
 	}
-	if !a.ReadOnly && a.HasSavedSession() {
+	if a.HasSavedSession() {
 		if err = a.Save(); err != nil {
 			return err
 		}

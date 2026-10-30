@@ -1,12 +1,9 @@
 package tui
 
 import (
-	"context"
-	"os/exec"
-	"runtime"
 	"strings"
-	"time"
 
+	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -81,24 +78,14 @@ func (s selection) text(rows []string, width int) string {
 // copyText puts text on the system clipboard.
 func copyText(text string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		name, args := "xclip", []string{"-selection", "clipboard"}
-		if runtime.GOOS == "darwin" {
-			name, args = "pbcopy", nil
-		} else if _, err := exec.LookPath("wl-copy"); err == nil {
-			name, args = "wl-copy", nil
-		}
-		cmd := exec.CommandContext(ctx, name, args...)
-		cmd.Stdin = strings.NewReader(text)
-		if err := cmd.Run(); err != nil {
-			return clipboardResult{err: err}
-		}
-		return clipboardCopied{lines: strings.Count(text, "\n") + 1}
+		return clipboardCopied{lines: strings.Count(text, "\n") + 1, err: clipboard.WriteAll(text)}
 	}
 }
 
-type clipboardCopied struct{ lines int }
+type clipboardCopied struct {
+	lines int
+	err   error
+}
 
 // mouseSelection handles left-button selection in the composer and the timeline. It reports
 // whether the event was consumed; the wheel and other buttons keep scrolling the viewport.

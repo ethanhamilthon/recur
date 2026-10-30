@@ -90,9 +90,8 @@ func newModel(a *agent.Agent, cwd string) model {
 }
 
 func (m *model) restoreHistory() {
-	m.entries, m.cache, m.contextInput = nil, nil, nil
-	for _, r := range m.a.Records() {
-		m.entries = append(m.entries, entry{Kind: r.Kind, Text: r.Text, ID: r.ID, Meta: r.Meta})
+	m.entries, m.cache, m.contextInput = m.a.Records(), nil, nil
+	for _, r := range m.entries {
 		if r.Meta != nil && r.Meta.RequestID != "" {
 			m.contextInput = r.Meta.ContextInput
 		}
@@ -100,6 +99,13 @@ func (m *model) restoreHistory() {
 }
 
 type followerTick struct{}
+
+func (m model) idleNotifications() []string {
+	if m.busy {
+		return nil
+	}
+	return m.a.Notifications()
+}
 
 func followerPulse() tea.Cmd {
 	return tea.Tick(time.Second, func(time.Time) tea.Msg { return followerTick{} })
@@ -194,28 +200,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh(true)
 		return m, cmd
 	case followerTick:
-		if !m.busy && !m.a.ReadOnly {
-			if messages := m.a.Notifications(); len(messages) > 0 {
-				draft := m.keepDraft()
-				next, cmd := m.startTurn(messages[0])
-				m = next.(model)
-				for _, text := range messages[1:] {
-					m.steering.Push(text)
-				}
-				m.restoreDraft(draft, follow)
-				return m, tea.Batch(cmd, followerPulse())
+		// While busy, the turn itself accepts notifications as steering.
+		if messages := m.idleNotifications(); len(messages) > 0 {
+			draft := m.keepDraft()
+			next, cmd := m.startTurn(messages[0])
+			m = next.(model)
+			for _, text := range messages[1:] {
+				m.steering.Push(text)
 			}
-		}
-		if m.a.ReadOnly {
-			before := len(m.a.Records())
-			if err := m.a.Refresh(); err != nil {
-				m.add("error", err.Error())
-			} else if len(m.a.Records()) != before {
-				m.entries = nil
-				m.contextInput = nil
-				m.restoreHistory()
-			}
-			m.refresh(follow)
+			m.restoreDraft(draft, follow)
+			return m, tea.Batch(cmd, followerPulse())
 		}
 		return m, followerPulse()
 	case modelChoices:
@@ -283,6 +277,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case clipboardCopied:
+		if v.err != nil {
+			return m.stop("error", "Copy failed: "+v.err.Error())
+		}
 		return m.stop("notice", fmt.Sprintf("Copied %d lines to the clipboard.", v.lines))
 	case compactMsg:
 		m.busy, m.compacting, m.cancel = false, false, nil
@@ -342,12 +339,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refresh(follow)
 			return m, nil
 		}
-		if v.Kind == "retry" {
-			m.retryInput = v.Text
-			m.retry = true
-		} else {
-			m.applyAgentEvent(v)
+		if v.Kind == "withdraw" {
+			m.retryInput, m.retry = v.Text, true
 		}
+		m.applyAgentEvent(v)
 		m.refresh(follow)
 		return m, m.wait()
 	case tea.KeyMsg:
@@ -359,9 +354,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch v.String() {
 		case "ctrl+v":
-			if m.a.ReadOnly {
-				return m, nil
-			}
 			return m.pasteClipboard()
 		case "ctrl+x":
 			if len(m.images) > 0 {
@@ -447,9 +439,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if matches := m.completions(); len(matches) > 0 && len(m.images) == 0 {
 				return m.runCommand(matches[m.selected%len(matches)].name)
-			}
-			if m.a.ReadOnly {
-				return m.stop("notice", "Session is read-only; use /new or /resume.")
 			}
 			if m.compacting {
 				return m.stop("notice", "Compaction is running; wait before sending.")

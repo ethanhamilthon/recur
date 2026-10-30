@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 
 	"recur/internal/agent"
 	"recur/internal/repl"
@@ -38,7 +37,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 	flags := flag.NewFlagSet("recur", flag.ContinueOnError)
 	flags.SetOutput(diagnostics)
 	prompt := flags.String("prompt", "", "run one turn without TUI")
-	mode := flags.String("mode", "", "headless transport: stdio or jsonl")
+	mode := flags.String("mode", "", "headless transport: jsonl")
 	sessionID := flags.String("s", "", "target session for notify/view (default: $RECUR_ENDPOINT)")
 	resume := flags.String("resume", "", "resume a project session ID")
 	if err := flags.Parse(args); err != nil {
@@ -50,8 +49,8 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 	if flags.NArg() != 0 && command == "" {
 		return fmt.Errorf("unexpected arguments: %v", flags.Args())
 	}
-	if *mode != "" && *mode != "stdio" && *mode != "jsonl" {
-		return fmt.Errorf("mode must be stdio or jsonl")
+	if *mode != "" && *mode != "jsonl" {
+		return fmt.Errorf("mode must be jsonl")
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -80,61 +79,32 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 	if !headless {
 		return tui.Run(a, cwd)
 	}
+	jsonl := *mode == "jsonl"
 	encoder := json.NewEncoder(out)
-	emit := tui.NewEventPrinter(out, diagnostics)
 	var writeErr error
 	send := func(value any) {
 		if writeErr == nil {
 			writeErr = encoder.Encode(value)
 		}
 	}
-	if *mode == "jsonl" {
-		send(map[string]any{"type": "session", "session": a.SessionInfo(), "read_only": a.ReadOnly})
-		emit = func(e agent.Event) {
+	// Without jsonl, stdout carries only the committed assistant answers.
+	emit := func(e agent.Event) {
+		switch {
+		case jsonl:
 			send(map[string]any{"type": e.Kind, "text": e.Text, "id": e.ID, "meta": e.Meta, "provisional": e.Provisional})
+		case e.Kind == "assistant" && e.Meta != nil && e.Meta.RequestID != "":
+			fmt.Fprintln(out, e.Text)
+		case e.Kind == "error":
+			fmt.Fprintln(diagnostics, e.Text)
 		}
 	}
-	if a.ReadOnly {
-		fmt.Fprintln(diagnostics, "Read-only session; input is not submitted.")
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		previous, printed := "", 0
-		for {
-			records := a.Records()
-			data, _ := json.Marshal(records)
-			if snapshot := string(data); snapshot != previous {
-				previous = snapshot
-				if *mode == "jsonl" {
-					send(map[string]any{"type": "snapshot", "records": records, "session": a.SessionInfo()})
-				} else {
-					if printed > len(records) {
-						printed = 0
-					}
-					for _, record := range records[printed:] {
-						fmt.Fprintln(out, record.Text)
-					}
-					printed = len(records)
-				}
-			}
-			if writeErr != nil {
-				return writeErr
-			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-ticker.C:
-			}
-			if err = a.Refresh(); err != nil {
-				fmt.Fprintln(diagnostics, err)
-			}
-		}
+	if jsonl {
+		send(map[string]any{"type": "session", "session": a.SessionInfo()})
 	}
 	run := func(text string) error {
 		err := a.Run(ctx, text, emit)
-		if *mode == "jsonl" {
+		if jsonl {
 			send(map[string]any{"type": "done", "ok": err == nil, "session": a.SessionInfo()})
-		} else {
-			fmt.Fprintln(out)
 		}
 		if writeErr != nil {
 			return writeErr
@@ -164,7 +134,6 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 		finished <- scanner.Err()
 	}()
 	for {
-		var text string
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -172,30 +141,22 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 			if err = run(message); err != nil {
 				return err
 			}
-			continue
 		case line, ok := <-lines:
 			if !ok {
 				return <-finished
 			}
-			text = line
-		}
-		if *mode == "jsonl" {
 			var request struct {
 				Prompt string `json:"prompt"`
 			}
-			if err = json.Unmarshal([]byte(text), &request); err != nil {
+			if err = json.Unmarshal([]byte(line), &request); err != nil {
 				return fmt.Errorf("invalid JSONL input: %w", err)
 			}
-			text = request.Prompt
-			if text == "" {
+			if request.Prompt == "" {
 				return fmt.Errorf("JSONL input requires a nonempty prompt")
 			}
-		}
-		if text == "" {
-			continue
-		}
-		if err = run(text); err != nil {
-			return err
+			if err = run(request.Prompt); err != nil {
+				return err
+			}
 		}
 	}
 }

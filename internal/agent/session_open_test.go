@@ -46,12 +46,17 @@ func TestSessionOpenRejectsInvalidTargetsWithoutChangingCurrentSession(t *testin
 		t.Fatal(err)
 	}
 	id := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	if second, err := New(cwd, id); err == nil {
+		second.Close()
+		t.Fatal("an owned session opened twice")
+	}
+	a.Close()
 	opened, err := New(cwd, id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer opened.Close()
-	if !opened.ReadOnly || !reflect.DeepEqual(opened.Records(), records) {
-		t.Fatal("direct opening did not preserve follower behavior")
+	if !reflect.DeepEqual(opened.Records(), records) {
+		t.Fatal("direct opening lost records")
 	}
 }

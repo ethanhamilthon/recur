@@ -8,6 +8,6 @@ Run recur docs TOPIC with one of these topics:
 - steering: instructions queued while the agent works, acceptance, and recall.
 - interface: commands, keyboard shortcuts, and rendering limits.
 - models: provider setup, model/effort selection, and session metadata.
-- headless: stdio/JSONL transports, recur notify, and read-only followers.
+- headless: --prompt and JSONL transports, recur notify, and session ownership.
 
 These topics describe implemented behavior, not the planned TODO backlog.

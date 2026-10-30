@@ -18,7 +18,7 @@ import (
 )
 
 func TestHeadlessTransportsAndExplicitResume(t *testing.T) {
-	for _, mode := range []string{"stdio", "jsonl"} {
+	for _, mode := range []string{"jsonl"} {
 		t.Run(mode, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("RECUR_HOME", home)
@@ -33,10 +33,7 @@ func TestHeadlessTransportsAndExplicitResume(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(home, "settings.toml"), []byte(config), 0600); err != nil {
 				t.Fatal(err)
 			}
-			input := "first\nsecond\n"
-			if mode == "jsonl" {
-				input = "{\"prompt\":\"first\"}\n{\"prompt\":\"second\"}\n"
-			}
+			input := "{\"prompt\":\"first\"}\n{\"prompt\":\"second\"}\n"
 			var out, diagnostics bytes.Buffer
 			if err := Run(context.Background(), []string{"--mode", mode}, strings.NewReader(input), &out, &diagnostics); err != nil {
 				t.Fatal(err)
@@ -68,6 +65,9 @@ func TestHeadlessTransportsAndExplicitResume(t *testing.T) {
 			out.Reset()
 			if err = Run(context.Background(), []string{"--prompt", "continued", "--resume", id}, strings.NewReader(""), &out, &diagnostics); err != nil {
 				t.Fatal(err)
+			}
+			if out.String() != "answer\n" {
+				t.Fatalf("--prompt must print only the answer: %q", out.String())
 			}
 			files, _ = filepath.Glob(filepath.Join(home, "sessions", "*", "*.jsonl"))
 			if len(files) != 1 {
@@ -159,7 +159,7 @@ func TestHeadlessCancellationWhileWaitingForInput(t *testing.T) {
 	defer writer.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Run(ctx, []string{"--mode", "stdio"}, in, io.Discard, io.Discard) }()
+	go func() { done <- Run(ctx, []string{"--mode", "jsonl"}, in, io.Discard, io.Discard) }()
 	cancel()
 	select {
 	case err := <-done:
@@ -171,7 +171,7 @@ func TestHeadlessCancellationWhileWaitingForInput(t *testing.T) {
 	}
 }
 
-func TestHeadlessReadOnlyFollowerPublishesCommittedSnapshots(t *testing.T) {
+func TestHeadlessRejectsOwnedSession(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -186,40 +186,9 @@ func TestHeadlessReadOnlyFollowerPublishesCommittedSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := writer.SessionInfo()["id"].(string)
-	output, out := io.Pipe()
-	defer output.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	done := make(chan error, 1)
-	go func() {
-		defer out.Close()
-		done <- Run(ctx, []string{"--mode", "jsonl", "--resume", id}, strings.NewReader("ignored input"), out, io.Discard)
-	}()
-	decoder := json.NewDecoder(output)
-	var event struct {
-		Type     string
-		ReadOnly bool `json:"read_only"`
-		Records  []agent.Record
-	}
-	if err = decoder.Decode(&event); err != nil || event.Type != "session" || !event.ReadOnly {
-		t.Fatalf("not a read-only follower: %+v %v", event, err)
-	}
-	if err = decoder.Decode(&event); err != nil || event.Type != "snapshot" {
-		t.Fatalf("initial snapshot: %+v %v", event, err)
-	}
-	writer.History = append(writer.History, json.RawMessage(`{"role":"user","content":"new committed message"}`))
-	if err = writer.Save(); err != nil {
-		t.Fatal(err)
-	}
-	if err = decoder.Decode(&event); err != nil || len(event.Records) != 1 || event.Records[0].Text != "new committed message" {
-		t.Fatalf("snapshot not refreshed: %+v %v", event, err)
-	}
-	cancel()
-	if err = <-done; err != context.Canceled {
-		t.Fatal(err)
-	}
-	if len(writer.History) != 1 {
-		t.Fatal("follower mutated session")
+	err = Run(context.Background(), []string{"--prompt", "x", "--resume", id}, strings.NewReader(""), io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "in use") {
+		t.Fatalf("second client opened an owned session: %v", err)
 	}
 }
 

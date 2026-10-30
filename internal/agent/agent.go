@@ -71,7 +71,6 @@ type Agent struct {
 	inbox             chan string
 	views             chan repl.Image
 	owner             *os.File
-	ReadOnly          bool
 	settings          Settings
 	REPL              *repl.REPL
 	History           []json.RawMessage
@@ -106,9 +105,6 @@ func (a *Agent) message(role, text string) {
 	a.History = append(a.History, raw(map[string]any{"role": role, "content": text}))
 }
 func (a *Agent) Save() error {
-	if err := a.Writable(); err != nil {
-		return err
-	}
 	if err := os.MkdirAll(filepath.Dir(a.HistoryPath), 0700); err != nil {
 		return err
 	}
@@ -122,10 +118,6 @@ func (a *Agent) Run(ctx context.Context, text string, emit func(Event), steering
 	return a.RunInput(ctx, Input{Text: text}, emit, steering...)
 }
 func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), steering ...*Steering) (err error) {
-	if err = a.Writable(); err != nil {
-		emit(Event{Kind: "error", Text: err.Error()})
-		return err
-	}
 	if a.records == nil {
 		a.records = a.Records()
 	}
@@ -175,20 +167,33 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 	}
 	turnStart := time.Now()
 	userAdded := false
+	// Display the input before shell initialization so a slow prefix does not
+	// look like a frozen UI. It joins API history only after the prefix runs;
+	// a failed initialization withdraws it; the withdraw event carries the text
+	// so the UI can return it to the composer for retry.
+	shown := inputEvent(input, false)
+	shown.ID = fmt.Sprintf("input-%d", time.Now().UnixNano())
+	recordsBefore := append([]Record(nil), a.records...)
+	emit(shown)
+	initFailed := func(cause error) error {
+		a.records = recordsBefore
+		forward(Event{Kind: "withdraw", ID: shown.ID, Text: input.Text})
+		return &InitializationError{cause}
+	}
 
 	var total Usage
 	usageKnown := true
 	for step := 0; a.settings.MaxAgentSteps <= 0 || step < a.settings.MaxAgentSteps; step++ {
 		if ctx.Err() != nil {
 			if !userAdded {
-				return &InitializationError{ctx.Err()}
+				return initFailed(ctx.Err())
 			}
 			return ctx.Err()
 		}
 		fresh, e := a.REPL.Ensure(ctx)
 		if e != nil {
 			if !userAdded {
-				return &InitializationError{e}
+				return initFailed(e)
 			}
 			return e
 		}
@@ -206,7 +211,7 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 			emit(Event{Kind: "notice", Text: notice})
 		}
 		if !userAdded {
-			a.addInput(input, emit, false)
+			a.commitInput(input)
 			userAdded = true
 		}
 
@@ -242,7 +247,7 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 				part := finished[int64(i)]
 				durableHistory = append(durableHistory, part)
 				for _, r := range RecordsForItem(part) {
-					durableRecords = ApplyEvent(durableRecords, Event{Kind: r.Kind, Text: r.Text, ID: fmt.Sprintf("%s-%d", a.lastRequest.RequestID, i), Final: true})
+					durableRecords = ApplyEvent(durableRecords, Event{Kind: r.Kind, Text: r.Text, ID: a.itemID(int64(i)), Final: true})
 				}
 			}
 			snapshot := *a
@@ -291,7 +296,7 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 						m.Usage = nil
 					}
 				}
-				emit(Event{Kind: r.Kind, Text: r.Text, ID: fmt.Sprintf("%s-%d", meta.RequestID, i), Meta: &m, Final: true})
+				emit(Event{Kind: r.Kind, Text: r.Text, ID: a.itemID(int64(i)), Meta: &m, Final: true})
 			}
 		}
 		if e := a.Save(); e != nil {
@@ -310,42 +315,7 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 			}
 			calls++
 			started := time.Now()
-			var result any
-			if ctx.Err() != nil {
-				result = repl.Result{Output: ctx.Err().Error(), Error: true}
-			} else {
-				switch call.Name {
-				case "bash":
-					var args struct {
-						Command   string `json:"command"`
-						Timeout   *int64 `json:"timeout"`
-						MaxOutput *int64 `json:"max_output"`
-					}
-					var value repl.Result
-					timeout := repl.DefaultTimeout
-					if e = json.Unmarshal([]byte(call.Arguments), &args); e == nil && args.Timeout != nil {
-						timeout = time.Duration(*args.Timeout) * time.Second
-						if timeout <= 0 || timeout > repl.MaxTimeout {
-							e = fmt.Errorf("timeout must be 1..600 seconds; run longer work as a top-level background job ending with recur notify")
-						}
-					}
-					limit := repl.DefaultOutputLimit
-					if e == nil && args.MaxOutput != nil {
-						if limit = int(*args.MaxOutput); limit < 0 {
-							e = fmt.Errorf("max_output must be >= 0 bytes (0 = no truncation)")
-						}
-					}
-					if e == nil {
-						value, e = a.REPL.ExecuteLimit(ctx, args.Command, timeout, limit)
-					}
-					if e != nil {
-						value = repl.Result{Output: e.Error(), ExitCode: 2, Error: true}
-					}
-					result = value
-				default:
-					result = repl.Result{Output: "Unknown tool: " + call.Name, Error: true}
-				}
-			}
+			result := a.runTool(ctx, call.Name, call.Arguments)
 			output := raw(map[string]any{"type": "function_call_output", "call_id": call.CallID, "output": string(raw(result))})
 			a.History = append(a.History, output)
 			for _, r := range RecordsForItem(output) {
@@ -368,6 +338,46 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 	}
 	return fmt.Errorf("stopped after %d agent steps; raise max_agent_steps in settings.toml", a.settings.MaxAgentSteps)
 }
+
+// runTool executes one function call; failures become an error result for the model.
+func (a *Agent) runTool(ctx context.Context, name, arguments string) repl.Result {
+	if ctx.Err() != nil {
+		return repl.Result{Output: ctx.Err().Error(), Error: true}
+	}
+	if name != "bash" {
+		return repl.Result{Output: "Unknown tool: " + name, Error: true}
+	}
+	var args struct {
+		Command   string `json:"command"`
+		Timeout   *int64 `json:"timeout"`
+		MaxOutput *int64 `json:"max_output"`
+	}
+	timeout, limit := repl.DefaultTimeout, repl.DefaultOutputLimit
+	err := json.Unmarshal([]byte(arguments), &args)
+	if err == nil && args.Timeout != nil {
+		if timeout = time.Duration(*args.Timeout) * time.Second; timeout <= 0 || timeout > repl.MaxTimeout {
+			err = fmt.Errorf("timeout must be 1..600 seconds; run longer work as a top-level background job ending with recur notify")
+		}
+	}
+	if err == nil && args.MaxOutput != nil {
+		if limit = int(*args.MaxOutput); limit < 0 {
+			err = fmt.Errorf("max_output must be >= 0 bytes (0 = no truncation)")
+		}
+	}
+	if err == nil {
+		var result repl.Result
+		if result, err = a.REPL.ExecuteLimit(ctx, args.Command, timeout, limit); err == nil {
+			return result
+		}
+	}
+	return repl.Result{Output: err.Error(), ExitCode: 2, Error: true}
+}
+
+// itemID identifies a response item of the latest request in display events.
+func (a *Agent) itemID(index int64) string {
+	return fmt.Sprintf("%s-%d", a.lastRequest.RequestID, index)
+}
+
 func (a *Agent) request(ctx context.Context, emit func(Event), checkpoints ...func(int64, json.RawMessage) error) ([]json.RawMessage, error) {
 	if strings.TrimSpace(a.settings.Model) == "" || strings.TrimSpace(a.settings.Provider) == "" {
 		return nil, fmt.Errorf("no provider or model selected: use /login to add a provider, then choose a model with /model")
@@ -416,7 +426,7 @@ func (a *Agent) request(ctx context.Context, emit func(Event), checkpoints ...fu
 				arguments[event.OutputIndex] = event.Arguments
 			}
 			if names[event.OutputIndex] == "bash" {
-				emit(Event{Kind: "code", Text: partialCode(arguments[event.OutputIndex]), Provisional: true, ID: fmt.Sprintf("%s-%d", a.lastRequest.RequestID, event.OutputIndex), Final: true})
+				emit(Event{Kind: "code", Text: partialCode(arguments[event.OutputIndex]), Provisional: true, ID: a.itemID(event.OutputIndex), Final: true})
 			}
 		case "response.output_item.added", "response.output_item.done":
 			if event.Type == "response.output_item.done" && len(checkpoints) > 0 && checkpoints[0] != nil {
@@ -433,20 +443,20 @@ func (a *Agent) request(ctx context.Context, emit func(Event), checkpoints ...fu
 					arguments[event.OutputIndex] = event.Item.Arguments.OfString
 				}
 				if event.Item.Name == "bash" {
-					emit(Event{Kind: "code", Text: partialCode(arguments[event.OutputIndex]), Provisional: true, ID: fmt.Sprintf("%s-%d", a.lastRequest.RequestID, event.OutputIndex), Final: true})
+					emit(Event{Kind: "code", Text: partialCode(arguments[event.OutputIndex]), Provisional: true, ID: a.itemID(event.OutputIndex), Final: true})
 					continue
 				}
 			}
 
 			for _, record := range RecordsForItem(json.RawMessage(event.Item.RawJSON())) {
-				emit(Event{Kind: record.Kind, Text: record.Text, ID: fmt.Sprintf("%s-%d", a.lastRequest.RequestID, event.OutputIndex), Final: true, Provisional: event.Type == "response.output_item.added"})
+				emit(Event{Kind: record.Kind, Text: record.Text, ID: a.itemID(event.OutputIndex), Final: true, Provisional: event.Type == "response.output_item.added"})
 			}
 		case "response.output_text.delta":
-			emit(Event{Kind: "delta", Text: event.Delta, ID: fmt.Sprintf("%s-%d", a.lastRequest.RequestID, event.OutputIndex), Provisional: true})
+			emit(Event{Kind: "delta", Text: event.Delta, ID: a.itemID(event.OutputIndex), Provisional: true})
 		case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
-			emit(Event{Kind: "reasoning_delta", Text: event.Delta, ID: fmt.Sprintf("%s-%d", a.lastRequest.RequestID, event.OutputIndex), Provisional: true})
+			emit(Event{Kind: "reasoning_delta", Text: event.Delta, ID: a.itemID(event.OutputIndex), Provisional: true})
 		case "response.refusal.delta":
-			emit(Event{Kind: "refusal_delta", Text: event.Delta, ID: fmt.Sprintf("%s-%d", a.lastRequest.RequestID, event.OutputIndex), Provisional: true})
+			emit(Event{Kind: "refusal_delta", Text: event.Delta, ID: a.itemID(event.OutputIndex), Provisional: true})
 		case "response.completed":
 			a.lastRequest.Duration = time.Since(started)
 			if event.Response.JSON.Usage.Valid() {

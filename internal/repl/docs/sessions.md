@@ -22,8 +22,6 @@ model-written summary and saves immediately; max_context_tokens (default 400000,
 request. /reload re-reads settings.toml, prefix.sh and system.md and restarts the
 shell while keeping the current session and its history.
 
-One client owns the session writer lock; other clients are read-only followers
-that reload committed snapshots once per second. No live stream is broadcast.
-Locks are released by the OS after crashes; reopen a follower to acquire released
-ownership. Session headers retain their own provider, model, and effort.
+One recur process owns a session at a time; opening it elsewhere fails with
+"session is in use". Locks are released by the OS after crashes. Session headers retain their own provider, model, and effort.
 recur docs models and recur docs headless describe selection and transport details.

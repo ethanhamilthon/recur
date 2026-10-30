@@ -87,6 +87,7 @@ func TestSteeringAtSafeBoundaries(t *testing.T) {
 			if requests != 2 || !reflect.DeepEqual(live, a.Records()) {
 				t.Fatalf("steering/live journal mismatch: requests=%d", requests)
 			}
+			a.Close() // release ownership so the session can be reopened
 			restored, err := New(a.REPL.Dir, a.SessionInfo()["id"].(string))
 			if err != nil {
 				t.Fatal(err)

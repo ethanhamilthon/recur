@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -86,19 +85,6 @@ func TestMetadataAndBottomBar(t *testing.T) {
 		t.Fatal(m.bottomBar())
 	}
 }
-func TestHeadlessPrinterCompleteness(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	emit := NewEventPrinter(&stdout, &stderr)
-	emit(agent.Event{Kind: "delta", Text: "hel", ID: "a"})
-	emit(agent.Event{Kind: "assistant", Text: "hello", ID: "a", Final: true, Meta: &agent.Metadata{}})
-	emit(agent.Event{Kind: "assistant", Text: "completed only", ID: "b", Final: true, Meta: &agent.Metadata{}})
-	emit(agent.Event{Kind: "reasoning_delta", Text: "par", ID: "r"})
-	emit(agent.Event{Kind: "reasoning", Text: "partial", ID: "r", Final: true, Meta: &agent.Metadata{}})
-	emit(agent.Event{Kind: "code", Text: "1+1"})
-	if stdout.String() != "hello\ncompleted only\n" || stderr.String() != "partial\n1+1\n" {
-		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
-	}
-}
 func BenchmarkLongChatCachedDelta(b *testing.B) {
 	m := newModel(&agent.Agent{}, "/project")
 	for i := 0; i < 1000; i++ {
@@ -123,19 +109,6 @@ func TestUnavailableContextClearsOldEstimate(t *testing.T) {
 		t.Fatal("stale context shown for request without usage")
 	}
 }
-func TestHeadlessSnapshotsDoNotDuplicate(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	emit := NewEventPrinter(&stdout, &stderr)
-	emit(agent.Event{Kind: "assistant", ID: "a", Text: "intermediate", Final: true})
-	emit(agent.Event{Kind: "assistant", ID: "a", Text: "intermediate complete", Final: true})
-	emit(agent.Event{Kind: "assistant", ID: "a", Text: "intermediate complete", Final: true, Meta: &agent.Metadata{}})
-	emit(agent.Event{Kind: "code", ID: "c", Text: "1+1", Final: true})
-	emit(agent.Event{Kind: "code", ID: "c", Text: "1+1", Final: true, Meta: &agent.Metadata{}})
-	if stdout.String() != "intermediate complete\n" || stderr.String() != "1+1\n" {
-		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
-	}
-}
-
 func TestCompactTimelineDesign(t *testing.T) {
 	meta := &agent.Metadata{Duration: 1200 * time.Millisecond, Usage: &agent.Usage{Input: 12400, Output: 320, Cached: 9920}}
 	for _, tc := range []struct{ kind, heading string }{

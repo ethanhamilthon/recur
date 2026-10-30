@@ -36,8 +36,18 @@ func TestInitializationFailureRetryAndSaveErrors(t *testing.T) {
 	if !errors.As(err, &init) || requests != 0 || len(a.History) != 0 {
 		t.Fatalf("failed init sent/committed user request: %v", err)
 	}
-	if len(events) != 1 || events[0].Kind != "error" {
-		t.Fatal("failed init must only display error")
+	// The input is shown immediately, then withdrawn when the prefix fails.
+	if len(events) != 3 || events[0].Kind != "user" || events[0].Text != "keep request" ||
+		events[1].Kind != "withdraw" || events[1].ID != events[0].ID || events[2].Kind != "error" {
+		t.Fatalf("failed init must show, withdraw, then report: %+v", events)
+	}
+	if shown := ApplyEvent(ApplyEvent(nil, events[0]), events[1]); len(shown) != 0 {
+		t.Fatalf("withdraw left the input displayed: %+v", shown)
+	}
+	for _, r := range a.Records() {
+		if r.Kind == "user" {
+			t.Fatal("withdrawn input stayed in the journal")
+		}
 	}
 	a.REPL.Prefix = ""
 	if err = a.Run(context.Background(), "keep request", func(Event) {}); err != nil {
@@ -57,6 +67,42 @@ func TestInitializationFailureRetryAndSaveErrors(t *testing.T) {
 	err = a.Run(context.Background(), "retry me", func(Event) {})
 	if !errors.As(err, &init) || !strings.Contains(err.Error(), "prefix failed") || !strings.Contains(err.Error(), "save history") {
 		t.Fatalf("lost combined errors: %v", err)
+	}
+}
+
+func TestInputDisplayedBeforeSlowPrefix(t *testing.T) {
+	t.Setenv("RECUR_HOME", t.TempDir())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n")
+	}))
+	defer server.Close()
+	a, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	configureTestAgent(t, a, Settings{Provider: "p", Model: "m", Providers: map[string]Provider{"p": {BaseURL: server.URL}}})
+	release := t.TempDir() + "/go"
+	a.REPL.Prefix = "while [ ! -e " + release + " ]; do sleep 0.01; done"
+	events := make(chan Event, 16)
+	done := make(chan error, 1)
+	go func() { done <- a.Run(context.Background(), "hello", func(e Event) { events <- e }) }()
+	if first := <-events; first.Kind != "user" || first.Text != "hello" {
+		t.Fatalf("input must be displayed before the prefix finishes: %+v", first)
+	}
+	if err = os.WriteFile(release, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if next := <-events; next.Kind != "notice" || !strings.Contains(next.Text, "Shell session initialized.") {
+		t.Fatalf("initialization notice must follow the prefix: %+v", next)
+	}
+	if err = <-done; err != nil {
+		t.Fatal(err)
+	}
+	// API order is unchanged: prefix notification first, then the request.
+	if len(a.History) != 2 || !strings.Contains(string(a.History[0]), "prefix_output") || !strings.Contains(string(a.History[1]), "hello") {
+		t.Fatalf("history order: %s", a.History)
 	}
 }
 
