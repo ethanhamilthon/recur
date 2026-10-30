@@ -17,6 +17,7 @@ var commands = []command{
 	{name: "/help", icon: "?", description: "Show commands and keyboard shortcuts"},
 	{name: "/quit", icon: "->", description: "Save the chat and exit"},
 	{name: "/resume", icon: "<", description: "Resume a saved session in this project"},
+	{name: "/rename", icon: "#", description: "Rename this session; empty name restores the default"},
 	{name: "/compact", icon: "=", description: "Summarize older turns; add a prompt to guide it"},
 	{name: "/reload", icon: "*", description: "Reload settings and prompts; restart the shell"},
 	{name: "/model", icon: "~", description: "Choose model; Left/Right changes effort"},
@@ -88,6 +89,14 @@ func (m model) completions() []command {
 		return matches
 	}
 
+	if !m.hideCompletion && strings.HasPrefix(text, "/rename ") && !strings.ContainsAny(text, "\n\t") {
+		name := strings.TrimSpace(strings.TrimPrefix(text, "/rename"))
+		label := "Rename session to: " + name
+		if name == "" {
+			label = "Type a name; Enter on empty restores the default title"
+		}
+		return []command{{name: text, icon: "#", label: label}}
+	}
 	if m.hideCompletion || !strings.HasPrefix(text, "/") || strings.ContainsAny(text, " \n\t") {
 		return nil
 	}
@@ -127,7 +136,7 @@ func (m model) runCommand(name string) (tea.Model, tea.Cmd) {
 	if len(verb) == 0 {
 		return m, nil
 	}
-	if verb[0] != "/resume" && verb[0] != "/compact" && len(verb) != 1 {
+	if verb[0] != "/resume" && verb[0] != "/compact" && verb[0] != "/rename" && len(verb) != 1 {
 		return m.stop("error", "Unexpected command arguments.")
 	}
 	if verb[0] == "/resume" {
@@ -163,6 +172,25 @@ func (m model) runCommand(name string) (tea.Model, tea.Cmd) {
 		}
 		m.cache = nil
 		m.add("notice", "Settings reloaded; shell state was reset.")
+	case "/rename":
+		if m.busy {
+			return m.stop("notice", "Wait for the active turn before renaming.")
+		}
+		if name == "/rename" {
+			m.input.SetValue("/rename ")
+			m.input.CursorEnd()
+			m.refresh(true)
+			return m, nil
+		}
+		title := strings.TrimSpace(strings.TrimPrefix(name, "/rename"))
+		if err := m.a.Rename(title); err != nil {
+			return m.stop("error", err.Error())
+		}
+		if title == "" {
+			m.add("notice", "Session title reset to the first message.")
+		} else {
+			m.add("notice", "Session renamed: "+strings.Join(strings.Fields(title), " "))
+		}
 	case "/compact":
 		if m.busy {
 			return m.stop("notice", "Wait for the active turn before compacting.")

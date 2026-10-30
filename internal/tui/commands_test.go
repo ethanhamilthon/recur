@@ -2,6 +2,7 @@ package tui
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
+	"path/filepath"
 	"recur/internal/agent"
 	"strings"
 	"testing"
@@ -87,5 +88,57 @@ func TestNavigationCommandsAndUnsentSessionNotSaved(t *testing.T) {
 	}
 	if sessions, _ := m.a.Sessions(); len(sessions) != 1 {
 		t.Fatalf("unsent /new session was saved on /quit: %v", sessions)
+	}
+}
+
+func TestRenameSessionPersistsTitle(t *testing.T) {
+	t.Setenv("RECUR_HOME", t.TempDir())
+	cwd := t.TempDir()
+	a, err := agent.New(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	a.History = append(a.History, []byte(`{"role":"user","content":"first message"}`))
+	if err = a.Save(); err != nil {
+		t.Fatal(err)
+	}
+	m := newModel(a, cwd)
+	run := func(text string) {
+		m.input.SetValue(text)
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = next.(model)
+	}
+	title := func() string {
+		sessions, err := m.a.Sessions()
+		if err != nil || len(sessions) != 1 {
+			t.Fatalf("sessions: %v %v", sessions, err)
+		}
+		return sessions[0].Title
+	}
+	run("/rename")
+	if m.input.Value() != "/rename " {
+		t.Fatalf("bare /rename should prompt for a name, got %q", m.input.Value())
+	}
+	run("/rename  My   project ")
+	if got := title(); got != "My project" {
+		t.Fatalf("title after rename = %q", got)
+	}
+	id := strings.TrimSuffix(filepath.Base(m.a.HistoryPath), ".jsonl")
+	if err := m.a.NewSession(); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.a.Resume(id); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.a.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if got := title(); got != "My project" {
+		t.Fatalf("title lost after resume and save = %q", got)
+	}
+	run("/rename ")
+	if got := title(); got != "first message" {
+		t.Fatalf("empty rename should restore default, got %q", got)
 	}
 }

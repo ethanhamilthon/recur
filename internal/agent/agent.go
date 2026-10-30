@@ -74,6 +74,7 @@ type Agent struct {
 	LocalConfig       string // project .recur directory supplying prompts, or ""
 	client            openai.Client
 	records           []Record
+	title             string // set by /rename; "" means the first user message
 	lastRequest       Metadata
 	home, sessionsDir string
 }

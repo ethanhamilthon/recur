@@ -23,6 +23,7 @@ type sessionLine struct {
 	Records   int             `json:"records,omitempty"`
 	Version   int             `json:"version,omitempty"`
 	CWD       string          `json:"cwd,omitempty"`
+	Title     string          `json:"title,omitempty"`
 	Item      json.RawMessage `json:"item,omitempty"`
 	Record    *Record         `json:"record,omitempty"`
 }
@@ -115,7 +116,17 @@ func (a *Agent) Sessions() ([]SessionSummary, error) {
 	return sessions, nil
 }
 
-// sessionSummary reads the model selection and the first user message only.
+// Rename sets the session title shown by /resume; an empty name restores the
+// default (the first user message). Unsent sessions keep it until first save.
+func (a *Agent) Rename(name string) error {
+	a.title = strings.Join(strings.Fields(name), " ")
+	if !a.HasSavedSession() {
+		return nil
+	}
+	return a.Save()
+}
+
+// sessionSummary reads the model selection and the title or first user message.
 func sessionSummary(path string) SessionSummary {
 	var summary SessionSummary
 	file, err := os.Open(path)
@@ -133,6 +144,10 @@ func sessionSummary(path string) SessionSummary {
 		if entry.Selection != nil {
 			summary.Model = entry.Selection.Model
 		}
+		if entry.Title != "" {
+			summary.Title = entry.Title
+			return summary
+		}
 		for _, r := range RecordsForItem(entry.Item) {
 			if r.Kind == "user" {
 				summary.Title = strings.Join(strings.Fields(r.Text), " ")
@@ -145,7 +160,7 @@ func sessionSummary(path string) SessionSummary {
 func (a *Agent) sessionData() ([]byte, error) {
 	var buffer bytes.Buffer
 	encoder := json.NewEncoder(&buffer)
-	if err := encoder.Encode(sessionLine{Version: 2, CWD: a.REPL.Dir, Selection: a.selection()}); err != nil {
+	if err := encoder.Encode(sessionLine{Version: 2, CWD: a.REPL.Dir, Title: a.title, Selection: a.selection()}); err != nil {
 		return nil, err
 	}
 	var derived []Record
@@ -179,6 +194,7 @@ func (a *Agent) readSession() error {
 	}
 	lines := bytes.Split(bytes.TrimSuffix(data, []byte("\n")), []byte("\n"))
 	var selection *Selection
+	var title string
 	var history []json.RawMessage
 	var derived []Record
 	records := []Record{}
@@ -188,7 +204,7 @@ func (a *Agent) readSession() error {
 			return fmt.Errorf("session line %d: %w", i+1, err)
 		}
 		if i == 0 {
-			selection = entry.Selection
+			selection, title = entry.Selection, entry.Title
 			if entry.Version != 2 || entry.CWD != a.REPL.Dir {
 				return fmt.Errorf("unsupported session version or project mismatch")
 			}
@@ -222,7 +238,7 @@ func (a *Agent) readSession() error {
 		}
 		a.applySettings(s)
 	}
-	a.History, a.records = history, records
+	a.History, a.records, a.title = history, records, title
 	return nil
 }
 
