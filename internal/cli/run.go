@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"recur/internal/agent"
@@ -40,6 +41,8 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 	mode := flags.String("mode", "", "headless transport: jsonl")
 	sessionID := flags.String("s", "", "target session for notify/view (default: $RECUR_ENDPOINT)")
 	resume := flags.String("resume", "", "resume a project session ID")
+	system := flags.String("system", "", "system prompt file (overrides .recur/system.md)")
+	prefix := flags.String("prefix", "", "prefix script file (overrides .recur/prefix.sh)")
 	if err := flags.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return nil
@@ -71,7 +74,16 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 		return agent.Notify(cwd, *sessionID, text)
 	}
 	headless := *mode != "" || *prompt != ""
-	a, err := agent.New(cwd, *resume)
+	files := agent.PromptFiles{System: *system, Prefix: *prefix}
+	for _, f := range []*string{&files.System, &files.Prefix} {
+		if *f == "" {
+			continue
+		}
+		if *f, err = filepath.Abs(*f); err != nil {
+			return err
+		}
+	}
+	a, err := agent.NewWith(cwd, files, *resume)
 	if err != nil {
 		return err
 	}

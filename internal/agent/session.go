@@ -87,9 +87,13 @@ type configuration struct {
 	local          string // project .recur directory that supplied a prompt file
 }
 
-// loadConfiguration reads settings from home. With enable_local_recur, system.md
-// and prefix.sh come from cwd/.recur when they exist there and it is not home.
-func loadConfiguration(home, cwd string) (c configuration, err error) {
+// PromptFiles holds --system and --prefix paths; they win over .recur files.
+type PromptFiles struct{ System, Prefix string }
+
+// loadConfiguration reads settings from home. system.md and prefix.sh come from
+// the given files, else (with enable_local_recur) from cwd/.recur when they
+// exist there and it is not home, else from home.
+func loadConfiguration(home, cwd string, files PromptFiles) (c configuration, err error) {
 	if c.settings, err = loadSettings(home); err != nil {
 		return c, err
 	}
@@ -97,11 +101,19 @@ func loadConfiguration(home, cwd string) (c configuration, err error) {
 	if err != nil || !c.settings.EnableLocalRecur || !projectConfig(local, home) {
 		local = ""
 	}
-	if c.prefix, err = c.load(home, local, "prefix.sh", prompts.Prefix); err != nil {
+	if c.prefix, err = c.pick(files.Prefix, home, local, "prefix.sh", prompts.Prefix); err != nil {
 		return c, err
 	}
-	c.system, err = c.load(home, local, "system.md", prompts.System)
+	c.system, err = c.pick(files.System, home, local, "system.md", prompts.System)
 	return c, err
+}
+
+func (c *configuration) pick(file, home, local, name, fallback string) (string, error) {
+	if file == "" {
+		return c.load(home, local, name, fallback)
+	}
+	data, err := os.ReadFile(file)
+	return string(data), err
 }
 
 // load prefers the project copy, which is never created, over the global one.
@@ -135,7 +147,7 @@ func (a *Agent) changeSession(id string) error {
 	if id != "" && id == strings.TrimSuffix(filepath.Base(a.HistoryPath), ".jsonl") {
 		return nil
 	}
-	c, err := loadConfiguration(a.home, a.REPL.Dir)
+	c, err := loadConfiguration(a.home, a.REPL.Dir, a.files)
 	if err != nil {
 		return err
 	}
@@ -144,7 +156,7 @@ func (a *Agent) changeSession(id string) error {
 			return err
 		}
 	}
-	next := &Agent{home: a.home, sessionsDir: a.sessionsDir, REPL: a.REPL, System: c.system, LocalConfig: c.local}
+	next := &Agent{files: a.files, home: a.home, sessionsDir: a.sessionsDir, REPL: a.REPL, System: c.system, LocalConfig: c.local}
 	next.applySettings(c.settings)
 	if id == "" {
 		err = next.createSession()

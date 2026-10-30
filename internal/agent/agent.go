@@ -76,19 +76,25 @@ type Agent struct {
 	records           []Record
 	title             string // set by /rename; "" means the first user message
 	lastRequest       Metadata
+	files             PromptFiles
 	home, sessionsDir string
 }
 
 func New(dir string, target ...string) (*Agent, error) {
+	return NewWith(dir, PromptFiles{}, target...)
+}
+
+// NewWith is New with explicit system/prefix files that override .recur lookup.
+func NewWith(dir string, files PromptFiles, target ...string) (*Agent, error) {
 	config, err := configDir(dir)
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := loadConfiguration(config, dir)
+	cfg, err := loadConfiguration(config, dir, files)
 	if err != nil {
 		return nil, err
 	}
-	a := &Agent{home: config, System: cfg.system, LocalConfig: cfg.local, REPL: &repl.REPL{Prefix: cfg.prefix, Dir: dir}}
+	a := &Agent{files: files, home: config, System: cfg.system, LocalConfig: cfg.local, REPL: &repl.REPL{Prefix: cfg.prefix, Dir: dir}}
 	a.applySettings(cfg.settings)
 	if err := a.openProject(dir, target...); err != nil {
 		a.release()
