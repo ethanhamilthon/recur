@@ -73,6 +73,9 @@ func TestViewDeliveredAfterAllToolOutputsAndPersists(t *testing.T) {
 		if err := json.Unmarshal(body.Input[6], &msg); err != nil {
 			t.Error(err)
 		}
+		if len(msg.Content) > 0 && !strings.Contains(msg.Content[0].Text, path) {
+			t.Error("original path missing from view notification")
+		}
 		if msg.Role != "user" || len(msg.Content) != 2 || msg.Content[0].Type != "input_text" || !strings.Contains(msg.Content[0].Text, "<notify>") || msg.Content[1].Type != "input_image" || !strings.HasPrefix(msg.Content[1].URL, "data:image/png;base64,") {
 			t.Errorf("missing queued image: %+v", msg)
 		}

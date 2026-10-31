@@ -26,7 +26,10 @@ attachment_dir in settings.toml selects the captured-image directory. Empty
 uses the platform temporary directory/recur-images (often /var/folders/... on
 macOS). Relative configured paths resolve against the project cwd. New
 directories use 0700 and files 0600. Images use the shared recur view validator: PNG or
-JPEG, at most 2 MiB and 20 megapixels after clipboard conversion. At most eight
+JPEG, at most 32 MiB and 20 megapixels after clipboard conversion. Only previews
+(up to 2048 pixels on the longest side and 1 MiB) are sent to the provider and
+embedded in history. Original PNG files stay unchanged on disk, and their paths
+are included in model context for cropping details. At most eight
 clipboard images can be pending across the active input, queued instructions,
 and current turn. The terminal never renders the files as graphics.
 

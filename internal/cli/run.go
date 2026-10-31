@@ -193,12 +193,21 @@ func view(cwd, id string, paths []string) error {
 	if err != nil {
 		return err
 	}
+	home := os.Getenv("RECUR_HOME")
+	if home == "" {
+		home, err = os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		home = filepath.Join(home, ".recur")
+	}
 	for _, path := range paths {
-		image, err := repl.CaptureImage(path)
+		image, err := repl.CaptureImageCopy(path, filepath.Join(home, "attachments"))
 		if err != nil {
 			return fmt.Errorf("%s: %w", path, err)
 		}
 		if err = agent.Send(endpoint, agent.Message{Image: &image}); err != nil {
+			_ = os.Remove(image.Path)
 			return fmt.Errorf("%s: %w", path, err)
 		}
 	}

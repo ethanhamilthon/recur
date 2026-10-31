@@ -28,8 +28,10 @@ func TestImageInputAndSteeringPersist(t *testing.T) {
 		if !strings.Contains(body, "data:image/png;base64,first") || !strings.Contains(body, "data:image/png;base64,second") {
 			t.Error("image bytes missing")
 		}
-		if strings.Contains(body, "/private/original") {
-			t.Error("full attachment path leaked")
+		for _, name := range []string{"first.png", "second.png"} {
+			if !strings.Contains(body, "/private/original/"+name) {
+				t.Error("original image path missing from model context")
+			}
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n")

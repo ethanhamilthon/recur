@@ -251,7 +251,7 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 
 		acceptSteering()
 		if images := a.viewed(); len(images) > 0 {
-			text := "<notify>\nImages queued by recur view.\n</notify>"
+			text := "<notify>\nImages queued by recur view." + imageOriginals(images) + "\n</notify>"
 			content := []any{map[string]any{"type": "input_text", "text": text}}
 			for _, img := range images {
 				content = append(content, map[string]any{"type": "input_image", "image_url": img.URL, "detail": "auto"})

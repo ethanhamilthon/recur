@@ -3,11 +3,13 @@ package tui
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"image"
 	"image/png"
 	"io"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -93,8 +95,11 @@ func TestLinuxClipboardImageBackends(t *testing.T) {
 			}
 			data := pngBytes(t)
 			calls := 0
-			run := func(_ context.Context, _ int, name string, args ...string) ([]byte, error) {
+			run := func(_ context.Context, limit int, name string, args ...string) ([]byte, error) {
 				calls++
+				if calls == 2 && limit != repl.MaxImageInputBytes {
+					t.Fatal("Linux clipboard still limits original bytes before resizing")
+				}
 				expected := "xclip"
 				if wayland {
 					expected = "wl-paste"
@@ -343,5 +348,37 @@ func TestCopyCutShortcutsAcrossLayouts(t *testing.T) {
 		case composerShortcut, tea.KeyMsg:
 			t.Fatalf("%s: plain key decoded as shortcut: %#v", payload, got)
 		}
+	}
+}
+
+func TestClipboardLargeOriginalAndBoundedPreview(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 3290, 1170))
+	rand.New(rand.NewSource(7)).Read(src.Pix)
+	var original bytes.Buffer
+	if err := png.Encode(&original, src); err != nil {
+		t.Fatal(err)
+	}
+	if original.Len() <= 2*1024*1024 {
+		t.Fatal("fixture must exceed the old input limit")
+	}
+	run := func(_ context.Context, _ int, _ string, args ...string) ([]byte, error) {
+		return []byte("image"), os.WriteFile(args[len(args)-1], original.Bytes(), 0600)
+	}
+	captured, _, err := readClipboardWith(context.Background(), t.TempDir(), "darwin", run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, encoded, _ := strings.Cut(captured.URL, ";base64,")
+	data, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || max(cfg.Width, cfg.Height) > 2048 || len(data) > 1024*1024 || format != "png" {
+		t.Fatalf("clipboard preview not prepared: %+v, %s, %d bytes, %v", cfg, format, len(data), err)
+	}
+	saved, err := os.ReadFile(captured.Path)
+	if err != nil || !bytes.Equal(saved, original.Bytes()) {
+		t.Fatal("clipboard original not preserved", err)
 	}
 }

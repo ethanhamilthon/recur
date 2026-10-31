@@ -2,6 +2,7 @@ package agent
 
 import (
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -35,11 +36,22 @@ func (a *Agent) commitInput(input Input) {
 		a.message("user", input.Text)
 		return
 	}
-	parts := []any{map[string]any{"type": "input_text", "text": input.Display()}}
+	parts := []any{map[string]any{"type": "input_text", "text": input.Display() + imageOriginals(input.Images)}}
 	for _, img := range input.Images {
 		parts = append(parts, map[string]any{"type": "input_image", "image_url": img.URL, "detail": "auto"})
 	}
 	a.History = append(a.History, raw(map[string]any{"role": "user", "content": parts}))
+}
+
+// Keep original paths in model context without cluttering the terminal labels.
+func imageOriginals(images []repl.Image) string {
+	var text strings.Builder
+	for _, img := range images {
+		if img.Path != "" {
+			text.WriteString("\nOriginal image (for crops): " + strconv.Quote(img.Path))
+		}
+	}
+	return text.String()
 }
 
 func inputEvent(input Input, steering bool) Event {

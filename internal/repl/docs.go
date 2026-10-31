@@ -27,8 +27,9 @@ cat -n; create or overwrite files with a quoted heredoc (cat > path <<'EOF').
 Recur commands (ordinary programs; also usable from scripts and background jobs):
 - recur notify TEXT... (or text on stdin): queue a <notify> message for this session. When the
   agent is idle it starts a new turn; during a turn it arrives after the current tool outputs.
-- recur view PATH...: queue PNG/JPEG images for the next model request (2 MiB and 20 megapixels
-  each, at most four waiting).
+- recur view PATH...: queue PNG/JPEG previews (max 2048 px per side and 1 MiB) for the next
+  model request; at most four waiting. Originals (max 32 MiB / 20 megapixels) are saved separately;
+  their paths are included for cropping details with ordinary shell tools.
 - recur docs [TOPIC]: print built-in Recur documentation; recur docs index lists topics.
 Every call exports RECUR_SESSION_ID, RECUR_MODEL, RECUR_PROVIDER, RECUR_EFFORT, RECUR_CTX_SIZE
 (latest request input tokens, empty if unknown) and RECUR_ENDPOINT (session socket).

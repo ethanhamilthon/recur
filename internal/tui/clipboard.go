@@ -107,7 +107,7 @@ func readClipboardWith(ctx context.Context, directory, platform string, run clip
 			return repl.Image{}, "", e
 		}
 		if strings.Contains(string(types), "image/png") {
-			data, err = run(ctx, 2*1024*1024, "wl-paste", "--type", "image/png")
+			data, err = run(ctx, repl.MaxImageInputBytes, "wl-paste", "--type", "image/png")
 		}
 		textCommand, textArgs = "wl-paste", []string{"--no-newline"}
 	} else {
@@ -116,7 +116,7 @@ func readClipboardWith(ctx context.Context, directory, platform string, run clip
 			return repl.Image{}, "", e
 		}
 		if strings.Contains(string(types), "image/png") {
-			data, err = run(ctx, 2*1024*1024, "xclip", "-selection", "clipboard", "-t", "image/png", "-o")
+			data, err = run(ctx, repl.MaxImageInputBytes, "xclip", "-selection", "clipboard", "-t", "image/png", "-o")
 		}
 		textCommand, textArgs = "xclip", []string{"-selection", "clipboard", "-o"}
 	}
