@@ -14,7 +14,6 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.4
 	golang.org/x/image v0.46.0
 	golang.org/x/mod v0.42.0
-	mvdan.cc/sh/v3 v3.14.1
 )
 
 require (

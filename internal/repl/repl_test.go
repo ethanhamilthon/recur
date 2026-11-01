@@ -5,20 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
-
-	"recur/prompts"
 )
-
-func start(t *testing.T, r *REPL) {
-	t.Helper()
-	t.Cleanup(r.Close)
-	if fresh, err := r.Ensure(context.Background()); err != nil || !fresh {
-		t.Fatalf("start: %v %v", fresh, err)
-	}
-}
 
 func run(t *testing.T, r *REPL, command string, timeout time.Duration) Result {
 	t.Helper()
@@ -29,65 +20,174 @@ func run(t *testing.T, r *REPL, command string, timeout time.Duration) Result {
 	return result
 }
 
-func TestPersistentShell(t *testing.T) {
-	r := &REPL{Dir: "../..", Prefix: prompts.Prefix}
-	start(t, r)
-	if !strings.Contains(r.PrefixOutput, "# Agent rules") {
-		t.Fatalf("prefix output: %q", r.PrefixOutput)
-	}
-	for _, test := range []struct {
-		command, want string
-		code          int
-	}{
-		{"x=40; echo hello", "hello\n", 0},
-		{"echo $((x + 2))", "42\n", 0},
-		{"add() { echo $(($1 + 1)); }", "", 0},
-		{"add $x", "41\n", 0},
-		{"cd internal && basename \"$PWD\"", "internal\n", 0},
-		{"basename \"$(pwd)\"", "internal\n", 0},
-		{"printf problem >&2; exit 7", "problem", 7},
-		{"echo after-exit $x", "after-exit 40\n", 0},
-		{"false", "", 1},
-		{"if then", "syntax error", 2},
-		{"missing-command-xyz", "not found", 127},
-		{"cat | wc -c", "0", 0},
-		{"cat; echo after-cat", "after-cat\n", 0},
-		{"cat <<'EOF'\nheredoc $x\nEOF", "heredoc $x\n", 0},
-		{"echo $PAGER $GIT_PAGER", "cat cat\n", 0},
-	} {
-		result := run(t, r, test.command, 10*time.Second)
-		if result.ExitCode != test.code || result.Error != (test.code != 0) || !strings.Contains(result.Output, test.want) {
-			t.Errorf("%s: %+v; want %q code %d", test.command, result, test.want, test.code)
-		}
-	}
-	if fresh, err := r.Ensure(context.Background()); err != nil || fresh {
-		t.Fatalf("unexpected reset: %v %v", fresh, err)
-	}
-}
-
-func TestEnvIsExportedBeforeEveryCall(t *testing.T) {
-	model := "m o"
-	r := &REPL{Dir: t.TempDir(), Env: func() map[string]string {
-		return map[string]string{"RECUR_MODEL": model, "RECUR_CTX_SIZE": "12"}
-	}}
-	start(t, r)
-	model = "changed"
-	result := run(t, r, `sh -c 'echo "$RECUR_MODEL|$RECUR_CTX_SIZE"'`, 5*time.Second)
-	if result.Output != "changed|12\n" {
-		t.Fatalf("%+v", result)
-	}
-}
-
-func TestTimeoutKeepsStateAndKillsProcessGroup(t *testing.T) {
+func TestStatelessFreshVariablesFunctionsAndCWD(t *testing.T) {
 	dir := t.TempDir()
 	r := &REPL{Dir: dir}
-	start(t, r)
-	run(t, r, "x=kept", time.Second)
+
+	// 1. Fresh variables: variable assignment does not persist across calls.
+	res := run(t, r, "x=40; echo $x", 5*time.Second)
+	if res.Output != "40\n" || res.ExitCode != 0 {
+		t.Fatalf("first call: %+v", res)
+	}
+	res = run(t, r, `echo "[$x]"`, 5*time.Second)
+	if res.Output != "[]\n" || res.ExitCode != 0 {
+		t.Fatalf("variable leaked across calls: %+v", res)
+	}
+
+	// 2. Fresh functions: defined functions do not persist across calls.
+	res = run(t, r, "add() { echo $(($1 + 1)); }", 5*time.Second)
+	if res.ExitCode != 0 {
+		t.Fatalf("function definition failed: %+v", res)
+	}
+	res = run(t, r, "add 1", 5*time.Second)
+	if res.ExitCode != 127 || !strings.Contains(res.Output, "not found") {
+		t.Fatalf("function persisted across calls: %+v", res)
+	}
+
+	// 3. Fresh cwd: directory changes do not persist across calls.
+	res = run(t, r, "mkdir subdir && cd subdir && basename \"$(pwd)\"", 5*time.Second)
+	if res.Output != "subdir\n" || res.ExitCode != 0 {
+		t.Fatalf("cd inside call failed: %+v", res)
+	}
+	res = run(t, r, "pwd", 5*time.Second)
+	cleanOut := strings.TrimSpace(res.Output)
+	realDir, _ := filepath.EvalSymlinks(dir)
+	realClean, _ := filepath.EvalSymlinks(cleanOut)
+	if realClean != realDir {
+		t.Fatalf("cwd persisted: got %q want %q", cleanOut, dir)
+	}
+
+	// 4. Fresh shell options: options do not persist across calls.
+	run(t, r, "shopt -s nullglob", 5*time.Second)
+	res = run(t, r, "shopt nullglob", 5*time.Second)
+	if !strings.Contains(res.Output, "off") {
+		t.Fatalf("shopt leaked across calls: %+v", res)
+	}
+}
+
+func TestBashSemantics(t *testing.T) {
+	dir := t.TempDir()
+	r := &REPL{Dir: dir}
+
+	for _, tc := range []struct {
+		name    string
+		command string
+		wantOut string
+		code    int
+	}{
+		{"pipeline", "echo hello | tr a-z A-Z", "HELLO\n", 0},
+		{"heredoc", "cat <<'EOF'\nheredoc line\nEOF", "heredoc line\n", 0},
+		{"merged stdout/stderr", "echo stdout; echo stderr >&2", "stdout\nstderr\n", 0},
+		{"exit code 7", "printf problem >&2; exit 7", "problem", 7},
+		{"false", "false", "", 1},
+		{"true", "true", "", 0},
+		{"syntax error", "if then", "syntax error", 2},
+		{"empty stdin cat", "cat; echo done", "done\n", 0},
+		{"cat wc -c", "cat | wc -c", "0", 0},
+		{"pagers", "echo $PAGER $GIT_PAGER", "cat cat\n", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := run(t, r, tc.command, 5*time.Second)
+			if res.ExitCode != tc.code || res.Error != (tc.code != 0) || !strings.Contains(res.Output, tc.wantOut) {
+				t.Fatalf("%s: %+v, want output containing %q, code %d", tc.name, res, tc.wantOut, tc.code)
+			}
+		})
+	}
+
+	// Recur binary directory is first in PATH.
+	res := run(t, r, `echo "$PATH"`, 5*time.Second)
+	if execPath, err := os.Executable(); err == nil {
+		execDir := filepath.Dir(execPath)
+		firstPart := strings.Split(strings.TrimSpace(res.Output), string(os.PathListSeparator))[0]
+		if firstPart != execDir {
+			t.Fatalf("PATH does not start with executable dir %q: %q", execDir, res.Output)
+		}
+	}
+}
+
+func TestBASHENVExcluded(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "evil_marker.txt")
+	badScript := filepath.Join(dir, "evil.sh")
+	if err := os.WriteFile(badScript, []byte("echo EVIL > "+marker+"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Inherited host BASH_ENV must be excluded.
+	t.Setenv("BASH_ENV", badScript)
+	r := &REPL{Dir: dir}
+	res := run(t, r, `echo clean; echo "[$BASH_ENV]"`, 5*time.Second)
+	if strings.Contains(res.Output, "EVIL") || !strings.Contains(res.Output, "clean\n[]") {
+		t.Fatalf("host BASH_ENV executed or passed: %+v", res)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("host BASH_ENV script ran!")
+	}
+
+	// 2. Configured Environment BASH_ENV must also be excluded.
+	rConfigured := &REPL{
+		Dir: dir,
+		Environment: map[string]string{
+			"BASH_ENV": badScript,
+			"SAFE_VAR": "safe_value",
+		},
+	}
+	res = run(t, rConfigured, `echo "$SAFE_VAR"; echo "[$BASH_ENV]"`, 5*time.Second)
+	if !strings.Contains(res.Output, "safe_value\n[]") {
+		t.Fatalf("configured BASH_ENV was not stripped: %+v", res)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("configured BASH_ENV script ran!")
+	}
+}
+
+func TestEnvironmentAndMetadata(t *testing.T) {
+	dir := t.TempDir()
+	r := &REPL{
+		Dir: dir,
+		Environment: map[string]string{
+			"CONFIG_KEY": "config_val",
+			"OVERRIDE":   "base",
+		},
+	}
+
+	// Base environment from configuration
+	res := run(t, r, `echo "$CONFIG_KEY|$OVERRIDE"`, 5*time.Second)
+	if res.Output != "config_val|base\n" {
+		t.Fatalf("base environment: %+v", res)
+	}
+
+	// Metadata via Env callback overrides base environment
+	model := "model-v1"
+	r.Env = func() map[string]string {
+		return map[string]string{
+			"RECUR_MODEL": model,
+			"OVERRIDE":    "meta",
+		}
+	}
+	res = run(t, r, `echo "$RECUR_MODEL|$OVERRIDE"`, 5*time.Second)
+	if res.Output != "model-v1|meta\n" {
+		t.Fatalf("metadata override: %+v", res)
+	}
+
+	// Dynamic change on subsequent call
+	model = "model-v2"
+	res = run(t, r, `echo "$RECUR_MODEL|$OVERRIDE"`, 5*time.Second)
+	if res.Output != "model-v2|meta\n" {
+		t.Fatalf("metadata change: %+v", res)
+	}
+}
+
+func TestTimeoutKillsDescendants(t *testing.T) {
+	dir := t.TempDir()
+	r := &REPL{Dir: dir}
+
 	started := time.Now()
 	result := run(t, r, "sh -c 'sleep 30 & echo $! > child.pid; wait'", 300*time.Millisecond)
 	if result.ExitCode != 124 || !strings.Contains(result.Output, "timed out") || time.Since(started) > 5*time.Second {
 		t.Fatalf("timeout: %+v after %s", result, time.Since(started))
 	}
+
 	data, err := os.ReadFile(filepath.Join(dir, "child.pid"))
 	if err != nil {
 		t.Fatal(err)
@@ -96,95 +196,46 @@ func TestTimeoutKeepsStateAndKillsProcessGroup(t *testing.T) {
 	for _, c := range strings.TrimSpace(string(data)) {
 		pid = pid*10 + int(c-'0')
 	}
-	// Allow init to reap the killed grandchild; a zombie still answers signal 0.
+	// Verify that grandchild was killed
 	for i := 0; syscall.Kill(pid, 0) == nil; i++ {
 		if i == 40 {
-			t.Fatalf("grandchild %d survived", pid)
+			t.Fatalf("grandchild %d survived timeout", pid)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+
+	// Timeout on built-in loop
 	result = run(t, r, "while :; do :; done", 200*time.Millisecond)
-	if result.ExitCode != 124 {
-		t.Fatalf("builtin loop: %+v", result)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	time.AfterFunc(100*time.Millisecond, cancel)
-	result, err = r.Execute(ctx, "sleep 30", 10*time.Second)
-	if err != nil || result.ExitCode != 130 {
-		t.Fatalf("cancel: %+v %v", result, err)
-	}
-	if result = run(t, r, "echo $x", time.Second); result.Output != "kept\n" {
-		t.Fatalf("state lost: %+v", result)
+	if result.ExitCode != 124 || !strings.Contains(result.Output, "timed out") {
+		t.Fatalf("loop timeout: %+v", result)
 	}
 }
 
-func TestBackgroundJobOutlivesCallTimeout(t *testing.T) {
-	dir := t.TempDir()
-	r := &REPL{Dir: dir}
-	start(t, r)
-	result := run(t, r, "(sleep 0.5; echo \"job done $?\" > job.txt) &\necho started", time.Second)
-	if result.ExitCode != 0 || result.Output != "started\n" {
-		t.Fatalf("%+v", result)
-	}
-	if result = run(t, r, "sleep 5", 100*time.Millisecond); result.ExitCode != 124 {
-		t.Fatalf("%+v", result)
-	}
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		data, _ := os.ReadFile(filepath.Join(dir, "job.txt"))
-		if string(data) == "job done 0\n" {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("background job was killed by another call's timeout")
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	r.Close()
-	if _, err := r.Execute(context.Background(), "true", time.Second); err == nil {
-		t.Fatal("closed shell accepted a command")
+func TestCancellation(t *testing.T) {
+	r := &REPL{Dir: t.TempDir()}
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+
+	result, err := r.Execute(ctx, "sleep 30", 10*time.Second)
+	if err != nil || result.ExitCode != 130 || !strings.Contains(result.Output, "[recur: cancelled]") {
+		t.Fatalf("cancellation: %+v err=%v", result, err)
 	}
 }
 
 func TestOutputLimit(t *testing.T) {
 	r := &REPL{Dir: t.TempDir()}
-	start(t, r)
-	for _, command := range []string{"yes x | head -c 400000", "i=0; while [ $i -lt 40000 ]; do echo xxxxxxxxx; i=$((i+1)); done"} {
+
+	for _, command := range []string{
+		"yes x | head -c 400000",
+		"i=0; while [ $i -lt 40000 ]; do echo xxxxxxxxx; i=$((i+1)); done",
+	} {
 		result := run(t, r, command, 20*time.Second)
 		if result.ExitCode != 0 || len(result.Output) > DefaultOutputLimit+300 || !strings.Contains(result.Output, "[output truncated") {
 			t.Fatalf("%s: length=%d %+v", command, len(result.Output), result.ExitCode)
 		}
 	}
-}
 
-func TestPrefixFailures(t *testing.T) {
-	r := &REPL{Dir: t.TempDir(), Prefix: "if then"}
-	if _, err := r.Ensure(context.Background()); err == nil || !strings.Contains(err.Error(), "syntax error") {
-		t.Fatalf("syntax: %v", err)
-	}
-	r.Prefix = "echo init; false"
-	start(t, r)
-	if r.PrefixOutput != "init\n" {
-		t.Fatalf("nonzero prefix status must not fail: %q", r.PrefixOutput)
-	}
-	r.Close()
-	r.Prefix = "sleep 30"
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
-	defer cancel()
-	if _, err := r.Ensure(ctx); err == nil {
-		t.Fatal("expected prefix cancellation")
-	}
-	if r.runner != nil {
-		t.Fatal("failed prefix left a shell")
-	}
-}
-
-func TestOutputLimitChoices(t *testing.T) {
-	r := &REPL{Dir: t.TempDir(), Prefix: "yes p | head -c 100000"}
-	start(t, r)
-	if len(r.PrefixOutput) != 100000 || strings.Contains(r.PrefixOutput, "[output truncated") {
-		t.Fatalf("prefix truncated: %d", len(r.PrefixOutput))
-	}
+	// Custom limits
 	for _, tc := range []struct{ limit, max int }{{1000, 1300}, {NoOutputLimit, 50000}} {
 		result, err := r.ExecuteLimit(context.Background(), "yes x | head -c 50000", 20*time.Second, tc.limit)
 		if err != nil || len(result.Output) > tc.max {
@@ -194,8 +245,104 @@ func TestOutputLimitChoices(t *testing.T) {
 			t.Fatalf("limit %d: truncated=%v", tc.limit, truncated)
 		}
 	}
-	result := run(t, r, "echo small", time.Second)
-	if result.Output != "small\n" {
-		t.Fatalf("small: %q", result.Output)
+}
+
+func TestMissingExecutableScenarios(t *testing.T) {
+	r := &REPL{Dir: t.TempDir()}
+
+	// Nonexistent command executed within bash returns 127
+	result := run(t, r, "nonexistent-command-xyz-12345", 5*time.Second)
+	if result.ExitCode != 127 || !result.Error || !strings.Contains(result.Output, "not found") {
+		t.Fatalf("missing command: %+v", result)
 	}
+
+	// Nonexistent working directory
+	rBad := &REPL{Dir: filepath.Join(t.TempDir(), "nonexistent-directory")}
+	result, err := rBad.Execute(context.Background(), "echo hello", 5*time.Second)
+	if err != nil || result.ExitCode == 0 || !result.Error {
+		t.Fatalf("bad dir: %+v %v", result, err)
+	}
+}
+
+func TestNoStuckWaitFromPipes(t *testing.T) {
+	r := &REPL{Dir: t.TempDir()}
+
+	// Background process holding pipes open is terminated by WaitDelay rather than hanging
+	started := time.Now()
+	result := run(t, r, "sleep 10 & echo finished", 5*time.Second)
+	if result.ExitCode != 0 || !strings.Contains(result.Output, "finished") {
+		t.Fatalf("pipe holding test: %+v", result)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("Wait took too long with open pipes: %s", elapsed)
+	}
+
+	// Detached background task with redirection returns immediately without delay
+	started = time.Now()
+	result = run(t, r, "(sleep 0.5; echo bg > job.txt) >/dev/null 2>&1 & echo immediate", 5*time.Second)
+	if result.ExitCode != 0 || result.Output != "immediate\n" {
+		t.Fatalf("redirected bg job: %+v", result)
+	}
+	if elapsed := time.Since(started); elapsed > 200*time.Millisecond {
+		t.Fatalf("redirected bg job delayed parent: %s", elapsed)
+	}
+}
+
+func TestEnsureAndCloseCompatibility(t *testing.T) {
+	r := &REPL{
+		Dir:    t.TempDir(),
+		Prefix: "echo should not run",
+	}
+
+	// Ensure is a no-op returning false, nil
+	fresh, err := r.Ensure(context.Background())
+	if fresh || err != nil {
+		t.Fatalf("Ensure: fresh=%v err=%v", fresh, err)
+	}
+	if r.PrefixOutput != "" {
+		t.Fatalf("PrefixOutput should remain empty, got %q", r.PrefixOutput)
+	}
+
+	// Close terminates any active managed processes
+	started := make(chan struct{})
+	done := make(chan Result, 1)
+	go func() {
+		close(started)
+		res, _ := r.Execute(context.Background(), "sleep 30", 10*time.Second)
+		done <- res
+	}()
+	<-started
+	time.Sleep(100 * time.Millisecond)
+	r.Close()
+
+	select {
+	case res := <-done:
+		if res.ExitCode == 0 {
+			t.Fatal("expected terminated process on Close")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Close did not terminate active process")
+	}
+
+	// REPL is stateless: calls succeed after Close without reinitialization
+	res := run(t, r, "echo still works", 5*time.Second)
+	if res.Output != "still works\n" || res.ExitCode != 0 {
+		t.Fatalf("Execute after Close: %+v", res)
+	}
+}
+
+func TestConcurrentRace(t *testing.T) {
+	r := &REPL{Dir: t.TempDir()}
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			res := run(t, r, "echo start; echo err >&2; echo done", 5*time.Second)
+			if res.ExitCode != 0 || !strings.Contains(res.Output, "done") {
+				t.Errorf("worker %d: %+v", n, res)
+			}
+		}(i)
+	}
+	wg.Wait()
 }

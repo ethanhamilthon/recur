@@ -22,3 +22,26 @@ func TestDocs(t *testing.T) {
 		}
 	}
 }
+
+func TestToolDescriptionFor(t *testing.T) {
+	// Default values match ToolDescription constant
+	desc := ToolDescriptionFor(0, 0, -1)
+	if desc != ToolDescription {
+		t.Fatalf("default ToolDescriptionFor mismatch:\ngot:\n%s\nwant:\n%s", desc, ToolDescription)
+	}
+
+	// Dynamic values formatted correctly
+	custom := ToolDescriptionFor(45, 180, 4096)
+	if !strings.Contains(custom, "default 45 (null), maximum 180") {
+		t.Fatalf("missing custom timeout in:\n%s", custom)
+	}
+	if !strings.Contains(custom, "default 4096 (null)") {
+		t.Fatalf("missing custom max_output in:\n%s", custom)
+	}
+
+	// Unlimited max_output (0)
+	unlimited := ToolDescriptionFor(120, 600, 0)
+	if !strings.Contains(unlimited, "default 0 (unlimited) (null)") {
+		t.Fatalf("missing unlimited max_output in:\n%s", unlimited)
+	}
+}

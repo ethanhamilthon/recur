@@ -3,6 +3,7 @@ package repl
 import (
 	"fmt"
 	"strings"
+	"sync"
 )
 
 const (
@@ -34,11 +35,14 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 	}
 	b.tail = append(b.tail, p...)
 	if keep := b.limit - half; len(b.tail) > keep {
-		b.tail = append(b.tail[:0], b.tail[len(b.tail)-keep:]...)
+		copy(b.tail[:keep], b.tail[len(b.tail)-keep:])
+		b.tail = b.tail[:keep]
 	}
 	return total, nil
 }
+
 func (b *cappedBuffer) Reset() { b.head, b.tail, b.size = b.head[:0], b.tail[:0], 0 }
+
 func (b *cappedBuffer) Text() string {
 	head, tail := strings.ToValidUTF8(string(b.head), ""), strings.ToValidUTF8(string(b.tail), "")
 	if b.limit <= 0 || b.size <= b.limit {
@@ -47,4 +51,28 @@ func (b *cappedBuffer) Text() string {
 	return head + fmt.Sprintf("\n[output truncated: %d of %d bytes omitted (max_output=%d, first %d + last %d kept); "+
 		"filter with rg, grep, head, tail or pass a larger max_output]\n",
 		b.size-len(b.head)-len(b.tail), b.size, b.limit, len(b.head), len(b.tail)) + tail
+}
+
+// syncBuffer serializes concurrent writes from stdout and stderr pipes.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf cappedBuffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) WriteString(str string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.buf.Write([]byte(str))
+}
+
+func (s *syncBuffer) Text() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Text()
 }
