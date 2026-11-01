@@ -163,7 +163,42 @@ is displayed on completion.
 
 ### [hooks.NAME]
 
-Named lifecycle hooks. Fields (`events`, `command`, `timeout`, `enabled`,
-`send_output`, `headless_support`), events, variables and examples live in
-`recur docs hooks`. Headless runs (`recur --mode jsonl`) run the same hooks as
-the TUI, except hooks with `headless_support = false`; see `recur docs headless`.
+Defines named lifecycle hook handlers:
+```toml
+[hooks.turn_notify]
+events = ["turn_end"]
+command = '''
+[ "$RECUR_TURN_SOURCE" = user ] || exit 0
+notify-send "Recur" "Turn finished ($RECUR_TURN_STATUS)"
+'''
+timeout = 10
+
+[hooks.test_gate]
+events = ["turn_end"]
+command = '''
+[ "$RECUR_TURN_SOURCE" = user ] || exit 0
+make test > /tmp/test-hook.log 2>&1 || recur notify "make test failed"
+'''
+timeout = 180
+```
+
+- `events`: array of lifecycle event names to handle. Wildcard `"*"` matches all
+  events. Hook declarations require the `events = [...]` array syntax.
+- `command`: Bash command to execute.
+- `timeout`: deadline in seconds (default `10`, maximum `600`).
+- `enabled`: boolean flag (default `true`). Setting `enabled = false` disables an
+  inherited hook with the same name.
+- `send_output`: boolean flag (default `false`). When `true`, stdout/stderr output
+  is captured and queued for delivery at the start of the next turn.
+- `headless_support`: boolean flag (default `true`). Setting `headless_support = false`
+  keeps the hook from running in headless runs (`recur --mode jsonl`).
+  The hook still runs in the TUI.
+
+See `recur docs hooks` for full hook details and lifecycle events.
+
+## Headless Mode Hooks
+
+Headless runs (`recur --mode jsonl`) load the same configuration as the TUI, so
+hooks from `./recur.toml` and `$RECUR_HOME/config.toml` run without `--config`.
+Hooks with `headless_support = false` are skipped in headless runs only. The
+`--config` and `--no-extend` flags behave the same way in both interfaces.
