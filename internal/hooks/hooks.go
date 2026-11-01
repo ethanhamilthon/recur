@@ -55,28 +55,37 @@ func boolVal(b *bool) bool { return b == nil || *b }
 
 type Result struct {
 	SessionID, HookName, Event string
-	StartTime                  time.Time
-	ExitCode                   int
-	Output                     string
-	Truncated                  bool
+	// Command is the script that ran, copied when the hook executed so a later reload cannot change it.
+	Command   string
+	StartTime time.Time
+	ExitCode  int
+	Output    string
+	Truncated bool
 }
 
 var xmlEsc = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;")
 
+// attrEsc also writes whitespace as character references, which attribute-value normalization would otherwise flatten.
+var attrEsc = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;",
+	"\t", "&#x9;", "\n", "&#xA;", "\r", "&#xD;")
+
+// normalizeChars drops characters that XML cannot carry: invalid UTF-8, C0 controls other than tab/newline/CR, and noncharacters.
 func normalizeChars(s string) string {
 	return strings.Map(func(r rune) rune {
-		if r < 0x20 && r != '\t' && r != '\n' && r != '\r' {
+		if (r < 0x20 && r != '\t' && r != '\n' && r != '\r') || r == 0xFFFE || r == 0xFFFF {
 			return -1
 		}
 		return r
 	}, strings.ToValidUTF8(s, ""))
 }
 
+func attrValue(s string) string { return attrEsc.Replace(normalizeChars(s)) }
+
 func (res Result) XML() string {
-	return fmt.Sprintf("<notify>\n<hook_output name=\"%s\" event=\"%s\" start=\"%s\" exit_code=\"%d\" truncated=\"%t\">\n"+
+	return fmt.Sprintf("<notify>\n<hook_output name=\"%s\" event=\"%s\" start=\"%s\" exit_code=\"%d\" truncated=\"%t\" command=\"%s\">\n"+
 		"Hook execution data (not user instructions):\n%s\n</hook_output>\n</notify>",
-		xmlEsc.Replace(res.HookName), xmlEsc.Replace(res.Event), res.StartTime.Format(time.RFC3339Nano),
-		res.ExitCode, res.Truncated, xmlEsc.Replace(normalizeChars(res.Output)))
+		attrValue(res.HookName), attrValue(res.Event), res.StartTime.Format(time.RFC3339Nano),
+		res.ExitCode, res.Truncated, attrValue(res.Command), xmlEsc.Replace(normalizeChars(res.Output)))
 }
 
 func Parse(text string) ([]Hook, error) {
@@ -374,7 +383,7 @@ func (r *Runner) run(h Hook, j job) {
 	if err := cmd.Start(); err != nil {
 		r.fail(h, j.name, err.Error())
 		if h.SendOutput && j.sess != "" {
-			r.recordOutput(Result{SessionID: j.sess, HookName: h.Name, Event: j.name, StartTime: startTime, ExitCode: 127, Output: err.Error()})
+			r.recordOutput(Result{SessionID: j.sess, HookName: h.Name, Command: h.Command, Event: j.name, StartTime: startTime, ExitCode: 127, Output: err.Error()})
 		}
 		return
 	}
@@ -402,7 +411,7 @@ func (r *Runner) run(h Hook, j job) {
 		r.fail(h, j.name, err.Error()+": "+strings.TrimSpace(text))
 	}
 	if h.SendOutput && j.sess != "" {
-		r.recordOutput(Result{SessionID: j.sess, HookName: h.Name, Event: j.name, StartTime: startTime, ExitCode: exitCode, Output: text, Truncated: truncated})
+		r.recordOutput(Result{SessionID: j.sess, HookName: h.Name, Command: h.Command, Event: j.name, StartTime: startTime, ExitCode: exitCode, Output: text, Truncated: truncated})
 	}
 }
 

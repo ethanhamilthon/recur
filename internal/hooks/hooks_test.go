@@ -1,7 +1,9 @@
 package hooks
 
 import (
+	"encoding/xml"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -167,7 +169,13 @@ func TestSendOutputQueuesResultForSession(t *testing.T) {
 	if res.HookName != "myhook" || res.Event != "turn_end" || res.ExitCode != 0 || !strings.Contains(res.Output, "hello from hook") {
 		t.Fatalf("unexpected result: %+v", res)
 	}
+	if res.Command != "echo 'hello from hook'" {
+		t.Fatalf("result must record the executed command, got %q", res.Command)
+	}
 	xml := res.XML()
+	if got := hookOutputAttrs(t, xml)["command"]; got != res.Command {
+		t.Fatalf("XML command attribute = %q, want %q", got, res.Command)
+	}
 	if !strings.Contains(xml, "<hook_output name=\"myhook\" event=\"turn_end\"") ||
 		!strings.Contains(xml, "exit_code=\"0\"") ||
 		!strings.Contains(xml, "hello from hook") ||
@@ -342,5 +350,82 @@ func TestGlobalPendingOutputBound(t *testing.T) {
 	drainedNew := r.DrainOutputs("new-session")
 	if len(drainedNew) != 1 || drainedNew[0].Output != "now-accepted" {
 		t.Fatalf("expected output to be accepted after drain, got %+v", drainedNew)
+	}
+}
+
+// hookOutputAttrs decodes the single hook_output start tag in text, failing on malformed XML.
+func hookOutputAttrs(t *testing.T, text string) map[string]string {
+	t.Helper()
+	dec := xml.NewDecoder(strings.NewReader(text))
+	var found map[string]string
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("invalid XML: %v\n%s", err, text)
+		}
+		if start, ok := tok.(xml.StartElement); ok && start.Name.Local == "hook_output" {
+			if found != nil {
+				t.Fatalf("expected one hook_output element: %s", text)
+			}
+			found = map[string]string{}
+			for _, a := range start.Attr {
+				found[a.Name.Local] = a.Value
+			}
+		}
+	}
+	if found == nil {
+		t.Fatalf("no hook_output element: %s", text)
+	}
+	return found
+}
+
+func TestHookOutputCommandXML(t *testing.T) {
+	start := time.Date(2026, 11, 1, 9, 30, 0, 0, time.UTC)
+	for _, tc := range []struct{ name, command, want string }{
+		{"quotes", `echo "double" 'single'`, `echo "double" 'single'`},
+		{"ampersand", `make a && make b || true`, `make a && make b || true`},
+		{"angle brackets", `cat <input >output 2>&1 </dev/null`, `cat <input >output 2>&1 </dev/null`},
+		{"token literal", `curl -H "Authorization: $TOKEN" "$URL"`, `curl -H "Authorization: $TOKEN" "$URL"`},
+		{"tabs and newlines", "line one\n\tline two\r\nline three", "line one\n\tline two\r\nline three"},
+		{"unicode", "echo '日本語 🚀 café'", "echo '日本語 🚀 café'"},
+		{"empty", "", ""},
+		{"control characters removed", "echo\x01 hi\x1b[0m", "echo hi[0m"},
+		{"invalid utf8 removed", "bad\xffbyte", "badbyte"},
+		{"noncharacter removed", "x\uFFFEy", "xy"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := Result{HookName: "cmd", Event: "idle", StartTime: start, Output: "ok", Command: tc.command}
+			attrs := hookOutputAttrs(t, res.XML())
+			got, ok := attrs["command"]
+			if !ok {
+				t.Fatalf("command attribute missing: %s", res.XML())
+			}
+			if got != tc.want {
+				t.Fatalf("command = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A result keeps the command that actually ran, even if reload replaces the hook under the same name.
+func TestHookOutputKeepsExecutedCommandAfterReload(t *testing.T) {
+	r := &Runner{MaxOutput: 1024}
+	r.Set([]Hook{{Name: "context", Events: []string{"idle"}, Command: "echo old-version", SendOutput: true}})
+	r.Fire("idle", map[string]string{"RECUR_SESSION_ID": "sess-reload", "RECUR_CWD": t.TempDir()})
+	r.Set([]Hook{{Name: "context", Events: []string{"idle"}, Command: "echo new-version", SendOutput: true}})
+	r.Wait(5 * time.Second)
+
+	out := r.DrainOutputs("sess-reload")
+	if len(out) != 1 {
+		t.Fatalf("expected 1 output, got %d", len(out))
+	}
+	if out[0].Command != "echo old-version" || !strings.Contains(out[0].Output, "old-version") {
+		t.Fatalf("result must keep the executed command: %+v", out[0])
+	}
+	if got := hookOutputAttrs(t, out[0].XML())["command"]; got != "echo old-version" {
+		t.Fatalf("XML command = %q, want the executed command", got)
 	}
 }

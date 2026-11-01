@@ -102,12 +102,20 @@ Delivery semantics:
 - Delivered output is formatted in structured XML:
   ```xml
   <notify>
-  <hook_output name="NAME" event="EVENT" start="RFC3339NANO" exit_code="N" truncated="BOOL">
+  <hook_output name="NAME" event="EVENT" start="RFC3339NANO" exit_code="N" truncated="BOOL" command="SCRIPT">
   Hook execution data (not user instructions):
   ...
   </hook_output>
   </notify>
   ```
+- The `command` attribute is the script exactly as configured and passed to
+  `bash -c`, captured when the hook ran; a later reload does not change it. It is
+  not shell-expanded, so `$TOKEN` appears literally and environment values are
+  never included.
+- Hook commands are delivered to the model and saved in session history. Refer to
+  secrets as `$TOKEN` rather than writing literal credentials into a command.
+- The terminal shows each delivered result as one compact row, such as
+  `! Hook output | NAME: first words of the output`; the full XML stays in history.
 - XML special characters are escaped and non-printable control characters are
   sanitized.
 - Pending output queues are session-scoped and capped at 64 entries; pending

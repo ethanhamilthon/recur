@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -239,16 +241,49 @@ func TestHookSendOutputDrainedOnNextTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	const command = `[ "$RECUR_TURN_SOURCE" = "user" ] && echo "build success" || true`
 	found := false
 	for _, n := range notices {
 		if strings.Contains(n, "build success") && strings.Contains(n, "<hook_output") {
 			found = true
+			if got := hookCommandAttr(t, n); got != command {
+				t.Fatalf("emitted notice command = %q, want %q", got, command)
+			}
 			break
 		}
 	}
 	if !found {
 		t.Fatalf("expected hook output delivered as notice on second turn, got %v", notices)
 	}
+
+	saved := false
+	for _, item := range a.History {
+		var msg struct{ Role, Content string }
+		if json.Unmarshal(item, &msg) != nil || msg.Role != "user" || !strings.Contains(msg.Content, "<hook_output") {
+			continue
+		}
+		saved = true
+		if got := hookCommandAttr(t, msg.Content); got != command {
+			t.Fatalf("saved history command = %q, want %q", got, command)
+		}
+	}
+	if !saved {
+		t.Fatal("expected hook output saved as user history")
+	}
+}
+
+// hookCommandAttr decodes the hook_output command attribute from an XML notice.
+func hookCommandAttr(t *testing.T, text string) string {
+	t.Helper()
+	var doc struct {
+		HookOutput struct {
+			Command string `xml:"command,attr"`
+		} `xml:"hook_output"`
+	}
+	if err := xml.Unmarshal([]byte(text), &doc); err != nil {
+		t.Fatalf("invalid hook output XML: %v\n%s", err, text)
+	}
+	return doc.HookOutput.Command
 }
 
 func TestHeadlessHookInheritanceAndValidation(t *testing.T) {
