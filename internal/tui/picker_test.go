@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -140,5 +142,106 @@ func TestModelPickerListsAllProvidersAndSelectsItsProvider(t *testing.T) {
 	m = enterPicker(m)
 	if s := m.a.Settings(); s.Provider != "two" || s.Model != "beta" {
 		t.Fatalf("provider not switched with model: %+v", s)
+	}
+}
+
+func TestPrimaryConfigMethod(t *testing.T) {
+	var nilAgent *agent.Agent
+	if nilAgent.PrimaryConfig() != "" {
+		t.Fatalf("nil agent PrimaryConfig() = %q, want empty", nilAgent.PrimaryConfig())
+	}
+
+	home := t.TempDir()
+	t.Setenv("RECUR_HOME", home)
+	a, err := agent.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+
+	dest := a.PrimaryConfig()
+	if dest == "" {
+		t.Fatal("expected non-empty PrimaryConfig()")
+	}
+	if !strings.HasSuffix(dest, "config.toml") {
+		t.Fatalf("PrimaryConfig() = %q, want suffix config.toml", dest)
+	}
+}
+
+func TestCredentialDestinationInLoginAndModelNotices(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("RECUR_HOME", home)
+	projectDir := t.TempDir()
+	projectToml := filepath.Join(projectDir, "recur.toml")
+	_ = os.WriteFile(projectToml, []byte("model = \"base-model\"\n"), 0600)
+
+	a, err := agent.New(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+
+	if a.PrimaryConfig() != projectToml {
+		t.Fatalf("a.PrimaryConfig() = %q, want %q", a.PrimaryConfig(), projectToml)
+	}
+
+	m := newModel(a, projectDir)
+
+	// 1. openPicker("login") displays credential destination
+	m.openPicker("login")
+	entriesStr := fmt.Sprint(m.entries)
+	if !strings.Contains(entriesStr, "Credentials destination: "+projectToml) {
+		t.Fatalf("openPicker login entries = %v, want Credentials destination: %s", m.entries, projectToml)
+	}
+
+	// 2. Select "Add" row
+	if last := m.menu[len(m.menu)-1]; last.name != "Add" || last.icon != "+" {
+		t.Fatal("missing final Add row")
+	}
+	m.selected = len(m.menu) - 1
+	m = enterPicker(m)
+
+	entriesStr = fmt.Sprint(m.entries)
+	if !strings.Contains(entriesStr, "Credentials will be saved to "+projectToml) {
+		t.Fatalf("entering setup entries = %v, want Credentials will be saved to: %s", m.entries, projectToml)
+	}
+
+	// 3. Provider name
+	m.input.SetValue("proj-prov")
+	m = enterPicker(m)
+
+	// 4. Base URL
+	m.input.SetValue("https://api.project.com/v1")
+	m = enterPicker(m)
+
+	// At API key step, warning about project config is shown
+	entriesStr = fmt.Sprint(m.entries)
+	if !strings.Contains(entriesStr, "Warning: API key will be saved to project configuration ("+projectToml+")") {
+		t.Fatalf("setup API key prompt missing project config warning: %v", m.entries)
+	}
+
+	// 5. API key entered and submitted
+	m.input.SetValue("secret-proj-key")
+	m = enterPicker(m)
+
+	// Success notice contains destination
+	entriesStr = fmt.Sprint(m.entries)
+	if !strings.Contains(entriesStr, "Provider created in "+projectToml+". Choose a model with /model.") {
+		t.Fatalf("provider created notice missing destination: %v", m.entries)
+	}
+	// Verify secret key is not leaked
+	if strings.Contains(entriesStr, "secret-proj-key") || strings.Contains(fmt.Sprint(m.a.History), "secret-proj-key") {
+		t.Fatal("secret key leaked into entries or history")
+	}
+
+	// 6. Model selection notice shows destination
+	m.openPicker("model")
+	m.menu = []command{{name: "gpt-4o", description: "proj-prov"}}
+	m.selected = 0
+	m = enterPicker(m)
+
+	entriesStr = fmt.Sprint(m.entries)
+	if !strings.Contains(entriesStr, "(saved to "+projectToml+")") {
+		t.Fatalf("model selection notice missing destination: %v", m.entries)
 	}
 }

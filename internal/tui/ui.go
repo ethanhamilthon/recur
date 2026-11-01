@@ -84,6 +84,9 @@ type model struct {
 	fileIndexCacheTime       time.Time
 	fileIndexCwd             string
 	fileScanCancel           context.CancelFunc
+	fileDismissed            bool
+	fileDismissedValue       string
+	fileDismissedCursor      int
 }
 
 func newModel(a *agent.Agent, cwd string) model {
@@ -229,9 +232,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fileScanMsg:
 		return m.handleFileScan(v)
 	case clipboardResult:
+		valBefore := m.input.Value()
+		curBefore := m.composerCursorOffset()
 		cmd := m.acceptClipboard(v)
+		valAfter := m.input.Value()
+		curAfter := m.composerCursorOffset()
+		changed := valAfter != valBefore
+		moved := curAfter != curBefore
+		if changed {
+			m.selected = 0
+			m.hideCompletion = false
+		}
+		var fileCmd tea.Cmd
+		if changed || moved {
+			m.fileDismissed = false
+			fileCmd = m.checkFileCompletion()
+		}
 		m.refresh(true)
-		return m, cmd
+		return m, tea.Batch(cmd, fileCmd)
 	case followerTick:
 		// While busy, the turn itself accepts notifications as steering.
 		if messages := m.idleNotifications(); len(messages) > 0 {
@@ -538,20 +556,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.startTurn(text)
 
 		}
-		before := m.input.Value()
+		valBefore := m.input.Value()
+		curBefore := m.composerCursorOffset()
 		cmd := m.updateInput(msg)
-		changed := m.input.Value() != before
+		valAfter := m.input.Value()
+		curAfter := m.composerCursorOffset()
+		changed := valAfter != valBefore
+		moved := curAfter != curBefore
 		if changed {
 			m.selected = 0
 			m.hideCompletion = false
 		}
-		fileCmd := m.checkFileCompletion()
+		var fileCmd tea.Cmd
+		if changed || moved {
+			m.fileDismissed = false
+			fileCmd = m.checkFileCompletion()
+		}
 		m.refresh(follow || changed)
 		return m, tea.Batch(cmd, fileCmd)
 	}
+	valBefore := m.input.Value()
+	curBefore := m.composerCursorOffset()
 	cmd := m.updateInput(msg)
-	fileCmd := m.checkFileCompletion()
-	m.refresh(follow)
+	valAfter := m.input.Value()
+	curAfter := m.composerCursorOffset()
+	changed := valAfter != valBefore
+	moved := curAfter != curBefore
+	var fileCmd tea.Cmd
+	if changed || moved {
+		m.fileDismissed = false
+		fileCmd = m.checkFileCompletion()
+	}
+	m.refresh(follow || changed)
 	return m, tea.Batch(cmd, fileCmd)
 }
 func (m model) View() string {

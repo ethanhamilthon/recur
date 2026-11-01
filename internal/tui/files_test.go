@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	tea "github.com/charmbracelet/bubbletea"
 	"recur/internal/agent"
 	"recur/internal/repl"
@@ -635,5 +636,350 @@ func TestRenderingFileCompletions(t *testing.T) {
 	}
 	if !strings.Contains(view, "  beta.go") {
 		t.Fatalf("expected unselected marker for beta.go in timeline:\n%s", view)
+	}
+}
+
+func TestFileCompletionE2EUpdateTypingBlinkEnterEsc(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "util.go"), []byte("package main"), 0644)
+
+	m := newModel(&agent.Agent{}, dir)
+
+	// Genuine Update typing of "@ma"
+	for _, r := range "@ma" {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = next.(model)
+	}
+
+	if m.input.Value() != "@ma" {
+		t.Fatalf("input value = %q, want @ma", m.input.Value())
+	}
+	if !m.fileLoading {
+		t.Fatal("expected fileLoading to be true after typing @ma")
+	}
+
+	// Debounce and scan
+	next, scanCmd := m.Update(fileDebounceMsg{debounceGen: m.fileDebounceGen, fileGen: m.fileGen})
+	m = next.(model)
+	if scanCmd == nil {
+		t.Fatal("expected scanCmd from debounce")
+	}
+	scanMsg := scanCmd()
+	next, _ = m.Update(scanMsg)
+	m = next.(model)
+
+	if !m.hasFileCompletions() {
+		t.Fatal("expected hasFileCompletions() to be true after scan")
+	}
+	if len(m.fileCompletions) != 1 || m.fileCompletions[0] != "main.go" {
+		t.Fatalf("fileCompletions = %v, want ['main.go']", m.fileCompletions)
+	}
+
+	// Press Enter: accepts file completion
+	next, acceptCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if acceptCmd != nil {
+		if noopMsg := acceptCmd(); noopMsg != nil {
+			next, _ = m.Update(noopMsg)
+			m = next.(model)
+		}
+	}
+
+	if m.input.Value() != "@main.go" {
+		t.Fatalf("input value after Enter = %q, want @main.go", m.input.Value())
+	}
+	if m.hasFileCompletions() {
+		t.Fatal("expected completions closed after accepting file")
+	}
+	if m.fileLoading {
+		t.Fatal("expected fileLoading false after accepting file")
+	}
+
+	genBefore := m.fileGen
+
+	// Non-key message: cursor.BlinkMsg
+	next, blinkCmd := m.Update(cursor.BlinkMsg{})
+	if blinkCmd != nil {
+		t.Fatalf("cursor.BlinkMsg generated non-nil cmd: %v", blinkCmd)
+	}
+	m = next.(model)
+
+	if m.hasFileCompletions() {
+		t.Fatal("cursor.BlinkMsg reopened file completions after Enter")
+	}
+	if m.fileLoading {
+		t.Fatal("cursor.BlinkMsg started file loading after Enter")
+	}
+	if m.fileGen != genBefore {
+		t.Fatalf("cursor.BlinkMsg bumped fileGen: %d -> %d", genBefore, m.fileGen)
+	}
+	// Also test another non-key message (window size or noop)
+	next, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = next.(model)
+	if m.hasFileCompletions() || m.fileLoading {
+		t.Fatal("WindowSizeMsg reopened file completion")
+	}
+
+	// Subsequent Enter submits normally: when busy, it queues steering
+	m.busy = true
+	m.steering = &agent.Steering{}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+
+	if len(m.queued) != 1 || m.queued[0].Text != "@main.go" {
+		t.Fatalf("subsequent Enter did not submit/queue steering: queued = %v", m.queued)
+	}
+	if m.input.Value() != "" {
+		t.Fatalf("composer not cleared after submit: %q", m.input.Value())
+	}
+
+	// Test Esc dismisses completion and stays dismissed on non-key messages
+	m.busy = false
+	m.queued = nil
+	for _, r := range "@ut" {
+		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = next.(model)
+	}
+	next, scanCmd = m.Update(fileDebounceMsg{debounceGen: m.fileDebounceGen, fileGen: m.fileGen})
+	m = next.(model)
+	if scanCmd != nil {
+		scanMsg = scanCmd()
+		next, _ = m.Update(scanMsg)
+		m = next.(model)
+	}
+	if !m.hasFileCompletions() {
+		t.Fatal("expected completions for @ut")
+	}
+
+	// Esc dismisses
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(model)
+	if m.hasFileCompletions() || m.fileLoading {
+		t.Fatal("Esc did not close completion")
+	}
+
+	// Idle blink does NOT reopen
+	next, _ = m.Update(cursor.BlinkMsg{})
+	m = next.(model)
+	if m.hasFileCompletions() || m.fileLoading {
+		t.Fatal("cursor.BlinkMsg revived completion dismissed by Esc")
+	}
+
+	// Moving cursor clears suppression: Left arrow moves cursor from 3 to 2
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	m = next.(model)
+	if m.fileDismissed {
+		t.Fatal("cursor movement did not clear fileDismissed")
+	}
+
+	// Typing clears suppression
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = next.(model)
+	if m.fileDismissed {
+		t.Fatal("typing did not clear fileDismissed")
+	}
+}
+
+func TestFileCompletionWithAttachedImageAndSteering(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0644)
+
+	m := newModel(&agent.Agent{}, dir)
+	m.images = []repl.Image{{URL: "data:image/png;base64,AA==", Path: filepath.Join(dir, "img.png")}}
+
+	for _, r := range "@ma" {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = next.(model)
+	}
+	next, scanCmd := m.Update(fileDebounceMsg{debounceGen: m.fileDebounceGen, fileGen: m.fileGen})
+	m = next.(model)
+	if scanCmd != nil {
+		scanMsg := scanCmd()
+		next, _ = m.Update(scanMsg)
+		m = next.(model)
+	}
+	if !m.hasFileCompletions() {
+		t.Fatal("expected completion active")
+	}
+
+	// Enter accepts file completion first, keeping attached image
+	next, acceptCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if acceptCmd != nil {
+		if noop := acceptCmd(); noop != nil {
+			next, _ = m.Update(noop)
+			m = next.(model)
+		}
+	}
+	if m.input.Value() != "@main.go" {
+		t.Fatalf("value = %q, want @main.go", m.input.Value())
+	}
+	if len(m.images) != 1 {
+		t.Fatalf("attached images lost on file accept: count = %d", len(m.images))
+	}
+
+	// Blink message does not reopen
+	next, _ = m.Update(cursor.BlinkMsg{})
+	m = next.(model)
+	if m.hasFileCompletions() {
+		t.Fatal("blink reopened completion")
+	}
+
+	// Subsequent Enter while busy queues steering with image
+	m.busy = true
+	m.steering = &agent.Steering{}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+
+	if len(m.queued) != 1 {
+		t.Fatalf("expected 1 queued steering instruction, got %d", len(m.queued))
+	}
+	if m.queued[0].Text != "@main.go" {
+		t.Fatalf("queued text = %q, want @main.go", m.queued[0].Text)
+	}
+	if len(m.queued[0].Images) != 1 {
+		t.Fatalf("queued images = %d, want 1", len(m.queued[0].Images))
+	}
+}
+
+func TestFileCompletionMultilineUnicode(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0644)
+
+	m := newModel(&agent.Agent{}, dir)
+	prefix := "héllo 🚀\nsee "
+	m.input.SetValue(prefix)
+	m.input.CursorEnd()
+
+	for _, r := range "@ma" {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = next.(model)
+	}
+	next, scanCmd := m.Update(fileDebounceMsg{debounceGen: m.fileDebounceGen, fileGen: m.fileGen})
+	m = next.(model)
+	if scanCmd != nil {
+		scanMsg := scanCmd()
+		next, _ = m.Update(scanMsg)
+		m = next.(model)
+	}
+	if !m.hasFileCompletions() {
+		t.Fatal("expected completion active in multiline Unicode")
+	}
+
+	next, acceptCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if acceptCmd != nil {
+		if noop := acceptCmd(); noop != nil {
+			next, _ = m.Update(noop)
+			m = next.(model)
+		}
+	}
+
+	want := "héllo 🚀\nsee @main.go"
+	if m.input.Value() != want {
+		t.Fatalf("value = %q, want %q", m.input.Value(), want)
+	}
+
+	// Idle blink does not reopen
+	next, _ = m.Update(cursor.BlinkMsg{})
+	m = next.(model)
+	if m.hasFileCompletions() {
+		t.Fatal("blink reopened completion in multiline Unicode")
+	}
+}
+
+func TestQuotePathAndFindFileTokenEscapingRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	quoteDir := filepath.Join(dir, "my\"folder")
+	_ = os.Mkdir(quoteDir, 0755)
+	_ = os.WriteFile(filepath.Join(quoteDir, "main.go"), []byte("package main"), 0644)
+
+	slashDir := filepath.Join(dir, "my\\folder")
+	_ = os.Mkdir(slashDir, 0755)
+	_ = os.WriteFile(filepath.Join(slashDir, "util.go"), []byte("package main"), 0644)
+
+	// quotePath escapes quotes and backslashes
+	qpQuote := quotePath("my\"folder/")
+	if qpQuote != "@\"my\\\"folder/\"" {
+		t.Fatalf("quotePath for directory with quote = %q, want %q", qpQuote, "@\"my\\\"folder/\"")
+	}
+
+	qpSlash := quotePath("my\\folder/")
+	if qpSlash != "@\"my\\\\folder/\"" {
+		t.Fatalf("quotePath for directory with backslash = %q, want %q", qpSlash, "@\"my\\\\folder/\"")
+	}
+
+	// findFileToken parses escaped quotes and backslashes
+	// Cursor right before closing quote in @"my"folder/"
+	runes := []rune(qpQuote)
+	cursorBeforeQuote := len(runes) - 1
+	token, ok := findFileToken(qpQuote, cursorBeforeQuote)
+	if !ok {
+		t.Fatalf("findFileToken failed for %q at cursor %d", qpQuote, cursorBeforeQuote)
+	}
+	if !token.dir {
+		t.Fatal("expected token.dir = true")
+	}
+	if token.query != "my\"folder/" {
+		t.Fatalf("token.query = %q, want %q", token.query, "my\"folder/")
+	}
+	if token.start != 0 || token.end != len(runes) {
+		t.Fatalf("token range = [%d, %d], want [0, %d]", token.start, token.end, len(runes))
+	}
+
+	// findFileToken for backslash path
+	runesSlash := []rune(qpSlash)
+	cursorBeforeSlash := len(runesSlash) - 1
+	tokenSlash, okSlash := findFileToken(qpSlash, cursorBeforeSlash)
+	if !okSlash {
+		t.Fatalf("findFileToken failed for %q at cursor %d", qpSlash, cursorBeforeSlash)
+	}
+	if !tokenSlash.dir {
+		t.Fatal("expected tokenSlash.dir = true")
+	}
+	if tokenSlash.query != "my\\folder/" {
+		t.Fatalf("tokenSlash.query = %q, want %q", tokenSlash.query, "my\\folder/")
+	}
+
+	// End-to-end directory continuation: accept directory completion, then accept file inside it
+	m := newModel(&agent.Agent{}, dir)
+	m.fileCompletions = []string{"my\"folder/"}
+	m.fileSelected = 0
+	m.fileTokenStart = 0
+	m.fileTokenEnd = 0
+	m.input.SetValue("@my")
+	tokenInit, _ := findFileToken("@my", 3)
+	m.fileTokenStart, m.fileTokenEnd = tokenInit.start, tokenInit.end
+
+	acceptDirCmd := m.acceptFileCompletion()
+	if acceptDirCmd != nil {
+		if noop := acceptDirCmd(); noop != nil {
+			next, _ := m.Update(noop)
+			m = next.(model)
+		}
+	}
+
+	// Value should be quoted dir, and token range should span the entire quoted directory
+	if m.input.Value() != "@\"my\\\"folder/\"" {
+		t.Fatalf("after accepting quoted dir, input = %q", m.input.Value())
+	}
+	// Completion continuation: file inside directory
+	m.fileCompletions = []string{"my\"folder/main.go"}
+	m.fileSelected = 0
+	acceptFileCmd := m.acceptFileCompletion()
+	if acceptFileCmd != nil {
+		if noop := acceptFileCmd(); noop != nil {
+			next, _ := m.Update(noop)
+			m = next.(model)
+		}
+	}
+
+	wantFinal := "@\"my\\\"folder/main.go\""
+	if m.input.Value() != wantFinal {
+		t.Fatalf("after accepting file in quoted dir, input = %q, want %q", m.input.Value(), wantFinal)
+	}
+	if m.hasFileCompletions() {
+		t.Fatal("file completion should be dismissed after accepting regular file")
 	}
 }

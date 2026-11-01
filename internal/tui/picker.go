@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +16,23 @@ type modelChoices struct {
 	generation int
 	models     []agent.ModelChoice
 	errs       map[string]error
+}
+
+func isProjectConfig(dest, cwd string, a *agent.Agent) bool {
+	if dest == "" {
+		return false
+	}
+	if a != nil && a.LocalConfig != "" {
+		return true
+	}
+	if filepath.Base(dest) == "recur.toml" {
+		return true
+	}
+	if cwd != "" && (filepath.Clean(dest) == filepath.Clean(filepath.Join(cwd, "recur.toml")) ||
+		filepath.Clean(dest) == filepath.Clean(filepath.Join(cwd, ".recur", "config.toml"))) {
+		return true
+	}
+	return false
 }
 
 func (m *model) openPicker(kind string) tea.Cmd {
@@ -30,6 +48,10 @@ func (m *model) openPicker(kind string) tea.Cmd {
 		}
 		sort.Slice(m.menu, func(i, j int) bool { return m.menu[i].name < m.menu[j].name })
 		m.menu = append(m.menu, command{name: "Add", icon: "+", description: "Create provider"})
+		dest := m.a.PrimaryConfig()
+		if dest != "" {
+			m.add("notice", fmt.Sprintf("Credentials destination: %s", dest))
+		}
 		return nil
 	}
 	m.effort = 0
@@ -40,10 +62,10 @@ func (m *model) openPicker(kind string) tea.Cmd {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	m.menuCancel = cancel
-	generation, providers := m.menuGeneration, m.a.Settings().Providers
+	generation, settings := m.menuGeneration, m.a.Settings()
 	return func() tea.Msg {
 		defer cancel()
-		models, errs := agent.AllModels(ctx, providers)
+		models, errs := agent.AllModels(ctx, settings.Providers, settings.Environment)
 		return modelChoices{generation, models, errs}
 	}
 }
@@ -106,14 +128,29 @@ func (m model) pickerKey(key tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			prompts := []string{"Provider name", "HTTP(S) base URL", "API key (optional)"}
 			if len(m.setup) < 3 {
 				m.input.Placeholder = prompts[len(m.setup)]
+				if len(m.setup) == 2 {
+					dest := m.a.PrimaryConfig()
+					if isProjectConfig(dest, m.cwd, m.a) {
+						m.add("notice", fmt.Sprintf("Warning: API key will be saved to project configuration (%s); avoid committing secrets to version control.", dest))
+					}
+				}
 				break
 			}
-			err := m.a.AddProvider(m.setup[0], agent.Provider{BaseURL: m.setup[1], APIKey: m.setup[2]})
+			dest := m.a.PrimaryConfig()
+			apiKey := m.setup[2]
+			if apiKey != "" && isProjectConfig(dest, m.cwd, m.a) {
+				m.add("notice", fmt.Sprintf("Warning: API key saved in project configuration (%s); avoid committing secrets.", dest))
+			}
+			err := m.a.AddProvider(m.setup[0], agent.Provider{BaseURL: m.setup[1], APIKey: apiKey})
 			m.closePicker()
 			if err != nil {
 				return m.fail(err)
 			}
-			m.add("notice", "Provider created. Choose a model with /model.")
+			if dest != "" {
+				m.add("notice", fmt.Sprintf("Provider created in %s. Choose a model with /model.", dest))
+			} else {
+				m.add("notice", "Provider created. Choose a model with /model.")
+			}
 			break
 		}
 		matches := m.completions()
@@ -127,6 +164,10 @@ func (m model) pickerKey(key tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			m.selected = 0
 			m.input.Reset()
 			m.input.Placeholder = "Provider name"
+			dest := m.a.PrimaryConfig()
+			if dest != "" {
+				m.add("notice", fmt.Sprintf("Credentials will be saved to %s", dest))
+			}
 			break
 		}
 		settings := m.a.Settings()
@@ -141,7 +182,12 @@ func (m model) pickerKey(key tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		if err != nil {
 			return m.fail(err)
 		}
-		m.add("notice", fmt.Sprintf("Selected %s · %s/%s", settings.Provider, settings.Model, settings.Effort))
+		dest := m.a.PrimaryConfig()
+		if dest != "" {
+			m.add("notice", fmt.Sprintf("Selected %s · %s/%s (saved to %s)", settings.Provider, settings.Model, settings.Effort, dest))
+		} else {
+			m.add("notice", fmt.Sprintf("Selected %s · %s/%s", settings.Provider, settings.Model, settings.Effort))
+		}
 	default:
 		return m, nil, false
 	}

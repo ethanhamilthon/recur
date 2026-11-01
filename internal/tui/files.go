@@ -61,10 +61,24 @@ func sanitizeLabel(s string) string {
 }
 
 func quotePath(p string) string {
-	if !strings.ContainsAny(p, " \t\n\"'") {
+	if !strings.ContainsAny(p, " \t\n\"'\\") {
 		return "@" + p
 	}
 	return "@\"" + strings.ReplaceAll(strings.ReplaceAll(p, "\\", "\\\\"), "\"", "\\\"") + "\""
+}
+
+func unescapeQuoted(s string) string {
+	var sb strings.Builder
+	runes := []rune(s)
+	for i := 0; i < len(runes); i++ {
+		if runes[i] == '\\' && i+1 < len(runes) {
+			i++
+			sb.WriteRune(runes[i])
+		} else {
+			sb.WriteRune(runes[i])
+		}
+	}
+	return sb.String()
 }
 
 func findFileToken(text string, cursor int) (fileToken, bool) {
@@ -92,8 +106,16 @@ func findFileToken(text string, cursor int) (fileToken, bool) {
 		}
 		tokenStart, tokenEnd, query := at, cursor, ""
 		if at+1 < len(runes) && (runes[at+1] == '"' || runes[at+1] == '\'') {
-			quote, qEnd := runes[at+1], at+2
-			for qEnd < len(runes) && runes[qEnd] != '\n' && runes[qEnd] != quote {
+			quote := runes[at+1]
+			qEnd := at + 2
+			for qEnd < len(runes) && runes[qEnd] != '\n' {
+				if runes[qEnd] == '\\' && qEnd+1 < len(runes) && runes[qEnd+1] != '\n' {
+					qEnd += 2
+					continue
+				}
+				if runes[qEnd] == quote {
+					break
+				}
 				qEnd++
 			}
 			tokenEnd = qEnd
@@ -103,7 +125,7 @@ func findFileToken(text string, cursor int) (fileToken, bool) {
 			if cursor < at || cursor > tokenEnd {
 				return fileToken{}, false
 			}
-			query = string(runes[at+2 : min(cursor, qEnd)])
+			query = unescapeQuoted(string(runes[at+2 : min(cursor, qEnd)]))
 		} else {
 			tokenEnd = at + 1
 			for tokenEnd < len(runes) && !unicode.IsSpace(runes[tokenEnd]) && !strings.ContainsRune(")]}>\";,`", runes[tokenEnd]) {
@@ -226,6 +248,9 @@ func filterFileCompletions(indexed []string, query string) []string {
 
 func (m *model) dismissFileCompletion() {
 	m.fileCompletions, m.fileLoading, m.fileSelected, m.fileGen = nil, false, 0, m.fileGen+1
+	m.fileDismissed = true
+	m.fileDismissedValue = m.input.Value()
+	m.fileDismissedCursor = m.composerCursorOffset()
 	if m.fileScanCancel != nil {
 		m.fileScanCancel()
 		m.fileScanCancel = nil
@@ -241,6 +266,9 @@ func (m *model) checkFileCompletion() tea.Cmd {
 		m.dismissFileCompletion()
 		return nil
 	}
+	if m.fileDismissed && m.input.Value() == m.fileDismissedValue && m.composerCursorOffset() == m.fileDismissedCursor {
+		return nil
+	}
 	token, ok := findFileToken(m.input.Value(), m.composerCursorOffset())
 	if !ok {
 		if m.fileLoading || len(m.fileCompletions) > 0 {
@@ -248,6 +276,7 @@ func (m *model) checkFileCompletion() tea.Cmd {
 		}
 		return nil
 	}
+	m.fileDismissed = false
 	m.fileGen++
 	m.fileDebounceGen++
 	m.fileLoading, m.hideCompletion = true, false
@@ -260,6 +289,9 @@ func (m *model) checkFileCompletion() tea.Cmd {
 
 func (m *model) handleFileDebounce(msg fileDebounceMsg) (tea.Model, tea.Cmd) {
 	if msg.debounceGen != m.fileDebounceGen || msg.fileGen != m.fileGen {
+		return *m, nil
+	}
+	if m.fileDismissed && m.input.Value() == m.fileDismissedValue && m.composerCursorOffset() == m.fileDismissedCursor {
 		return *m, nil
 	}
 	token, ok := findFileToken(m.input.Value(), m.composerCursorOffset())
@@ -293,6 +325,11 @@ func (m *model) handleFileScan(msg fileScanMsg) (tea.Model, tea.Cmd) {
 		return *m, nil
 	}
 	m.fileLoading = false
+	if m.fileDismissed && m.input.Value() == m.fileDismissedValue && m.composerCursorOffset() == m.fileDismissedCursor {
+		m.fileCompletions = nil
+		m.refresh(true)
+		return *m, nil
+	}
 	token, ok := findFileToken(m.input.Value(), m.composerCursorOffset())
 	if !ok || msg.err != nil {
 		m.fileCompletions = nil
@@ -315,11 +352,13 @@ func (m *model) acceptFileCompletion() tea.Cmd {
 	start, end := max(0, min(m.fileTokenStart, len(runes))), max(0, min(m.fileTokenEnd, len(runes)))
 	m.input.SetValue(string(runes[:start]) + rep)
 	cursor := len([]rune(m.input.Value()))
-	if isDir && strings.HasSuffix(rep, "\"") {
+	if isDir && (strings.HasSuffix(rep, "\"") || strings.HasSuffix(rep, "'")) {
 		cursor = max(0, cursor-1)
 	}
 	m.input.SetValue(m.input.Value() + string(runes[min(end, len(runes)):]))
+	cmd := m.setCursorOffset(cursor)
 	if isDir {
+		m.fileDismissed = false
 		m.fileSelected, m.fileLoading, m.hideCompletion, m.fileGen = 0, false, false, m.fileGen+1
 		if token, ok := findFileToken(m.input.Value(), cursor); ok {
 			m.fileTokenStart, m.fileTokenEnd = token.start, token.end
@@ -330,5 +369,5 @@ func (m *model) acceptFileCompletion() tea.Cmd {
 	} else {
 		m.dismissFileCompletion()
 	}
-	return m.setCursorOffset(cursor)
+	return cmd
 }
