@@ -19,13 +19,6 @@ Recur merges layers: Built-in defaults -> `$RECUR_HOME/config.toml` -> Primary
 configuration. The `--no-extend` flag skips reading the global configuration file.
 Tables deep-merge, while scalars and arrays replace inherited values.
 
-Legacy files (`settings.toml`, `system.md`, `prefix.sh`, and `hooks.toml`) and
-legacy CLI flags (`--settings`, `--system`, `--prefix`, `--hooks`,
-`enable_local_recur`) are retired. If legacy configuration files are detected
-without a new `config.toml`, Recur exits with a diagnostic error instructing the
-user to migrate manually; Recur never alters or deletes user files automatically.
-See `recur docs config` for full migration instructions.
-
 ## Session Files and Persistence
 
 Each project maintains independent JSONL session files below
