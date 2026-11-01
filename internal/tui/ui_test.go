@@ -125,7 +125,7 @@ func TestNewCommand(t *testing.T) {
 		t.Fatal("new should clear timeline and history")
 	}
 	if a.System == "" {
-		t.Fatal("new should load prompt files")
+		t.Fatal("new should re-read the system prompt from config")
 	}
 }
 func TestTimelineHasNoBackgrounds(t *testing.T) {

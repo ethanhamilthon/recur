@@ -1,12 +1,16 @@
 # Interface
 
 Commands:
-- `/new`: starts a new chat and session.
+- `/new`: starts a new chat and session (config is re-read).
 - `/resume`: selects a project session to reopen.
+- `/rename [name]`: renames the session; an empty name restores the default
+  (the first user message).
 - `/compact [prompt]`: summarizes older turns beyond `compact_keep_turns`.
-- `/reload`: re-reads configuration and updates settings for subsequent commands.
+- `/reload`: re-reads configuration for this chat; history and the selected model
+  are kept, running shell commands are stopped. Refused while a turn is running.
 - `/model`: selects active model and reasoning effort.
-- `/login`: adds or updates provider credentials.
+- `/login`: selects an existing provider or adds a new one (name, base URL,
+  optional API key).
 - `/help`: displays available commands and shortcuts.
 - `/quit`: saves history and exits Recur.
 
@@ -79,8 +83,8 @@ Narrow terminal widths (1 to 5 cells, 80 cells) are handled cleanly without
 wrapping or negative padding. Wide Unicode characters and emojis are truncated
 with display-width awareness.
 
-Status content is configured in `recur.toml` or `config.toml` via `status_left`
-and `status_right` command arrays under `[ui]`:
+Status content is configured via `status_left` and `status_right` command arrays
+under `[ui]` (this section is the only place that describes them):
 - Commands run in `/bin/bash --noprofile --norc -c` in the project directory.
 - Inherited `BASH_ENV` is stripped.
 - Commands receive the process environment plus `[env]` and raw `RECUR_*`

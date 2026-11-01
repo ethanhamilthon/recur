@@ -1,39 +1,69 @@
-# Recur — an AI coding agent you can control 100%
+# Recur — a minimalist AI agent for coding and automation
 
-Modern AI agents are hard to understand. What they do can feel like magic. Their system prompts are hidden, and changing their behavior can be unpredictable.
+Recur is configured with a single file: `recur.toml`. Put it in your project root and describe what the agent should know: skills, MCP, commands, files, and anything else.
 
-Recur solves this by keeping the agent simple and visible. You control 100%: the system prompt, the tools, and what enters the agent's context. All customization happens in these files:
+You can also change the system prompt, model, and provider — per project or per agent. For example, create separate Planner, Builder, and Reviewer agents.
 
-- `system.md` — the system prompt, in plain Markdown
-- `prefix.sh` — Bash code that runs at the start of a session; the code and its output enter the agent's context immediately
-- `settings.toml` — provider, model, UI, and compaction settings
-- `hooks.toml` (optional) — shell commands that run on events such as turn start, turn end or exit; see `recur docs hooks`
+Recur exists so you can build the agent's context differently for each project and use case.
 
-That's all you need to make an AI agent that solves your tasks. Each file can also live in a project's `.recur/` folder, and `--system`, `--prefix` and `--hooks` point to a specific file; project and `--hooks` hooks add to the global ones instead of replacing them. The start screen shows which files were read.
+## Recur vs. other harnesses
 
-![How Recur works: system.md, prefix.sh and its stdout enter the agent's context; Recur runs commands in a stateful Bash and returns a response](docs/how-recur-works.png)
+**Pi, DSH, OpenCode:** Recur is configured through one file. Customizing Pi/DSH/OpenCode means maintaining a whole codebase, which hurts even more when you need many different profiles.
 
-This isn't a heavy agent like Claude Code or OMP that decides everything for you. It isn't Pi or OpenCode, where you can get lost in your own plugins.
+**Claude Code, Codex, Copilot:** Recur works with any AI provider. You can change its tools, system prompt, and behavior. The base version has nothing extra.
 
-Recur is an AI agent you can make 100% your own, while keeping it simple and understandable. One Bash tool and fewer than 6,000 lines of source code.
+Recur doesn't tell you how to code. It lets you build the context where an AI codes best.
 
-## Installation
+## Quick Start
 
-Currently supported: Linux and macOS on amd64 and arm64.
+1. Install:
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/ethanhamilthon/recur/main/scripts/install.sh | sh
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/ethanhamilthon/recur/main/scripts/install.sh | sh
+   ```
+
+   The binary goes to `~/.local/bin/recur` (override with `RECUR_BINDIR`; pin a version with `RECUR_VERSION`). Make sure that directory is in your `PATH`. Supports macOS and Linux (amd64, arm64).
+
+   Or build from source (Go 1.26+):
+
+   ```sh
+   git clone https://github.com/ethanhamilthon/recur && cd recur
+   make install
+   ```
+
+2. Run `recur` in your project directory.
+3. Run `/login` to sign in to a provider.
+4. Run `/model` to pick a model.
+
+## recur.toml
+
+`recur.toml` is the only file you need to think about. All configuration lives here: UI, providers/models, hooks, system prompt, agent behavior, and more.
+
+By default Recur reads `~/.recur/config.toml`. If the current directory has a `recur.toml`, it is applied on top of the global config. You can also pass a config explicitly: `recur -config example.toml`.
+
+A minimal config:
+
+```toml
+provider = "openrouter"
+model = "anthropic/claude-sonnet-4"
+effort = "medium"
+
+# Custom system prompt (optional)
+system = "You are a concise coding assistant."
+
+# Any provider that speaks the OpenAI Responses API
+[providers.openrouter]
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"  # better than a literal api_key in a repo
+
+# Add extra context at session start: stdout is sent to the agent
+[hooks.context]
+events = ["session_start"]
+command = "cat AGENTS.md"
+send_output = true
 ```
 
-## Development
-
-Run from source with an isolated development home:
-
-```sh
-make dev
-```
-
-Rules for AI agents working on this repository are in [AGENTS.md](AGENTS.md).
+Write only the keys you want to change; everything else keeps its default. Unknown keys are rejected at startup. More options: `recur docs config`.
 
 ## License
 

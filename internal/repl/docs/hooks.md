@@ -77,7 +77,7 @@ active hooks to finish.
 ## Capturing Output with send_output
 
 Setting `send_output = true` captures merged stdout and stderr (up to
-`shell.max_output`, default 8192 bytes), the exit code, hook and event names,
+`shell.max_output` bytes), the exit code, hook and event names,
 the UTC RFC3339Nano start timestamp, and truncation status.
 
 Delivery semantics:

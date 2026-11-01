@@ -39,6 +39,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 	sessionID := flags.String("s", "", "target session for notify/view (default: $RECUR_ENDPOINT)")
 	resume := flags.String("resume", "", "resume a project session ID")
 	configPath := flags.String("config", "", "configuration file (overrides recur.toml and $RECUR_HOME/config.toml)")
+	flags.StringVar(configPath, "c", "", "alias for --config")
 	noExtend := flags.Bool("no-extend", false, "skip inheriting from global configuration")
 	if err := flags.Parse(args); err != nil {
 		if err == flag.ErrHelp {

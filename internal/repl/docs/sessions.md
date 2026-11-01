@@ -7,17 +7,10 @@ against the project launch directory. `RECUR_HOME` holds session data and image
 attachments independently of project configuration files:
 - `$RECUR_HOME/sessions/<project-key>/`: JSONL session files. The project key
   combines a sanitized project directory basename and directory path hash.
-- `$RECUR_HOME/attachments/`: full-resolution captured clipboard images.
+- `$RECUR_HOME/attachments/`: originals saved by `recur view`.
 
-Configuration discovery resolves a primary configuration file in order:
-1. `--config PATH`: explicit command-line path (relative paths resolve against
-   launch cwd; errors fail immediately).
-2. `./recur.toml`: project-root configuration in launch cwd.
-3. `$RECUR_HOME/config.toml`: global user configuration.
-
-Recur merges layers: Built-in defaults -> `$RECUR_HOME/config.toml` -> Primary
-configuration. The `--no-extend` flag skips reading the global configuration file.
-Tables deep-merge, while scalars and arrays replace inherited values.
+Configuration discovery and layering are documented once in
+`recur docs config`.
 
 ## Session Files and Persistence
 
@@ -33,6 +26,8 @@ creates its JSONL file on disk only after the first message completes, unless
 ## Session Commands
 
 - `/new`: retains older sessions and opens a fresh conversation.
+- `/rename [name]`: sets the session title shown in `/resume`; empty restores the
+  first user message.
 - `/resume`: provides project-scoped session completions to select and reopen a
   saved session. Switching waits for active work to finish and isolates history.
   During work, `/new` and `/resume` cancel the turn and switch after it ends. A
@@ -43,10 +38,10 @@ creates its JSONL file on disk only after the first message completes, unless
 - `/compact [prompt]`: replaces turns older than `compact_keep_turns` with a
   concise model-generated summary and saves immediately. Automatic compaction
   triggers before an oversized request if history exceeds `max_context_tokens`
-  (default 400000; 0 disables).
-- `/reload`: re-reads configuration (`recur.toml` or `config.toml`), applying
-  updated settings, environment variables, and hook handlers to subsequent tool
-  calls while preserving the current session and its history.
+  (see `recur docs config`).
+- `/reload`: re-reads configuration, applying updated settings, environment
+  variables, and hook handlers while preserving the session, its history and
+  its model selection (`recur docs interface`).
 
 ## Locks and Session Headers
 

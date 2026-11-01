@@ -4,32 +4,21 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
 	"recur/internal/agent"
+	"recur/internal/repl"
 )
-
-var DefaultStatusLeft = []string{
-	`if [ -z "$RECUR_PROVIDER" ] || [ -z "$RECUR_MODEL" ]; then echo "no model selected"; elif [ -n "$RECUR_EFFORT" ]; then echo "$RECUR_PROVIDER · $RECUR_MODEL/$RECUR_EFFORT"; else echo "$RECUR_PROVIDER · $RECUR_MODEL"; fi`,
-	`if [ -z "$RECUR_CTX_SIZE" ]; then echo "ctx ?"; elif [ "$RECUR_CTX_SIZE" -ge 999500 ] 2>/dev/null; then m=$(( RECUR_CTX_SIZE / 1000000 )); r=$(( (RECUR_CTX_SIZE % 1000000 + 50000) / 100000 )); if [ "$r" -ge 10 ]; then m=$(( m + 1 )); r=0; fi; if [ "$r" -eq 0 ]; then echo "ctx ~${m}M"; else echo "ctx ~${m}.${r}M"; fi; elif [ "$RECUR_CTX_SIZE" -ge 1000 ] 2>/dev/null; then echo "ctx ~$(( (RECUR_CTX_SIZE + 500) / 1000 ))K"; else echo "ctx ~$RECUR_CTX_SIZE"; fi`,
-}
-
-var DefaultStatusRight = []string{
-	`if [ -n "$HOME" ] && [ "$RECUR_CWD" = "$HOME" ]; then echo "~"; elif [ -n "$HOME" ] && [[ "$RECUR_CWD" == "$HOME"/* ]]; then echo "~${RECUR_CWD#$HOME}"; else echo "$RECUR_CWD"; fi`,
-}
 
 type StatusSnapshot struct {
 	Gen         uint64
@@ -78,16 +67,11 @@ func logStatusFailure(home string, cmd string, err error) {
 		return
 	}
 	lastStatusLog = now
-	f, oerr := os.OpenFile(filepath.Join(home, "status.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
-	if oerr != nil {
-		return
-	}
-	defer f.Close()
 	msg := err.Error()
 	if len(msg) > 200 {
 		msg = msg[:200]
 	}
-	fmt.Fprintf(f, "%s cmd=%q: %s\n", now.Format(time.RFC3339), cmd, strings.ReplaceAll(msg, "\n", " "))
+	repl.AppendLog(filepath.Join(home, "status.log"), "cmd=%q: %s", cmd, msg)
 }
 
 type limitWriter struct {
@@ -139,42 +123,23 @@ func runSingleStatusCommand(ctx context.Context, cmdStr string, snap StatusSnaps
 	cmdCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "/bin/bash", "--noprofile", "--norc", "-c", cmdStr)
-	cmd.WaitDelay = 100 * time.Millisecond
-	if snap.Cwd != "" {
-		if fi, err := os.Stat(snap.Cwd); err == nil && fi.IsDir() {
-			cmd.Dir = snap.Cwd
-		}
+	dir := ""
+	if fi, err := os.Stat(snap.Cwd); snap.Cwd != "" && err == nil && fi.IsDir() {
+		dir = snap.Cwd
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process != nil && cmd.Process.Pid > 0 {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
-		return nil
-	}
-
-	var env []string
-	for _, e := range os.Environ() {
-		if strings.HasPrefix(e, "BASH_ENV=") {
-			continue
-		}
-		env = append(env, e)
-	}
+	env := os.Environ()
 	for k, v := range snap.Environment {
-		if k == "BASH_ENV" || strings.HasSuffix(k, "_FILE") {
-			continue
+		if !strings.HasSuffix(k, "_FILE") {
+			env = append(env, k+"="+v)
 		}
-		env = append(env, k+"="+v)
 	}
 	for k, v := range snap.Metadata {
-		if strings.HasSuffix(k, "_FILE") || !agent.IsAllowedStatusMetadataKey(k) {
-			continue
+		if !strings.HasSuffix(k, "_FILE") && agent.IsAllowedStatusMetadataKey(k) {
+			env = append(env, k+"="+v)
 		}
-		env = append(env, k+"="+v)
 	}
-	env = append(env, "PAGER=cat", "GIT_PAGER=cat")
-	cmd.Env = env
+	cmd := repl.Command(cmdCtx, dir, env, cmdStr)
+	cmd.WaitDelay = 100 * time.Millisecond
 
 	var buf bytes.Buffer
 	cmd.Stdout = &limitWriter{w: &buf, max: 1024}
@@ -318,14 +283,7 @@ func (m *model) triggerStatusRefresh(eventVars map[string]string) tea.Cmd {
 		historyPath = m.ctl.HistoryPath()
 	}
 
-	leftCmds := DefaultStatusLeft
-	if settings.StatusLeft != nil {
-		leftCmds = settings.StatusLeft
-	}
-	rightCmds := DefaultStatusRight
-	if settings.StatusRight != nil {
-		rightCmds = settings.StatusRight
-	}
+	leftCmds, rightCmds := settings.StatusLeft, settings.StatusRight
 
 	meta := make(map[string]string, len(eventVars)+10)
 	for k, v := range eventVars {

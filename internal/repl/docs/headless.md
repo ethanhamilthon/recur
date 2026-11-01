@@ -1,7 +1,5 @@
 # Headless JSON/stdio transport and notifications
 
-## Running Headless
-
 `recur --mode jsonl` starts a long-lived control service. It reads
 newline-delimited JSON requests from stdin, writes results and events to stdout,
 and waits. Launching does not start work: no model request, no turn, and no new

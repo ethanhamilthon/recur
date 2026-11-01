@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"recur/internal/agent"
+	"recur/internal/repl"
 )
 
 func TestHeadlessSessionsResumeAndFreshStart(t *testing.T) {
@@ -179,5 +180,50 @@ func TestShellCommandsUseEndpoint(t *testing.T) {
 	}
 	if err = Run(context.Background(), []string{"view", filepath.Join(cwd, "missing.png")}, strings.NewReader(""), io.Discard, io.Discard); err == nil {
 		t.Fatal("missing image accepted")
+	}
+}
+
+func TestShortConfigFlag(t *testing.T) {
+	t.Setenv("RECUR_HOME", t.TempDir())
+	config := filepath.Join(t.TempDir(), "tracker.toml")
+	if err := os.WriteFile(config, []byte("system = 'You are Tracker'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, flag := range []string{"-c", "--config"} {
+		t.Run(flag, func(t *testing.T) {
+			var out, diagnostics bytes.Buffer
+			if err := Run(context.Background(), []string{"--mode", "jsonl", flag, config}, strings.NewReader(""), &out, &diagnostics); err != nil {
+				t.Fatalf("config flag failed: %v (%s)", err, diagnostics.String())
+			}
+			out.Reset()
+			if err := Run(context.Background(), []string{"--mode", "jsonl", flag, config + ".missing"}, strings.NewReader(""), &out, &diagnostics); err == nil || !strings.Contains(err.Error(), ".missing") {
+				t.Fatalf("missing explicit config must fail, got %v", err)
+			}
+		})
+	}
+}
+
+// Every flag recur defines must appear in the CLI reference.
+func TestEveryFlagIsDocumented(t *testing.T) {
+	var diagnostics bytes.Buffer
+	if err := Run(context.Background(), []string{"-h"}, strings.NewReader(""), io.Discard, &diagnostics); err != nil {
+		t.Fatal(err)
+	}
+	var doc bytes.Buffer
+	if err := repl.Docs(&doc, []string{"cli"}); err != nil {
+		t.Fatal(err)
+	}
+	found := 0
+	for _, line := range strings.Split(diagnostics.String(), "\n") {
+		if name, ok := strings.CutPrefix(strings.TrimSpace(line), "-"); ok {
+			found++
+			name, _, _ = strings.Cut(name, " ")
+			if !strings.Contains(doc.String(), "`-"+name) {
+				t.Errorf("flag -%s is missing from recur docs cli", name)
+			}
+		}
+	}
+	if found < 5 {
+		t.Fatalf("parsed only %d flags from usage:\n%s", found, diagnostics.String())
 	}
 }

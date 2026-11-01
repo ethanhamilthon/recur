@@ -386,19 +386,10 @@ func (a *Agent) runTool(ctx context.Context, name, arguments string) repl.Result
 		Timeout   *int64 `json:"timeout"`
 		MaxOutput *int64 `json:"max_output"`
 	}
-	defaultTimeout := time.Duration(a.settings.ShellTimeout) * time.Second
-	if defaultTimeout <= 0 {
-		defaultTimeout = repl.DefaultTimeout
-	}
+	// Settings are validated on load, so shell limits are always set.
+	timeout := time.Duration(a.settings.ShellTimeout) * time.Second
 	maxTimeout := time.Duration(a.settings.ShellMaxTimeout) * time.Second
-	if maxTimeout <= 0 {
-		maxTimeout = repl.MaxTimeout
-	}
-	defaultLimit := a.settings.ShellMaxOutput
-	if defaultLimit < 0 {
-		defaultLimit = repl.DefaultOutputLimit
-	}
-	timeout, limit := defaultTimeout, defaultLimit
+	limit := a.settings.ShellMaxOutput
 	err := json.Unmarshal([]byte(arguments), &args)
 	if err == nil && args.Timeout != nil {
 		maxSec := int64(maxTimeout / time.Second)

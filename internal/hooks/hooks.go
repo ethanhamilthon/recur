@@ -16,10 +16,11 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"recur/internal/repl"
 )
 
 // Events lists every event name a hook may subscribe to; "*" matches all.
@@ -277,22 +278,15 @@ func (r *Runner) Fire(event string, vars map[string]string) {
 	if len(targets) == 0 {
 		return
 	}
-	var env []string
-	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "BASH_ENV=") {
-			env = append(env, e)
-		}
-	}
+	env := os.Environ()
 	cfgEnv := r.environment
 	if cfgEnv == nil {
 		cfgEnv = r.Environment
 	}
 	for k, v := range cfgEnv {
-		if k != "BASH_ENV" {
-			env = append(env, k+"="+v)
-		}
+		env = append(env, k+"="+v)
 	}
-	env = append(env, "PAGER=cat", "GIT_PAGER=cat", "RECUR_EVENT="+event, "RECUR_MODE="+r.Mode,
+	env = append(env, "RECUR_EVENT="+event, "RECUR_MODE="+r.Mode,
 		"RECUR_SEQ="+strconv.FormatUint(sequence.Add(1), 10), "RECUR_TS="+strconv.FormatInt(time.Now().UnixMilli(), 10))
 
 	dir := ""
@@ -376,9 +370,10 @@ func (r *Runner) run(h Hook, j job) {
 		limit = 2048
 	}
 	out := &cappedBuffer{limit: limit}
-	cmd := exec.Command("/bin/bash", "--noprofile", "--norc", "-c", h.Command)
-	cmd.Env, cmd.Dir, cmd.Stdout, cmd.Stderr = j.env, j.dir, out, out
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(seconds)*time.Second)
+	defer cancel()
+	cmd := repl.Command(ctx, j.dir, j.env, h.Command)
+	cmd.Stdout, cmd.Stderr = out, out
 	cmd.WaitDelay = time.Second
 
 	startTime := time.Now().UTC()
@@ -390,11 +385,7 @@ func (r *Runner) run(h Hook, j job) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(seconds)*time.Second)
-	defer cancel()
-	stop := context.AfterFunc(ctx, func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) })
 	err := cmd.Wait()
-	stop()
 
 	exitCode := 0
 	if err != nil {
@@ -439,13 +430,5 @@ func (r *Runner) recordOutput(res Result) {
 }
 
 func (r *Runner) fail(h Hook, event, problem string) {
-	if r.Log == "" {
-		return
-	}
-	f, err := os.OpenFile(r.Log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fmt.Fprintf(f, "%s event=%s command=%q: %s\n", time.Now().Format(time.RFC3339), event, h.Command, strings.ReplaceAll(problem, "\n", " "))
+	repl.AppendLog(r.Log, "event=%s command=%q: %s", event, h.Command, problem)
 }

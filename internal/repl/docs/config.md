@@ -16,7 +16,7 @@ Recur resolves its primary configuration file in order:
 3. `$RECUR_HOME/config.toml`: the global user configuration file. `RECUR_HOME`
    defaults to `~/.recur`.
 
-Session data (`$RECUR_HOME/sessions/`) and clipboard attachments
+Session data (`$RECUR_HOME/sessions/`) and `recur view` originals
 (`$RECUR_HOME/attachments/`) always reside under `RECUR_HOME`, independently of
 where project configuration files are located.
 
@@ -54,44 +54,15 @@ supported.
 
 ## The recur.toml Format
 
-Below is a complete unified configuration showing default values:
+Built-in defaults (the exact file shipped inside this binary; every key you omit
+keeps this value):
 
 ```toml
-# Provider and model defaults
-provider = ""
-model = ""
-effort = ""
-reasoning_summary = "auto"
-max_context_tokens = 400000
-compact_keep_turns = 4
-max_agent_steps = 0
-max_file_bytes = 65536
-attachment_dir = ""
-system = "You are Recur, a coding agent"
-
-[ui]
-max_code_lines = 999
-max_result_lines = 4
-max_thinking_lines = 4
-status_left = [
-  'if [ -n "$RECUR_PROVIDER" ] && [ -n "$RECUR_MODEL" ]; then echo "$RECUR_PROVIDER · $RECUR_MODEL${RECUR_EFFORT:+/$RECUR_EFFORT}"; else echo "no model selected"; fi',
-  'if [ -n "$RECUR_CTX_SIZE" ]; then if [ "$RECUR_CTX_SIZE" -ge 1000000 ]; then echo "ctx ~$(( (RECUR_CTX_SIZE + 500000) / 1000000 ))M"; elif [ "$RECUR_CTX_SIZE" -ge 1000 ]; then echo "ctx ~$(( (RECUR_CTX_SIZE + 500) / 1000 ))K"; else echo "ctx $RECUR_CTX_SIZE"; fi; else echo "ctx ?"; fi'
-]
-status_right = [
-  'if [ "$RECUR_CWD" = "$HOME" ]; then echo "~"; elif [[ "$RECUR_CWD" == "$HOME"/* ]]; then echo "~${RECUR_CWD#$HOME}"; else echo "$RECUR_CWD"; fi'
-]
-
-[shell]
-timeout = 120
-max_timeout = 600
-max_output = 8192
-
-[env]
-
-[providers]
-
-[hooks]
+{{defaults}}
 ```
+
+Write only the keys you want to change. A minimal project file looks like
+`recur docs cookbook`.
 
 ### Root Fields
 
@@ -99,9 +70,9 @@ max_output = 8192
 - `model`: name of the default model (e.g., `"anthropic/claude-3.5-sonnet"`).
 - `effort`: default reasoning effort (`""`, `"none"`, `"minimal"`, `"low"`,
   `"medium"`, `"high"`, `"xhigh"`, `"max"`).
-- `reasoning_summary`: handling of reasoning summaries (`"auto"`).
-- `max_context_tokens`: cumulative input token threshold triggering automatic
-  context compaction before an oversized request (default `400000`; `0` disables).
+- `reasoning_summary`: `"auto"` requests reasoning summaries from the model; `"off"` does not.
+- `max_context_tokens`: input token threshold that triggers automatic context
+  compaction before an oversized request; `0` disables.
 - `compact_keep_turns`: number of recent turns preserved verbatim when compaction
   runs (default `4`).
 - `max_agent_steps`: maximum tool iterations allowed per turn (default `0`,
@@ -123,12 +94,9 @@ max_output = 8192
 ### [ui]
 
 Controls terminal rendering and status bar content:
-- `max_code_lines`: visible body rows for code blocks in history (default `999`;
-  `0` hides code body).
-- `max_result_lines`: visible body rows for tool output blocks (default `4`; `0`
-  hides result body).
-- `max_thinking_lines`: visible body rows for model reasoning blocks (default `4`;
-  `0` hides thinking body).
+- `max_code_lines`: visible body rows for code blocks in history; `0` hides the body.
+- `max_result_lines`: visible body rows for tool output blocks; `0` hides the body.
+- `max_thinking_lines`: visible body rows for model reasoning blocks; `0` hides the body.
 - `status_left`: array of shell command strings producing segments on the left
   side of the bottom status bar. Keys `status_left` and `status-left` are both
   accepted.
@@ -136,37 +104,19 @@ Controls terminal rendering and status bar content:
   side of the bottom status bar. Keys `status_right` and `status-right` are both
   accepted. Setting an empty array (`[]`) hides that side.
 
-The bottom status row has exactly 2 display-cell spaces padding on each side
-(`"  "` + content + `"  "`). Available content width is `max(0, width - 4)`.
-Narrow terminal widths (1 to 5 cells, 80 cells) are handled cleanly without
-wrapping or negative padding. Unicode wide characters and emojis are truncated
-with display-width awareness.
-
-Each status command runs in a fresh `/bin/bash --noprofile --norc -c` process in
-the project directory. Inherited `BASH_ENV` is stripped. Commands receive the
-effective environment plus raw `RECUR_*` metadata: `RECUR_SESSION_ID`, `RECUR_CWD`,
-`RECUR_PROVIDER`, `RECUR_MODEL`, `RECUR_EFFORT`, `RECUR_CTX_SIZE`, `RECUR_VERSION`,
-`RECUR_STATE` (`idle`, `busy`, or `cancelling`), and `RECUR_ENDPOINT`. There are
-no `RECUR_*_LABEL` variables or Go formatting APIs; shell commands assemble and
-format labels themselves.
-
-Nonempty stdout outputs from commands are trimmed, flattened to single lines,
-stripped of ANSI/OSC control sequences, and joined with `" · "` in declared order.
-Empty or failing commands are omitted silently. Commands run asynchronously with
-a 500 ms timeout, 1 KiB output limit, and a concurrency limit of 4 workers.
-Refreshes are event-driven: evaluation triggers on EVERY Recur lifecycle event
-(all 22 events), initial render, and `/reload`. There is no polling, timer, or
-token-streaming refresh. Rapid events cancel running status commands and restart
-evaluation for the new snapshot. Status commands do not emit lifecycle events.
-No status commands run in headless mode.
+Status commands run as shell snippets with `RECUR_*` metadata. Their environment,
+limits, refresh rules and padding are documented once in `recur docs interface`.
 
 ### [shell]
 
 Configures execution parameters for the agent's bash tool:
-- `timeout`: default execution deadline in seconds for tool calls (default `120`).
-- `max_timeout`: upper bound for tool deadlines (default `600`).
-- `max_output`: maximum bytes kept from merged stdout/stderr (default `8192`;
-  first half + last half with truncation notice). `0` disables truncation.
+- `timeout`: default execution deadline in seconds for tool calls.
+- `max_timeout`: upper bound a single call may request; `timeout` must not exceed it.
+- `max_output`: default bytes kept from merged stdout/stderr (first half + last
+  half with truncation notice). `0` disables truncation.
+
+Defaults are in the block above. The model sees the effective values in the bash
+tool schema, so changing them here is enough.
 
 ### [env]
 
@@ -213,42 +163,7 @@ is displayed on completion.
 
 ### [hooks.NAME]
 
-Defines named lifecycle hook handlers:
-```toml
-[hooks.turn_notify]
-events = ["turn_end"]
-command = '''
-[ "$RECUR_TURN_SOURCE" = user ] || exit 0
-notify-send "Recur" "Turn finished ($RECUR_TURN_STATUS)"
-'''
-timeout = 10
-
-[hooks.test_gate]
-events = ["turn_end"]
-command = '''
-[ "$RECUR_TURN_SOURCE" = user ] || exit 0
-make test > /tmp/test-hook.log 2>&1 || recur notify "make test failed"
-'''
-timeout = 180
-```
-
-- `events`: array of lifecycle event names to handle. Wildcard `"*"` matches all
-  events. Hook declarations require the `events = [...]` array syntax.
-- `command`: Bash command to execute.
-- `timeout`: deadline in seconds (default `10`, maximum `600`).
-- `enabled`: boolean flag (default `true`). Setting `enabled = false` disables an
-  inherited hook with the same name.
-- `send_output`: boolean flag (default `false`). When `true`, stdout/stderr output
-  is captured and queued for delivery at the start of the next turn.
-- `headless_support`: boolean flag (default `true`). Setting `headless_support = false`
-  keeps the hook from running in headless runs (`recur --mode jsonl`).
-  The hook still runs in the TUI.
-
-See `recur docs hooks` for full hook details and lifecycle events.
-
-## Headless Mode Hooks
-
-Headless runs (`recur --mode jsonl`) load the same configuration as the TUI, so
-hooks from `./recur.toml` and `$RECUR_HOME/config.toml` run without `--config`.
-Hooks with `headless_support = false` are skipped in headless runs only. The
-`--config` and `--no-extend` flags behave the same way in both interfaces.
+Named lifecycle hooks. Fields (`events`, `command`, `timeout`, `enabled`,
+`send_output`, `headless_support`), events, variables and examples live in
+`recur docs hooks`. Headless runs (`recur --mode jsonl`) run the same hooks as
+the TUI, except hooks with `headless_support = false`; see `recur docs headless`.

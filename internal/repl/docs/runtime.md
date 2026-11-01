@@ -16,13 +16,15 @@ shell startup files are not read, and inherited BASH_ENV is excluded. Exported
 variables from the launch environment and configured [env] settings are provided.
 
 Each call returns {output, exit_code}. Stdout and stderr are merged. The
-max_output argument sets how many bytes are kept: default 8192 (first 4 KiB and
-last 4 KiB with a truncation notice in the middle); 0 disables truncation.
+max_output argument sets how many bytes are kept (first half and last half with a
+truncation notice in the middle); 0 disables truncation. The default comes from
+`[shell] max_output` in the configuration.
 Prefer filtering with rg, grep, head, tail or sed -n. Commands parse and run
 according to standard Bash syntax and semantics; a syntax error runs nothing and
 returns exit_code 2.
 
-timeout is given per call in seconds: default 120, maximum 600. A timeout
+timeout is given per call in seconds; the default and maximum come from
+`[shell] timeout` and `max_timeout` (see `recur docs config`). A timeout
 (exit_code 124) or cancellation (exit_code 130) terminates the command's
 process group.
 

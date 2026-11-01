@@ -4,7 +4,7 @@ The terminal never displays image pixels, Sixel, Kitty graphics, or base64 data.
 The composer displays only an [Image N: filename] label. Ctrl+X removes the last
 draft attachment and its captured file. Enter submits text and attached images;
 an image-only message also works. Actual image bytes reach the model, not just
-a path. Both Responses and Chat Completions receive their appropriate format.
+a path.
 
 Ctrl+V reads the local clipboard asynchronously with a three-second timeout.
 On macOS, osascript's AppKit bridge converts native clipboard images to PNG;

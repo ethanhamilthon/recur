@@ -9,6 +9,10 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/pelletier/go-toml/v2"
+
+	"recur/prompts"
 )
 
 func run(t *testing.T, r *REPL, command string, timeout time.Duration) Result {
@@ -335,4 +339,40 @@ func TestConcurrentRace(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+func TestCommandKillsProcessGroupOnCancel(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	marker := filepath.Join(t.TempDir(), "survived")
+	cmd := Command(ctx, "", []string{"BASH_ENV=/nonexistent"}, `(sleep 1; touch `+marker+`) & wait`)
+	start := time.Now()
+	_ = cmd.Run()
+	if time.Since(start) > 900*time.Millisecond {
+		t.Fatal("command was not cancelled")
+	}
+	time.Sleep(1300 * time.Millisecond)
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("background child survived cancellation")
+	}
+}
+
+// config.toml is the source of truth for shell limits; repl constants are only
+// the engine fallback and must never drift from it.
+func TestShellDefaultsMatchShippedConfig(t *testing.T) {
+	var cfg struct {
+		Shell struct {
+			Timeout    int `toml:"timeout"`
+			MaxTimeout int `toml:"max_timeout"`
+			MaxOutput  int `toml:"max_output"`
+		} `toml:"shell"`
+	}
+	if err := toml.Unmarshal([]byte(prompts.Config), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if time.Duration(cfg.Shell.Timeout)*time.Second != DefaultTimeout ||
+		time.Duration(cfg.Shell.MaxTimeout)*time.Second != MaxTimeout ||
+		cfg.Shell.MaxOutput != DefaultOutputLimit {
+		t.Fatalf("repl defaults drifted from prompts/config.toml: %+v", cfg.Shell)
+	}
 }

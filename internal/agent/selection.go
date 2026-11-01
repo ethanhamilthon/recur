@@ -152,15 +152,6 @@ func (a *Agent) AddProvider(name string, provider Provider) error {
 
 func (a *Agent) bashParameters() map[string]any {
 	timeout, maxTimeout, maxOutput := a.settings.ShellTimeout, a.settings.ShellMaxTimeout, a.settings.ShellMaxOutput
-	if timeout <= 0 {
-		timeout = 120
-	}
-	if maxTimeout <= 0 {
-		maxTimeout = 600
-	}
-	if maxOutput < 0 {
-		maxOutput = 8192
-	}
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{

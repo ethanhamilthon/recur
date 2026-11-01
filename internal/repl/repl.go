@@ -71,6 +71,38 @@ func (r *REPL) untrack(cmd *exec.Cmd) {
 	r.mu.Unlock()
 }
 
+// Command builds `bash -c script` in its own process group. It is the only place
+// that decides how recur starts shell commands: BASH_ENV is always dropped,
+// pagers are disabled, and cancelling ctx kills the whole process group.
+// A nil env inherits the current environment.
+func Command(ctx context.Context, dir string, env []string, script string) *exec.Cmd {
+	bash := "/bin/bash"
+	if _, err := os.Stat(bash); err != nil {
+		if p, err := exec.LookPath("bash"); err == nil {
+			bash = p
+		}
+	}
+	if env == nil {
+		env = os.Environ()
+	}
+	cmd := exec.CommandContext(ctx, bash, "--noprofile", "--norc", "-c", script)
+	cmd.Dir = dir
+	for _, e := range env {
+		if !strings.HasPrefix(e, "BASH_ENV=") {
+			cmd.Env = append(cmd.Env, e)
+		}
+	}
+	cmd.Env = append(cmd.Env, "PAGER=cat", "GIT_PAGER=cat")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process != nil && cmd.Process.Pid > 0 {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+		return nil
+	}
+	return cmd
+}
+
 func (r *REPL) Execute(ctx context.Context, command string, timeout time.Duration) (Result, error) {
 	return r.ExecuteLimit(ctx, command, timeout, DefaultOutputLimit)
 }
@@ -81,20 +113,15 @@ func (r *REPL) ExecuteLimit(ctx context.Context, command string, timeout time.Du
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
-	bashPath := "/bin/bash"
-	if _, err := os.Stat(bashPath); err != nil {
-		if p, err := exec.LookPath("bash"); err == nil {
-			bashPath = p
-		}
-	}
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
-	cmd := exec.Command(bashPath, "--noprofile", "--norc", "-c", command)
-	if r != nil && r.Dir != "" {
-		cmd.Dir = r.Dir
+	dir := ""
+	if r != nil {
+		dir = r.Dir
 	}
+	cmd := Command(callCtx, dir, r.buildEnv(), command)
 	cmd.Stdin = strings.NewReader("")
-	cmd.Env = r.buildEnv()
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// Orphaned descendants that keep pipes open are cut off after WaitDelay.
 	cmd.WaitDelay = 250 * time.Millisecond
 
@@ -103,23 +130,18 @@ func (r *REPL) ExecuteLimit(ctx context.Context, command string, timeout time.Du
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 
-	callCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
 	if err := cmd.Start(); err != nil {
+		if ctx.Err() != nil {
+			return Result{Output: "\n[recur: cancelled]\n", ExitCode: 130, Error: true}, nil
+		}
 		out.WriteString(err.Error() + "\n")
 		return Result{Output: out.Text(), ExitCode: 127, Error: true}, nil
 	}
 
-	pid := cmd.Process.Pid
 	r.track(cmd)
 	defer r.untrack(cmd)
 
-	stop := context.AfterFunc(callCtx, func() {
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
-	})
 	err := cmd.Wait()
-	stop()
 
 	result := Result{}
 	var exit *exec.ExitError
@@ -151,28 +173,20 @@ func (r *REPL) ExecuteLimit(ctx context.Context, command string, timeout time.Du
 	return result, nil
 }
 
-// buildEnv merges inherited environment, configured [env], default pagers,
-// recur binary directory first in PATH, and per-call metadata. BASH_ENV is excluded.
+// buildEnv merges inherited environment, configured [env], recur binary
+// directory first in PATH, and per-call metadata. Command applies the final policy.
 func (r *REPL) buildEnv() []string {
 	envMap := make(map[string]string)
 	for _, entry := range os.Environ() {
 		if k, v, ok := strings.Cut(entry, "="); ok {
-			if k == "BASH_ENV" {
-				continue
-			}
 			envMap[k] = v
 		}
 	}
 	if r != nil {
 		for k, v := range r.Environment {
-			if k == "BASH_ENV" {
-				continue
-			}
 			envMap[k] = v
 		}
 	}
-	envMap["PAGER"] = "cat"
-	envMap["GIT_PAGER"] = "cat"
 	if execPath, err := os.Executable(); err == nil {
 		execDir := filepath.Dir(execPath)
 		currPath := envMap["PATH"]
@@ -184,9 +198,6 @@ func (r *REPL) buildEnv() []string {
 	}
 	if r != nil && r.Env != nil {
 		for k, v := range r.Env() {
-			if k == "BASH_ENV" {
-				continue
-			}
 			envMap[k] = v
 		}
 	}
