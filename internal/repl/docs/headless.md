@@ -26,7 +26,7 @@ Framing:
 ## Startup record
 
 ```json
-{"type":"ready","seq":1,"protocol":1,"version":"0.6.0","cwd":"/work/project",
+{"type":"ready","seq":1,"protocol":1,"version":"0.6.1","cwd":"/work/project",
  "state":{"session":{"id":"…","model":"…","provider":"…","effort":"…","ctx_size":null},"busy":false,"cancelling":false,"compacting":false,"queued":0},
  "capabilities":{"requests":["input", "…"],"max_record_bytes":2097152,"max_images":8,"max_file_bytes":65536}}
 ```
