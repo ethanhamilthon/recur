@@ -361,11 +361,13 @@ api_key = "other-key"
 	}
 	content := string(data)
 
-	// Check unrelated values and keys were preserved (comments/format preservation not required)
-	if !strings.Contains(content, "max_code_lines = 42") ||
+	// Check unrelated values, formatting, and comments were preserved
+	if !strings.Contains(content, "# Custom Project Config") ||
+		!strings.Contains(content, "# Preserve this comment") ||
+		!strings.Contains(content, "max_code_lines = 42") ||
 		!strings.Contains(content, "custom system instructions") ||
 		!strings.Contains(content, "other") {
-		t.Fatalf("unrelated values lost: %s", content)
+		t.Fatalf("unrelated values or comments lost: %s", content)
 	}
 
 	// Check new values sparsely added

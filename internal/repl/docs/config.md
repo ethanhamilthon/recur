@@ -196,8 +196,8 @@ or chat history. A missing or empty environment variable fails only if that
 provider is currently selected, not for unused providers.
 
 The `/login` and `/model` commands update credentials and active selections by
-atomically patching the raw TOML keys in the selected primary configuration file,
-preserving unrelated values and sparse inheritance. The write destination
+atomically patching targeted raw TOML keys in the selected primary configuration file,
+preserving unrelated formatting, comments, values, and sparse inheritance. The write destination
 is displayed on completion.
 
 ### [hooks.NAME]
