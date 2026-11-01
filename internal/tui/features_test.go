@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -199,32 +198,22 @@ func TestResumeCompletionWindowKeepsSelectionVisible(t *testing.T) {
 	}
 }
 
-func TestPrefixFailureRecoversOriginalThenSteeringAndDraft(t *testing.T) {
+func TestWithdrawRecoversOriginalThenSteeringAndDraft(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
 	a, err := agent.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	a.REPL.Prefix = "if then"
 	m := newModel(a, a.REPL.Dir)
-	next, _ := m.startTurn("original request")
-	m = next.(model)
+	m.busy = true
+	m.steering = &agent.Steering{}
 	m.queueSteering("queued instruction")
 	m.input.SetValue("unfinished draft")
-	deadline := time.After(5 * time.Second)
-	for m.busy {
-		select {
-		case e := <-m.events:
-			next, _ = m.Update(e)
-			m = next.(model)
-		case <-deadline:
-			if m.cancel != nil {
-				m.cancel()
-			}
-			t.Fatal("initialization failure did not finish")
-		}
-	}
+	next, _ := m.Update(agent.Event{Kind: "withdraw", Text: "original request"})
+	m = next.(model)
+	next, _ = m.Update(agent.Event{Kind: "done", Text: "initialization error"})
+	m = next.(model)
 	if m.input.Value() != "original request\n\nqueued instruction\n\nunfinished draft" {
 		t.Fatalf("retry text lost or reordered: %q", m.input.Value())
 	}

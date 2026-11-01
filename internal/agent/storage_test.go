@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -144,20 +143,83 @@ func TestScopedJSONLSessionsResumeAndCheckpoint(t *testing.T) {
 	}
 }
 
-func TestNewSessionResetsInterpreterState(t *testing.T) {
+func TestSessionSwitchPreservesStatusBridgeAndVersion(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
 	a, err := New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	if _, err = a.REPL.Ensure(context.Background()); err != nil {
+	a.Start("0.6.0")
+	ch := a.StatusEvents()
+	if ch == nil {
+		t.Fatal("StatusEvents returned nil channel")
+	}
+	// Drain startup events
+startupDrain:
+	for {
+		select {
+		case <-ch:
+		default:
+			break startupDrain
+		}
+	}
+
+	a.message("user", "test session")
+	if err = a.Save(); err != nil {
 		t.Fatal(err)
 	}
+	firstID := strings.TrimSuffix(filepath.Base(a.HistoryPath), ".jsonl")
 	if err = a.NewSession(); err != nil {
 		t.Fatal(err)
 	}
-	if fresh, err := a.REPL.Ensure(context.Background()); err != nil || !fresh {
-		t.Fatal("session switch retained interpreter state")
+	if a.version != "0.6.0" {
+		t.Fatalf("expected version 0.6.0 preserved, got %q", a.version)
+	}
+	foundStart := false
+drainNew:
+	for {
+		select {
+		case ev := <-ch:
+			if ev["RECUR_EVENT"] == "session_start" {
+				foundStart = true
+				if ev["RECUR_VERSION"] != "0.6.0" {
+					t.Fatalf("expected RECUR_VERSION 0.6.0, got %q", ev["RECUR_VERSION"])
+				}
+				if ev["RECUR_SESSION_SOURCE"] != "new" {
+					t.Fatalf("expected session source new, got %q", ev["RECUR_SESSION_SOURCE"])
+				}
+			}
+		default:
+			break drainNew
+		}
+	}
+	if !foundStart {
+		t.Fatal("session_start event not found after NewSession")
+	}
+
+	if err = a.Resume(firstID); err != nil {
+		t.Fatal(err)
+	}
+	if a.version != "0.6.0" {
+		t.Fatalf("expected version 0.6.0 preserved after Resume, got %q", a.version)
+	}
+	foundResume := false
+drainResume:
+	for {
+		select {
+		case ev := <-ch:
+			if ev["RECUR_EVENT"] == "session_start" && ev["RECUR_SESSION_SOURCE"] == "resume" {
+				foundResume = true
+				if ev["RECUR_VERSION"] != "0.6.0" {
+					t.Fatalf("expected RECUR_VERSION 0.6.0 on resume, got %q", ev["RECUR_VERSION"])
+				}
+			}
+		default:
+			break drainResume
+		}
+	}
+	if !foundResume {
+		t.Fatal("session_start with source=resume not found after Resume")
 	}
 }

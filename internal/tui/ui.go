@@ -26,54 +26,54 @@ type renderedEntry struct {
 	Text     string
 }
 type model struct {
-	a                       *agent.Agent
-	input                   textarea.Model
-	viewport                viewport.Model
-	entries                 []entry
-	events                  chan agent.Event
-	busy                    bool
-	cancelling              bool
-	compacting              bool
-	workingSince            time.Time
-	steering                *agent.Steering
-	queued                  []agent.Input
-	images, turnImages      []repl.Image
-	retry                   bool
-	pasteGeneration         int
-	pasting                 bool
-	retryInput              string
-	cancel                  context.CancelFunc
-	pending                 string
-	width, height           int
-	cwd                     string
-	selected                int
-	hideCompletion          bool
-	cache                   []renderedEntry
-	inputValue              string
-	inputWidth, inputHeight int
-	contextInput            *int64
-	sel                     *selection
-	inputSel                *composerSelection
-	inputDrag               bool
-	inputTop                int
-	layoutValue             string
-	layoutWidth             int
-	layout                  []composerRow
-	latest                  string
-	menuKind                string
-	menu                    []command
-	effort, menuGeneration  int
-	menuCancel              context.CancelFunc
-	setup                   []string
-	sessions                []agent.SessionSummary
-	statusEvents            <-chan map[string]string
-	statusGen               uint64
-	statusCancel            context.CancelFunc
-	statusLeft              string
-	statusRight             string
-	statusSem               chan struct{}
-	statusInit              bool
-	statusTornDown          bool
+	a                        *agent.Agent
+	input                    textarea.Model
+	viewport                 viewport.Model
+	entries                  []entry
+	events                   chan agent.Event
+	busy                     bool
+	cancelling               bool
+	compacting               bool
+	workingSince             time.Time
+	steering                 *agent.Steering
+	queued                   []agent.Input
+	images, turnImages       []repl.Image
+	retry                    bool
+	pasteGeneration          int
+	pasting                  bool
+	retryInput               string
+	cancel                   context.CancelFunc
+	pending                  string
+	width, height            int
+	cwd                      string
+	selected                 int
+	hideCompletion           bool
+	cache                    []renderedEntry
+	inputValue               string
+	inputWidth, inputHeight  int
+	contextInput             *int64
+	sel                      *selection
+	inputSel                 *composerSelection
+	inputDrag                bool
+	inputTop                 int
+	layoutValue              string
+	layoutWidth              int
+	layout                   []composerRow
+	latest                   string
+	menuKind                 string
+	menu                     []command
+	effort, menuGeneration   int
+	menuCancel               context.CancelFunc
+	setup                    []string
+	sessions                 []agent.SessionSummary
+	statusEvents             <-chan map[string]string
+	statusGen                uint64
+	statusCancel             context.CancelFunc
+	statusLeft               string
+	statusRight              string
+	statusSem                chan struct{}
+	statusInit               bool
+	statusTornDown           bool
 	fileGen, fileDebounceGen int
 	fileLoading              bool
 	fileCompletions          []string

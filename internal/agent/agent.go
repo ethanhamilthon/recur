@@ -123,7 +123,7 @@ func NewWith(dir string, files ConfigFiles, target ...string) (*Agent, error) {
 		a.release()
 		return nil, err
 	}
-	a.REPL.Env, a.REPL.Observe = a.shellEnv, a.Fire
+	a.REPL.Env = a.shellEnv
 	a.hooks.Set(cfg.hooks)
 	return a, nil
 }
@@ -412,7 +412,6 @@ func (a *Agent) runTool(ctx context.Context, name, arguments string) repl.Result
 	}
 	if err == nil {
 		var result repl.Result
-		_, _ = a.REPL.Ensure(ctx)
 		a.Fire("shell_start", "RECUR_COMMAND_FILE", args.Command, "RECUR_TIMEOUT", strconv.Itoa(int(timeout/time.Second)))
 		started := time.Now()
 		if result, err = a.REPL.ExecuteLimit(ctx, args.Command, timeout, limit); err == nil {

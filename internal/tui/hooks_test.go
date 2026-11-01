@@ -17,8 +17,8 @@ func TestInterfaceEvents(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("RECUR_HOME", home)
 	out := filepath.Join(t.TempDir(), "events")
-	hooks := "[[hook]]\nevents = [\"idle\", \"steer_queued\", \"image_attached\"]\ncommand = 'echo \"$RECUR_EVENT|$RECUR_IMAGE_SOURCE|$(cat \"$RECUR_MESSAGE_FILE\" 2>/dev/null)\" >> " + out + "'\n"
-	if err := os.WriteFile(filepath.Join(home, "hooks.toml"), []byte(hooks), 0600); err != nil {
+	hooks := "[hooks.test]\nevents = [\"idle\", \"steer_queued\", \"image_attached\"]\ncommand = 'echo \"$RECUR_EVENT|$RECUR_IMAGE_SOURCE|$(cat \"$RECUR_MESSAGE_FILE\" 2>/dev/null)\" >> " + out + "'\n"
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(hooks), 0600); err != nil {
 		t.Fatal(err)
 	}
 	a, err := agent.New(t.TempDir())

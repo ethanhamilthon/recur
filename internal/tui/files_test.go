@@ -465,6 +465,7 @@ func TestUpDownNavigatesFileCompletions(t *testing.T) {
 }
 
 func TestReloadClearsFileCache(t *testing.T) {
+	t.Setenv("RECUR_HOME", t.TempDir())
 	dir := t.TempDir()
 	a, err := agent.New(dir)
 	if err != nil {

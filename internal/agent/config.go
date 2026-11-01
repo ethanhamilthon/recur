@@ -64,7 +64,9 @@ type rawUI struct {
 	MaxResultLines   *int      `toml:"max_result_lines"`
 	MaxThinkingLines *int      `toml:"max_thinking_lines"`
 	StatusLeft       *[]string `toml:"status-left"`
+	StatusLeftAlt    *[]string `toml:"status_left"`
 	StatusRight      *[]string `toml:"status-right"`
+	StatusRightAlt   *[]string `toml:"status_right"`
 }
 
 type rawShell struct {
@@ -117,9 +119,13 @@ func applyLayer(s *Settings, system *string, hooksMap map[string]hooks.Hook, raw
 	setInt(&s.ShellMaxOutput, raw.Shell.MaxOutput)
 	if raw.UI.StatusLeft != nil {
 		s.StatusLeft = slices.Clone(*raw.UI.StatusLeft)
+	} else if raw.UI.StatusLeftAlt != nil {
+		s.StatusLeft = slices.Clone(*raw.UI.StatusLeftAlt)
 	}
 	if raw.UI.StatusRight != nil {
 		s.StatusRight = slices.Clone(*raw.UI.StatusRight)
+	} else if raw.UI.StatusRightAlt != nil {
+		s.StatusRight = slices.Clone(*raw.UI.StatusRightAlt)
 	}
 	for k, v := range raw.Env {
 		if s.Environment == nil {

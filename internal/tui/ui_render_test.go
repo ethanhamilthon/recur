@@ -257,12 +257,8 @@ func TestTimelineLimitsReloadAndHiddenSpacing(t *testing.T) {
 	if !strings.Contains(ansi.Strip(m.cache[0].Text), "fifth") {
 		t.Fatal("default code limit too short")
 	}
-	path := filepath.Join(os.Getenv("RECUR_HOME"), "settings.toml")
-	text, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text = []byte(strings.NewReplacer("max_code_lines = 999", "max_code_lines = 0", "max_result_lines = 4", "max_result_lines = 0", "max_thinking_lines = 4", "max_thinking_lines = 0").Replace(string(text)))
+	path := filepath.Join(os.Getenv("RECUR_HOME"), "config.toml")
+	text := []byte("[ui]\nmax_code_lines = 0\nmax_result_lines = 0\nmax_thinking_lines = 0\n")
 	if err := os.WriteFile(path, text, 0600); err != nil {
 		t.Fatal(err)
 	}

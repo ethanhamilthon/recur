@@ -116,7 +116,7 @@ func TestLateSteeringContinuesWithoutLosingDraft(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("RECUR_HOME", home)
 	config := fmt.Sprintf("provider = 'p'\nmodel = 'm'\n[providers.p]\nbase_url = '%s'\n", server.URL)
-	if err := os.WriteFile(filepath.Join(home, "settings.toml"), []byte(config), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}
 	a, err := agent.New(t.TempDir())

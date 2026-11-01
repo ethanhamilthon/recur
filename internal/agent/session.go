@@ -78,6 +78,8 @@ func (a *Agent) changeSession(id string) error {
 		sessionsDir:   a.sessionsDir,
 		REPL:          a.REPL,
 		hooks:         a.hooks,
+		status:        a.status,
+		version:       a.version,
 		System:        c.system,
 		LocalConfig:   c.local,
 		LocalIgnored:  c.ignored,

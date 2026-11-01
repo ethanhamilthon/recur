@@ -51,6 +51,7 @@ func Run(a *agent.Agent, cwd string) error {
 		}
 		if m.statusCancel != nil {
 			m.statusCancel()
+		}
 		if m.fileScanCancel != nil {
 			m.fileScanCancel()
 		}

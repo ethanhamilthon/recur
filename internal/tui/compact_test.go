@@ -12,6 +12,7 @@ import (
 // TestCompactRunsInTheBackground guards the interface against a blocking
 // summary request: /compact must return immediately with a running command.
 func TestCompactRunsInTheBackground(t *testing.T) {
+	t.Setenv("RECUR_HOME", t.TempDir())
 	a, err := agent.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -44,6 +45,7 @@ func TestCompactRunsInTheBackground(t *testing.T) {
 
 // TestSendDuringCompactionIsRefused keeps a queued message from being stranded.
 func TestSendDuringCompactionIsRefused(t *testing.T) {
+	t.Setenv("RECUR_HOME", t.TempDir())
 	a, err := agent.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -65,6 +67,7 @@ func TestSendDuringCompactionIsRefused(t *testing.T) {
 // TestCompactWithGuidanceRunsFromEnter: text after /compact is the guidance,
 // not an ordinary chat message.
 func TestCompactWithGuidanceRunsFromEnter(t *testing.T) {
+	t.Setenv("RECUR_HOME", t.TempDir())
 	a, err := agent.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

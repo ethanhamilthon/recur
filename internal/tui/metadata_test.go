@@ -29,6 +29,7 @@ func TestShortPathUsesTildeForHome(t *testing.T) {
 }
 
 func TestBottomBarShortensWorkingDirectory(t *testing.T) {
+	t.Setenv("RECUR_HOME", t.TempDir())
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" || home == string(filepath.Separator) {
 		t.Skip("no usable home directory")

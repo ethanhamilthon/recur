@@ -377,3 +377,26 @@ api_key = "other-key"
 		t.Fatalf("rollback did not restore file: %s", afterFail)
 	}
 }
+
+func TestStatusUnderscoreKeysAccepted(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("RECUR_HOME", home)
+	cfg := `
+[ui]
+status_left = ["echo left_underscore"]
+status_right = ["echo right_underscore"]
+`
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := loadConfiguration(home, t.TempDir(), ConfigFiles{})
+	if err != nil {
+		t.Fatalf("failed loading config with underscore status keys: %v", err)
+	}
+	if len(c.settings.StatusLeft) != 1 || c.settings.StatusLeft[0] != "echo left_underscore" {
+		t.Fatalf("StatusLeft unexpected: %+v", c.settings.StatusLeft)
+	}
+	if len(c.settings.StatusRight) != 1 || c.settings.StatusRight[0] != "echo right_underscore" {
+		t.Fatalf("StatusRight unexpected: %+v", c.settings.StatusRight)
+	}
+}

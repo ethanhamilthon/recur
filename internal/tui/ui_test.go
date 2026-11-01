@@ -123,7 +123,7 @@ func TestNewCommand(t *testing.T) {
 	if len(a.History) != 0 || len(m.entries) != 0 {
 		t.Fatal("new should clear timeline and history")
 	}
-	if a.System == "" || a.REPL.Prefix == "" {
+	if a.System == "" {
 		t.Fatal("new should load prompt files")
 	}
 }
