@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 func TestTurnsExecutionAndHistory(t *testing.T) {
@@ -38,7 +38,7 @@ func TestTurnsExecutionAndHistory(t *testing.T) {
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n")
 	}))
 	defer server.Close()
-	a := &Agent{REPL: &repl.REPL{}, HistoryPath: filepath.Join(t.TempDir(), "history.json")}
+	a := &Agent{Shell: &shell.Runner{}, HistoryPath: filepath.Join(t.TempDir(), "history.json")}
 	configureTestAgent(t, a, Settings{Provider: "test", Model: "test-model", Providers: map[string]Provider{"test": {BaseURL: server.URL}}})
 	defer a.Close()
 	for i := 0; i < 2; i++ {
@@ -107,7 +107,7 @@ func TestSDKRequestAndHistory(t *testing.T) {
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"reasoning\",\"id\":\"r\",\"opaque\":\"keep\"}]}}\n\n")
 	}))
 	defer server.Close()
-	a := &Agent{REPL: &repl.REPL{}, History: []json.RawMessage{raw(map[string]string{"role": "user", "content": "hi"}), json.RawMessage(`{"type":"reasoning","id":"r","opaque":"keep"}`)}}
+	a := &Agent{Shell: &shell.Runner{}, History: []json.RawMessage{raw(map[string]string{"role": "user", "content": "hi"}), json.RawMessage(`{"type":"reasoning","id":"r","opaque":"keep"}`)}}
 	configureTestAgent(t, a, Settings{Provider: "test", Model: "custom", Effort: "high", Providers: map[string]Provider{"test": {BaseURL: server.URL + "/v1/", APIKey: "selected-key"}}})
 	var text string
 	items, err := a.request(context.Background(), func(e Event) { text += e.Text })
@@ -136,7 +136,7 @@ func TestSDKStreamFailures(t *testing.T) {
 				fmt.Fprint(w, tc.body)
 			}))
 			defer server.Close()
-			a := &Agent{REPL: &repl.REPL{}}
+			a := &Agent{Shell: &shell.Runner{}}
 			configureTestAgent(t, a, Settings{Provider: "test", Model: "m", Providers: map[string]Provider{"test": {BaseURL: server.URL}}})
 			if _, err := a.request(context.Background(), func(Event) {}); err == nil {
 				t.Fatal("expected stream error")
@@ -158,7 +158,7 @@ func TestSDKRequestCancellation(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	defer server.Close()
-	a := &Agent{REPL: &repl.REPL{}}
+	a := &Agent{Shell: &shell.Runner{}}
 	configureTestAgent(t, a, Settings{Provider: "test", Model: "m", Providers: map[string]Provider{"test": {BaseURL: server.URL}}})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -189,7 +189,7 @@ func TestSDKIgnoresEmptySSEFrames(t *testing.T) {
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}],\"usage\":{\"input_tokens\":10,\"output_tokens\":2}}}\n\n\n")
 	}))
 	defer server.Close()
-	a := &Agent{REPL: &repl.REPL{}}
+	a := &Agent{Shell: &shell.Runner{}}
 	configureTestAgent(t, a, Settings{Provider: "test", Model: "m", Providers: map[string]Provider{"test": {BaseURL: server.URL}}})
 	items, err := a.request(context.Background(), func(Event) {})
 	if err != nil || len(items) != 1 || a.lastRequest.Usage == nil || a.lastRequest.Usage.Input != 10 {

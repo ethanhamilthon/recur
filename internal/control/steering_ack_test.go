@@ -19,7 +19,7 @@ func TestAcceptedNotifySteeringLeavesTheQueue(t *testing.T) {
 	}
 	h.submit(Request{Type: "steer", Text: "focus on errors"})
 	close(model.gate)
-	events := h.await("first turn done", func(events []Event) bool { return doneFor(events, turn) != nil })
+	h.await("first turn done", func(events []Event) bool { return doneFor(events, turn) != nil })
 
 	// Done is emitted under the controller lock, and any replacement turn is
 	// started inside that same lock, so Status is consistent once it returns.
@@ -28,7 +28,7 @@ func TestAcceptedNotifySteeringLeavesTheQueue(t *testing.T) {
 	} else if len(st.Queued) != 0 {
 		t.Fatalf("accepted steering is still queued: %+v", st.Queued)
 	}
-	events = h.log()
+	events := h.log()
 	if n := countKind(events, "started"); n != 1 {
 		t.Fatalf("accepted steering was replayed as a new turn: %d turns started", n)
 	}

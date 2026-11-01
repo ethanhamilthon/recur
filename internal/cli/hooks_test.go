@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-// hooksSetup writes provider settings and a home config.toml recording events.
+// hooksSetup writes provider settings and a home recur.toml recording events.
 func hooksSetup(t *testing.T, status int) (record string) {
 	t.Helper()
 	home := t.TempDir()
@@ -27,7 +27,7 @@ func hooksSetup(t *testing.T, status int) (record string) {
 	}))
 	t.Cleanup(server.Close)
 	config := fmt.Sprintf("provider='test'\nmodel='m'\n[providers.test]\nbase_url=%q\n", server.URL)
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "recur.toml"), []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}
 	return filepath.Join(t.TempDir(), "events")
@@ -35,7 +35,7 @@ func hooksSetup(t *testing.T, status int) (record string) {
 
 func hooksConfig(t *testing.T, record, serverURL string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "config.toml")
+	path := filepath.Join(t.TempDir(), "recur.toml")
 	text := fmt.Sprintf("provider='test'\nmodel='m'\n[providers.test]\nbase_url=%q\n[hooks.all]\nevents = [\"*\"]\ncommand = 'echo \"$RECUR_EVENT|$RECUR_MODE|$RECUR_EXIT_CODE\" >> %s'\n", serverURL, record)
 	if err := os.WriteFile(path, []byte(text), 0600); err != nil {
 		t.Fatal(err)
@@ -55,7 +55,7 @@ func TestHeadlessInheritsGlobalHooksUnlessSupportDisabled(t *testing.T) {
 		"[hooks.implicit]\nevents = [\"*\"]\ncommand = 'echo \"$RECUR_EVENT|$RECUR_MODE|$RECUR_EXIT_CODE\" >> %s'\n"+
 		"[hooks.tui_only]\nevents = [\"*\"]\ncommand = 'echo \"$RECUR_EVENT\" >> %s'\nheadless_support = false\n",
 		p.server.URL, record, tuiRecord)
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(homeCfg), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "recur.toml"), []byte(homeCfg), 0600); err != nil {
 		t.Fatal(err)
 	}
 	runOnce := func(args ...string) {
@@ -100,7 +100,7 @@ func TestInterfaceOnlyHooksNeverFireHeadless(t *testing.T) {
 	p := newProvider(t, nil)
 	p.configure(t, "")
 	record := filepath.Join(t.TempDir(), "events")
-	file := filepath.Join(t.TempDir(), "config.toml")
+	file := filepath.Join(t.TempDir(), "recur.toml")
 	text := fmt.Sprintf("provider='test'\nmodel='m'\n[providers.test]\nbase_url=%q\n[hooks.all]\nevents = [\"idle\", \"steer_queued\", \"image_attached\"]\ncommand = 'echo \"$RECUR_EVENT|$RECUR_IMAGE_SOURCE\" >> %s'\n", p.server.URL, record)
 	if err := os.WriteFile(file, []byte(text), 0600); err != nil {
 		t.Fatal(err)

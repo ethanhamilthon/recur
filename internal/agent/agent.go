@@ -21,8 +21,9 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
 
+	"recur/internal/docs"
 	"recur/internal/hooks"
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 var codeField = regexp.MustCompile(`"command"\s*:\s*"`)
@@ -67,10 +68,10 @@ type Agent struct {
 	listener          net.Listener
 	socketDir         string
 	inbox             chan string
-	views             chan repl.Image
+	views             chan shell.Image
 	owner             *os.File
 	settings          Settings
-	REPL              *repl.REPL
+	Shell             *shell.Runner
 	History           []json.RawMessage
 	HistoryPath       string
 	System            string
@@ -89,12 +90,9 @@ type Agent struct {
 	version           string
 }
 
-func New(dir string, target ...string) (*Agent, error) {
-	return NewWith(dir, ConfigFiles{}, target...)
-}
-
-// NewWith is New with explicit config files that override default lookup.
-func NewWith(dir string, files ConfigFiles, target ...string) (*Agent, error) {
+// New opens the project in dir with configuration from files (zero value: default
+// lookup). target optionally resumes a saved session id.
+func New(dir string, files ConfigFiles, target ...string) (*Agent, error) {
 	config, err := configDir(dir)
 	if err != nil {
 		return nil, err
@@ -113,14 +111,14 @@ func NewWith(dir string, files ConfigFiles, target ...string) (*Agent, error) {
 		hooks: &hooks.Runner{
 			Log: filepath.Join(config, "hooks.log"),
 		},
-		REPL: &repl.REPL{Dir: dir},
+		Shell: &shell.Runner{Dir: dir},
 	}
 	a.applySettings(cfg.settings)
 	if err := a.openProject(dir, target...); err != nil {
 		a.release()
 		return nil, err
 	}
-	a.REPL.Env = a.shellEnv
+	a.Shell.Env = a.shellEnv
 	a.hooks.Set(cfg.hooks)
 	return a, nil
 }
@@ -370,16 +368,16 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 			}
 		}
 	}
-	return fmt.Errorf("stopped after %d agent steps; raise max_agent_steps in config.toml", a.settings.MaxAgentSteps)
+	return fmt.Errorf("stopped after %d agent steps; raise max_agent_steps in recur.toml", a.settings.MaxAgentSteps)
 }
 
 // runTool executes one function call; failures become an error result for the model.
-func (a *Agent) runTool(ctx context.Context, name, arguments string) repl.Result {
+func (a *Agent) runTool(ctx context.Context, name, arguments string) shell.Result {
 	if ctx.Err() != nil {
-		return repl.Result{Output: ctx.Err().Error(), Error: true}
+		return shell.Result{Output: ctx.Err().Error(), Error: true}
 	}
 	if name != "bash" {
-		return repl.Result{Output: "Unknown tool: " + name, Error: true}
+		return shell.Result{Output: "Unknown tool: " + name, Error: true}
 	}
 	var args struct {
 		Command   string `json:"command"`
@@ -407,16 +405,16 @@ func (a *Agent) runTool(ctx context.Context, name, arguments string) repl.Result
 		}
 	}
 	if err == nil {
-		var result repl.Result
+		var result shell.Result
 		a.Fire("shell_start", "RECUR_COMMAND_FILE", args.Command, "RECUR_TIMEOUT", strconv.Itoa(int(timeout/time.Second)))
 		started := time.Now()
-		if result, err = a.REPL.ExecuteLimit(ctx, args.Command, timeout, limit); err == nil {
+		if result, err = a.Shell.ExecuteLimit(ctx, args.Command, timeout, limit); err == nil {
 			a.Fire("shell_end", "RECUR_EXIT_CODE", strconv.Itoa(result.ExitCode), "RECUR_DURATION_MS", ms(time.Since(started)),
 				"RECUR_TIMED_OUT", strconv.FormatBool(result.ExitCode == 124))
 			return result
 		}
 	}
-	return repl.Result{Output: err.Error(), ExitCode: 2, Error: true}
+	return shell.Result{Output: err.Error(), ExitCode: 2, Error: true}
 }
 
 // itemID identifies a response item of the latest request in display events.
@@ -443,7 +441,7 @@ func (a *Agent) request(ctx context.Context, emit func(Event), checkpoints ...fu
 		Store:        openai.Bool(false),
 		Tools: []responses.ToolUnionParam{{OfFunction: &responses.FunctionToolParam{
 			Name:        "bash",
-			Description: openai.String(repl.ToolDescription),
+			Description: openai.String(docs.ToolDescription),
 			Parameters:  a.bashParameters(),
 			Strict:      openai.Bool(true),
 		}}},

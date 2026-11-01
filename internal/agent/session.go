@@ -53,7 +53,7 @@ func (a *Agent) HasSavedSession() bool {
 	return len(a.History) > 0 || err == nil
 }
 
-func (a *Agent) Close() { a.REPL.Close(); a.release() }
+func (a *Agent) Close() { a.Shell.Close(); a.release() }
 
 // Session changes are called only after the active turn has finished.
 func (a *Agent) NewSession() error      { return a.changeSession("") }
@@ -63,7 +63,7 @@ func (a *Agent) changeSession(id string) error {
 	if id != "" && id == strings.TrimSuffix(filepath.Base(a.HistoryPath), ".jsonl") {
 		return nil
 	}
-	c, err := loadConfiguration(a.home, a.REPL.Dir, a.files)
+	c, err := loadConfiguration(a.home, a.Shell.Dir, a.files)
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func (a *Agent) changeSession(id string) error {
 		files:         a.files,
 		home:          a.home,
 		sessionsDir:   a.sessionsDir,
-		REPL:          a.REPL,
+		Shell:         a.Shell,
 		hooks:         a.hooks,
 		status:        a.status,
 		version:       a.version,

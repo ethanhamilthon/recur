@@ -1,4 +1,4 @@
-package repl
+package shell
 
 import (
 	"context"
@@ -25,8 +25,8 @@ type Result struct {
 	Error    bool   `json:"error,omitempty"`
 }
 
-// REPL executes commands in stateless system Bash processes.
-type REPL struct {
+// Runner executes commands in stateless system Bash processes.
+type Runner struct {
 	mu          sync.Mutex
 	active      map[*exec.Cmd]struct{}
 	Dir         string
@@ -36,7 +36,7 @@ type REPL struct {
 }
 
 // Close terminates any active managed processes.
-func (r *REPL) Close() {
+func (r *Runner) Close() {
 	if r == nil {
 		return
 	}
@@ -50,7 +50,7 @@ func (r *REPL) Close() {
 	r.active = make(map[*exec.Cmd]struct{})
 }
 
-func (r *REPL) track(cmd *exec.Cmd) {
+func (r *Runner) track(cmd *exec.Cmd) {
 	if r == nil {
 		return
 	}
@@ -62,7 +62,7 @@ func (r *REPL) track(cmd *exec.Cmd) {
 	r.mu.Unlock()
 }
 
-func (r *REPL) untrack(cmd *exec.Cmd) {
+func (r *Runner) untrack(cmd *exec.Cmd) {
 	if r == nil {
 		return
 	}
@@ -103,13 +103,13 @@ func Command(ctx context.Context, dir string, env []string, script string) *exec
 	return cmd
 }
 
-func (r *REPL) Execute(ctx context.Context, command string, timeout time.Duration) (Result, error) {
+func (r *Runner) Execute(ctx context.Context, command string, timeout time.Duration) (Result, error) {
 	return r.ExecuteLimit(ctx, command, timeout, DefaultOutputLimit)
 }
 
 // ExecuteLimit runs a command keeping at most limit output bytes (first and last
 // halves); NoOutputLimit keeps everything.
-func (r *REPL) ExecuteLimit(ctx context.Context, command string, timeout time.Duration, limit int) (Result, error) {
+func (r *Runner) ExecuteLimit(ctx context.Context, command string, timeout time.Duration, limit int) (Result, error) {
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
@@ -175,7 +175,7 @@ func (r *REPL) ExecuteLimit(ctx context.Context, command string, timeout time.Du
 
 // buildEnv merges inherited environment, configured [env], recur binary
 // directory first in PATH, and per-call metadata. Command applies the final policy.
-func (r *REPL) buildEnv() []string {
+func (r *Runner) buildEnv() []string {
 	envMap := make(map[string]string)
 	for _, entry := range os.Environ() {
 		if k, v, ok := strings.Cut(entry, "="); ok {

@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"recur/internal/hooks"
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 func write(t *testing.T, path, text string) {
@@ -25,15 +25,6 @@ func write(t *testing.T, path, text string) {
 	if err := os.WriteFile(path, []byte(text), 0600); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func source(a *Agent, name string) Source {
-	for _, s := range a.Sources {
-		if s.Name == name {
-			return s
-		}
-	}
-	return Source{}
 }
 
 // hookNames lists the active hook names of a in sorted order, comma separated.
@@ -52,7 +43,7 @@ func TestConfigSourcesPriority(t *testing.T) {
 
 	open := func(files ConfigFiles) *Agent {
 		t.Helper()
-		a, err := NewWith(cwd, files)
+		a, err := New(cwd, files)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -66,8 +57,8 @@ func TestConfigSourcesPriority(t *testing.T) {
 		t.Fatalf("defaults sources: %+v", a.Sources)
 	}
 
-	// Home config.toml exists
-	write(t, filepath.Join(home, "config.toml"), "[hooks.h1]\nevents = ['idle']\ncommand = 'true'\n")
+	// Home recur.toml exists
+	write(t, filepath.Join(home, "recur.toml"), "[hooks.h1]\nevents = ['idle']\ncommand = 'true'\n")
 	a = open(ConfigFiles{})
 	if len(a.Sources) != 1 || a.Sources[0].Origin != "home" {
 		t.Fatalf("home sources: %+v", a.Sources)
@@ -106,7 +97,7 @@ func TestConfigSourcesPriority(t *testing.T) {
 	}
 
 	// Missing explicit --config must fail
-	if _, err := NewWith(cwd, ConfigFiles{Config: filepath.Join(cwd, "missing.toml")}); err == nil {
+	if _, err := New(cwd, ConfigFiles{Config: filepath.Join(cwd, "missing.toml")}); err == nil {
 		t.Fatal("missing --config file must fail")
 	}
 }
@@ -129,7 +120,7 @@ func newHookAgent(t *testing.T, server *httptest.Server) *Agent {
 	t.Helper()
 	t.Setenv("RECUR_HOME", t.TempDir())
 	cwd := t.TempDir()
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +207,7 @@ func TestInputQueueEvents(t *testing.T) {
 	if got := a.Notifications(); len(got) != 1 {
 		t.Fatalf("notifications = %v", got)
 	}
-	a.views <- repl.Image{URL: "data:image/png;base64,AA=="}
+	a.views <- shell.Image{URL: "data:image/png;base64,AA=="}
 	if got := a.viewed(); len(got) != 1 {
 		t.Fatalf("views = %v", got)
 	}
@@ -315,12 +306,12 @@ events = ["turn_start"]
 command = "echo from-global"
 timeout = 10
 `
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(globalCfg), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "recur.toml"), []byte(globalCfg), 0600); err != nil {
 		t.Fatal(err)
 	}
 
 	// 1. Implicit headless: global hooks are active, as in the TUI
-	aImplicit, err := NewWith(cwd, ConfigFiles{Headless: true})
+	aImplicit, err := New(cwd, ConfigFiles{Headless: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +338,7 @@ command = "echo explicit"
 		t.Fatal(err)
 	}
 
-	aExplicit, err := NewWith(cwd, ConfigFiles{Headless: true, Config: explicitPath})
+	aExplicit, err := New(cwd, ConfigFiles{Headless: true, Config: explicitPath})
 	if err != nil {
 		t.Fatalf("explicit headless with partial override should succeed, got: %v", err)
 	}
@@ -375,7 +366,7 @@ command = "echo explicit"
 	if err := os.WriteFile(noExtendPath, []byte(noExtendCfg), 0600); err != nil {
 		t.Fatal(err)
 	}
-	aNoExt, err := NewWith(cwd, ConfigFiles{Headless: true, Config: noExtendPath, NoExtend: true})
+	aNoExt, err := New(cwd, ConfigFiles{Headless: true, Config: noExtendPath, NoExtend: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +389,7 @@ timeout = 5
 	if err := os.WriteFile(missingReqPath, []byte(missingReqCfg), 0600); err != nil {
 		t.Fatal(err)
 	}
-	_, err = NewWith(cwd, ConfigFiles{Headless: true, Config: missingReqPath})
+	_, err = New(cwd, ConfigFiles{Headless: true, Config: missingReqPath})
 	if err == nil {
 		t.Fatal("expected validateHooks error for incomplete hook, but got nil")
 	}
@@ -407,7 +398,7 @@ timeout = 5
 func TestHeadlessSupportField(t *testing.T) {
 	home, cwd := t.TempDir(), t.TempDir()
 	t.Setenv("RECUR_HOME", home)
-	write(t, filepath.Join(home, "config.toml"), `provider = "p"
+	write(t, filepath.Join(home, "recur.toml"), `provider = "p"
 model = "m"
 [providers.p]
 base_url = "https://example.com"
@@ -423,7 +414,7 @@ headless_support = false
 `)
 	open := func(files ConfigFiles) *Agent {
 		t.Helper()
-		a, err := NewWith(cwd, files)
+		a, err := New(cwd, files)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -462,7 +453,7 @@ headless_support = false
 	// Non-boolean values are rejected by strict parsing.
 	bad := filepath.Join(t.TempDir(), "bad.toml")
 	write(t, bad, "[hooks.bad]\nevents = [\"turn_end\"]\ncommand = \"true\"\nheadless_support = \"no\"\n")
-	if _, err := NewWith(cwd, ConfigFiles{Config: bad}); err == nil {
+	if _, err := New(cwd, ConfigFiles{Config: bad}); err == nil {
 		t.Fatal("non-boolean headless_support must fail")
 	}
 }

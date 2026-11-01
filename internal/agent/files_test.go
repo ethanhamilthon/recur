@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"testing"
 
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 func TestTextFileReadBounds(t *testing.T) {
@@ -231,7 +231,7 @@ func requestUserTexts(t *testing.T, body []byte) []string {
 func newFileTestAgent(t *testing.T, cwd, url string, maxFileBytes int) *Agent {
 	t.Helper()
 	t.Setenv("RECUR_HOME", t.TempDir())
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,8 +295,8 @@ func TestFileAttachmentWithImagesAndTruncation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	image := repl.Image{URL: "data:image/png;base64,AA==", Path: "/private/original/pic.png"}
-	if err := a.RunInput(context.Background(), Input{Text: "use @big.txt", Images: []repl.Image{image}, Files: files}, func(Event) {}); err != nil {
+	image := shell.Image{URL: "data:image/png;base64,AA==", Path: "/private/original/pic.png"}
+	if err := a.RunInput(context.Background(), Input{Text: "use @big.txt", Images: []shell.Image{image}, Files: files}, func(Event) {}); err != nil {
 		t.Fatal(err)
 	}
 	body := string(bodies[0])
@@ -364,7 +364,7 @@ func TestFileAttachmentSnapshotSurvivesSourceChangesAndReopen(t *testing.T) {
 	if err := os.Remove(source); err != nil {
 		t.Fatal(err)
 	}
-	restored, err := New(cwd, id)
+	restored, err := New(cwd, ConfigFiles{}, id)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -104,16 +104,16 @@ func BenchmarkLongChatCachedDelta(b *testing.B) {
 func TestConfigSourcesHeader(t *testing.T) {
 	a := &agent.Agent{}
 	m := newModel(a, "/project")
-	if strings.Contains(ansi.Strip(m.timeline()), "system") {
+	if strings.Contains(ansi.Strip(m.timeline()), "recur.toml") {
 		t.Fatal("sources shown before the agent loaded any")
 	}
 	a.Sources = []agent.Source{
-		{Name: "system.md", Path: "/work/repo/.recur/system.md", Origin: "project"},
-		{Name: "prefix.sh", Path: "/home/u/.recur/prefix.sh", Origin: "home"},
-		{Name: "hooks.toml", Origin: "none"},
+		{Name: "recur.toml", Path: "/work/repo/recur.toml", Origin: "project"},
+		{Name: "recur.toml", Path: "/home/u/.recur/recur.toml", Origin: "home"},
+		{Name: "recur.toml", Origin: "none"},
 	}
 	text := ansi.Strip(m.timeline())
-	for _, want := range []string{"system  /work/repo/.recur/system.md (project)", "prefix  /home/u/.recur/prefix.sh (home)", "hooks   none"} {
+	for _, want := range []string{"recur   /work/repo/recur.toml (project)", "recur   /home/u/.recur/recur.toml (home)", "recur   none"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("header missing %q in:\n%s", want, text)
 		}
@@ -234,7 +234,7 @@ func TestBlockLineLimits(t *testing.T) {
 
 func TestTimelineLimitsReloadAndHiddenSpacing(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
-	a, err := agent.New(t.TempDir())
+	a, err := agent.New(t.TempDir(), agent.ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestTimelineLimitsReloadAndHiddenSpacing(t *testing.T) {
 	if !strings.Contains(ansi.Strip(m.cache[0].Text), "fifth") {
 		t.Fatal("default code limit too short")
 	}
-	path := filepath.Join(os.Getenv("RECUR_HOME"), "config.toml")
+	path := filepath.Join(os.Getenv("RECUR_HOME"), "recur.toml")
 	text := []byte("[ui]\nmax_code_lines = 0\nmax_result_lines = 0\nmax_thinking_lines = 0\n")
 	if err := os.WriteFile(path, text, 0600); err != nil {
 		t.Fatal(err)

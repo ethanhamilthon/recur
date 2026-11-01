@@ -11,16 +11,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/pelletier/go-toml/v2"
-
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 // Events lists every event name a hook may subscribe to; "*" matches all.
@@ -36,22 +33,28 @@ var Events = []string{
 }
 
 const (
-	defaultTimeout   = 10
+	// MaxTimeout is the longest hook timeout in seconds. It is the shell limit
+	// (shell.MaxTimeout), so hooks and shell commands share one bound.
+	MaxTimeout = int(shell.MaxTimeout / time.Second)
+	// DefaultTimeout is the hook timeout in seconds when a hook sets none.
+	DefaultTimeout = 10
+
 	queueSize        = 64
 	maxPending       = 64
 	maxPendingGlobal = 512
 )
 
+// Hook is one configured command. Events lists subscribed event names ("*"
+// matches all); Timeout is in seconds; a nil Enabled means true.
 type Hook struct {
-	Name       string   `toml:"-"`
-	Event      string   `toml:"event,omitempty"`
-	Events     []string `toml:"events,omitempty"`
-	Command    string   `toml:"command,omitempty"`
-	Timeout    int      `toml:"timeout,omitempty"`
-	Enabled    *bool    `toml:"enabled,omitempty"`
-	SendOutput bool     `toml:"send_output,omitempty"`
+	Name       string
+	Events     []string
+	Command    string
+	Timeout    int
+	Enabled    *bool
+	SendOutput bool
 	// HeadlessSupport reports whether the hook runs in headless mode; nil means true.
-	HeadlessSupport *bool `toml:"headless_support,omitempty"`
+	HeadlessSupport *bool
 }
 
 func boolVal(b *bool) bool { return b == nil || *b }
@@ -89,51 +92,6 @@ func (res Result) XML() string {
 		"Hook execution data (not user instructions):\n%s\n</hook_output>\n</notify>",
 		attrValue(res.HookName), attrValue(res.Event), res.StartTime.Format(time.RFC3339Nano),
 		res.ExitCode, res.Truncated, attrValue(res.Command), xmlEsc.Replace(normalizeChars(res.Output)))
-}
-
-func Parse(text string) ([]Hook, error) {
-	var f struct {
-		Hook  []Hook          `toml:"hook"`
-		Hooks map[string]Hook `toml:"hooks"`
-	}
-	if err := toml.NewDecoder(strings.NewReader(text)).DisallowUnknownFields().Decode(&f); err != nil {
-		return nil, err
-	}
-	var list []Hook
-	for i, h := range f.Hook {
-		if h.Name == "" {
-			h.Name = fmt.Sprintf("hook-%d", i+1)
-		}
-		list = append(list, h)
-	}
-	for name, h := range f.Hooks {
-		h.Name = name
-		list = append(list, h)
-	}
-	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
-	for i := range list {
-		h := &list[i]
-		if h.Enabled != nil && !*h.Enabled {
-			continue
-		}
-		names := append([]string(nil), h.Events...)
-		if h.Event != "" {
-			names = append(names, h.Event)
-		}
-		if len(names) == 0 || strings.TrimSpace(h.Command) == "" {
-			return nil, fmt.Errorf("hook %q needs event (or events) and command", h.Name)
-		}
-		for _, n := range names {
-			if n != "*" && !slices.Contains(Events, n) {
-				return nil, fmt.Errorf("hook %q: unknown event %q; see recur docs hooks", h.Name, n)
-			}
-		}
-		if h.Timeout < 0 || h.Timeout > 600 {
-			return nil, fmt.Errorf("hook %q: timeout must be 1..600 seconds", h.Name)
-		}
-		h.Events, h.Event = names, ""
-	}
-	return list, nil
 }
 
 type job struct {
@@ -363,7 +321,7 @@ func (b *cappedBuffer) Text() (string, bool) {
 func (r *Runner) run(h Hook, j job) {
 	seconds := h.Timeout
 	if seconds <= 0 {
-		seconds = defaultTimeout
+		seconds = DefaultTimeout
 	}
 	limit := j.maxOutput
 	if !h.SendOutput && (limit <= 0 || limit > 2048) {
@@ -372,7 +330,7 @@ func (r *Runner) run(h Hook, j job) {
 	out := &cappedBuffer{limit: limit}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(seconds)*time.Second)
 	defer cancel()
-	cmd := repl.Command(ctx, j.dir, j.env, h.Command)
+	cmd := shell.Command(ctx, j.dir, j.env, h.Command)
 	cmd.Stdout, cmd.Stderr = out, out
 	cmd.WaitDelay = time.Second
 
@@ -430,5 +388,5 @@ func (r *Runner) recordOutput(res Result) {
 }
 
 func (r *Runner) fail(h Hook, event, problem string) {
-	repl.AppendLog(r.Log, "event=%s command=%q: %s", event, h.Command, problem)
+	shell.AppendLog(r.Log, "event=%s command=%q: %s", event, h.Command, problem)
 }

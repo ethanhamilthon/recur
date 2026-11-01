@@ -16,31 +16,31 @@ import (
 )
 
 type Provider struct {
-	BaseURL   string `toml:"base_url"`
-	APIKey    string `toml:"api_key"`
-	APIKeyEnv string `toml:"api_key_env"`
+	BaseURL   string
+	APIKey    string
+	APIKeyEnv string
 }
 
 type Settings struct {
-	AttachmentDir    string              `toml:"attachment_dir"`
-	MaxContextTokens int64               `toml:"max_context_tokens"`
-	CompactKeepTurns int                 `toml:"compact_keep_turns"`
-	MaxAgentSteps    int                 `toml:"max_agent_steps"`
-	MaxFileBytes     int                 `toml:"max_file_bytes"`
-	MaxCodeLines     int                 `toml:"max_code_lines"`
-	MaxResultLines   int                 `toml:"max_result_lines"`
-	MaxThinkingLines int                 `toml:"max_thinking_lines"`
-	StatusLeft       []string            `toml:"status_left"`
-	StatusRight      []string            `toml:"status_right"`
-	Environment      map[string]string   `toml:"env"`
-	ShellTimeout     int                 `toml:"shell_timeout"`
-	ShellMaxTimeout  int                 `toml:"shell_max_timeout"`
-	ShellMaxOutput   int                 `toml:"shell_max_output"`
-	Provider         string              `toml:"provider"`
-	Model            string              `toml:"model"`
-	ReasoningSummary string              `toml:"reasoning_summary"`
-	Effort           string              `toml:"effort"`
-	Providers        map[string]Provider `toml:"providers"`
+	AttachmentDir    string
+	MaxContextTokens int64
+	CompactKeepTurns int
+	MaxAgentSteps    int
+	MaxFileBytes     int
+	MaxCodeLines     int
+	MaxResultLines   int
+	MaxThinkingLines int
+	StatusLeft       []string
+	StatusRight      []string
+	Environment      map[string]string
+	ShellTimeout     int
+	ShellMaxTimeout  int
+	ShellMaxOutput   int
+	Provider         string
+	Model            string
+	ReasoningSummary string
+	Effort           string
+	Providers        map[string]Provider
 }
 
 // Efforts are the reasoning efforts offered by /model; empty uses the provider default.

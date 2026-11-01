@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"recur/internal/agent"
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 // fakeModel answers Responses requests. A gate holds streaming answers until
@@ -85,10 +85,10 @@ func newHarness(t *testing.T, model *fakeModel, config string) *harness {
 		config = "compact_keep_turns = 1\n"
 	}
 	text := fmt.Sprintf("provider='test'\nmodel='m'\n%s[providers.test]\nbase_url=%q\n", config, server.URL)
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(text), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "recur.toml"), []byte(text), 0600); err != nil {
 		t.Fatal(err)
 	}
-	a, err := agent.New(t.TempDir())
+	a, err := agent.New(t.TempDir(), agent.ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -517,8 +517,8 @@ func TestPendingImagesBlockSessionSwitch(t *testing.T) {
 	h.submit(Request{Type: "input", Text: "busy"})
 	<-model.started
 	defer close(model.gate)
-	image := repl.Image{URL: "data:image/png;base64,AA==", Path: "x.png"}
-	if _, err := h.c.Submit(Request{Type: "steer", Images: []repl.Image{image}}); err != nil {
+	image := shell.Image{URL: "data:image/png;base64,AA==", Path: "x.png"}
+	if _, err := h.c.Submit(Request{Type: "steer", Images: []shell.Image{image}}); err != nil {
 		t.Fatalf("steer with image: %v", err)
 	}
 	if _, err := h.c.Submit(Request{Type: "new"}); codeOf(err) != "pending_images" {
@@ -528,7 +528,7 @@ func TestPendingImagesBlockSessionSwitch(t *testing.T) {
 
 func TestSetupMissingBlocksInputWithHint(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
-	a, err := agent.New(t.TempDir())
+	a, err := agent.New(t.TempDir(), agent.ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -589,7 +589,7 @@ func TestNotificationStartsIdleTurnAndSteersBusyTurn(t *testing.T) {
 	defer cancel()
 	go h.c.Run(ctx)
 	id := strings.TrimSuffix(filepath.Base(h.a.HistoryPath), ".jsonl")
-	if err := agent.Notify(h.a.REPL.Dir, id, "ping"); err != nil {
+	if err := agent.Notify(h.a.Shell.Dir, id, "ping"); err != nil {
 		t.Fatal(err)
 	}
 	h.await("notify turn", func(events []Event) bool {

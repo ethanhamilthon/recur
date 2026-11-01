@@ -9,7 +9,7 @@ install:
 	go build -o $(BINDIR)/recur .
 	@echo "installed $(BINDIR)/recur"
 
-# Run from source with an isolated dev home (settings, prompts, sessions).
+# Run from source with an isolated dev home (recur.toml, sessions).
 dev:
 	RECUR_HOME=$(DEV_HOME) go run . $(ARGS)
 

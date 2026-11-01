@@ -1,11 +1,11 @@
 # Cookbook: common tasks
 
-Short recipes. Details live in the topic named in each recipe.
+Short recipes. Each recipe names the topic that owns the details.
 
 ## Create a minimal project config
 
-Put `recur.toml` in the project root (no upward search). Write only what differs
-from the defaults (`recur docs config`):
+Put `recur.toml` in the project root (see `recur docs config` for discovery). Write only what
+differs from the defaults:
 
 ```toml
 provider = "openrouter"
@@ -17,9 +17,8 @@ base_url = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"   # prefer this over a literal api_key in a repo
 ```
 
-The provider must speak the OpenAI Responses API. Check the result with
-`recur docs cli` and a headless smoke test (below) from that directory. A typo in a key name is a startup
-error (unknown keys are rejected).
+The provider must speak the OpenAI Responses API. A typo in a key name stops startup with an
+error; see `recur docs troubleshooting`.
 
 ## Tighten a config for unattended runs
 
@@ -95,28 +94,16 @@ From the bash tool, redirect output and notify when done:
 (make release > /tmp/release.log 2>&1; recur notify "release: exit $?") &
 ```
 
-## React to events with a hook
+## Run tests after each user turn
 
-```toml
-[hooks.after_turn]
-events = ["turn_end"]
-command = '''
-[ "$RECUR_TURN_SOURCE" = user ] || exit 0
-make test > /tmp/test.log 2>&1 || recur notify "tests failed: $(tail -n 20 /tmp/test.log)"
-'''
-timeout = 180
-```
-
-Always guard `turn_end` hooks that call `recur notify` with the turn-source check
-(`recur docs hooks`, loop prevention).
+Add a `turn_end` hook that runs only for user turns and calls `recur notify` on failure. The full
+example, the loop guard and the caveats are in `recur docs hooks`.
 
 ## Change the status bar
 
-Override `status_left` / `status_right` under `[ui]`. Arrays replace the defaults
-entirely; `[]` hides a side. Each entry is a shell snippet printing one segment
-(`recur docs interface`).
+Set `status_left` or `status_right` under `[ui]`. An array replaces the defaults entirely, and `[]`
+hides a side. Each entry is a shell snippet that prints one segment. Details: `recur docs interface`.
 
 ## Apply config changes
 
-Run `/reload` in the TUI after editing config. Precedence is `--config`, then
-`./recur.toml`, then `$RECUR_HOME/config.toml`, merged over built-in defaults.
+Edit the file, then run `/reload` in the TUI. Precedence and merge rules: `recur docs config`.

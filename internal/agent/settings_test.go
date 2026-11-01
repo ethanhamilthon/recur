@@ -13,7 +13,7 @@ func TestSettingsAndHome(t *testing.T) {
 	cwd := t.TempDir()
 	home := filepath.Join(t.TempDir(), ".recur")
 	t.Setenv("RECUR_HOME", home)
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ api_key = "first"
 base_url = "https://example.com/v1/"
 api_key = "second"
 `
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(text), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "recur.toml"), []byte(text), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.NewSession(); err != nil {
@@ -43,7 +43,7 @@ api_key = "second"
 		a.Settings().Providers["other"].APIKey != "second" {
 		t.Fatal("settings not applied")
 	}
-	next, err := New(cwd)
+	next, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestInvalidSettings(t *testing.T) {
 	} {
 		t.Run(text, func(t *testing.T) {
 			dir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(text), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "recur.toml"), []byte(text), 0600); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := loadConfiguration(dir, dir, ConfigFiles{}); err == nil {
@@ -112,7 +112,7 @@ func TestTimelineLineSettings(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			text := "provider = 'p'\nmodel = 'm'\n" + tc.extra + "[providers.p]\nbase_url = 'https://example.com'\n"
-			if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(text), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "recur.toml"), []byte(text), 0600); err != nil {
 				t.Fatal(err)
 			}
 			cfg, err := loadConfiguration(dir, dir, ConfigFiles{})
@@ -182,7 +182,7 @@ func TestShellTimeoutDurationOverflowAndBoundaries(t *testing.T) {
 	cwd := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("RECUR_HOME", home)
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestShellTimeoutDurationOverflowAndBoundaries(t *testing.T) {
 func TestMaxFileBytesReloadAppliesToNewSubmissions(t *testing.T) {
 	home, cwd := t.TempDir(), t.TempDir()
 	t.Setenv("RECUR_HOME", home)
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestMaxFileBytesReloadAppliesToNewSubmissions(t *testing.T) {
 	if a.Settings().MaxFileBytes != 65536 {
 		t.Fatalf("default max_file_bytes = %d", a.Settings().MaxFileBytes)
 	}
-	if err = os.WriteFile(filepath.Join(home, "config.toml"), []byte("max_file_bytes = 100\n"), 0600); err != nil {
+	if err = os.WriteFile(filepath.Join(home, "recur.toml"), []byte("max_file_bytes = 100\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err = a.Reload(); err != nil {
@@ -246,7 +246,7 @@ func TestMaxFileBytesReloadAppliesToNewSubmissions(t *testing.T) {
 	if a.Settings().MaxFileBytes != 100 {
 		t.Fatalf("reloaded max_file_bytes = %d", a.Settings().MaxFileBytes)
 	}
-	if err = os.WriteFile(filepath.Join(home, "config.toml"), []byte("max_file_bytes = -1\n"), 0600); err != nil {
+	if err = os.WriteFile(filepath.Join(home, "recur.toml"), []byte("max_file_bytes = -1\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err = a.Reload(); err == nil {

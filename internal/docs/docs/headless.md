@@ -8,7 +8,7 @@ notification) arrives. `--resume ID` opens an existing project session without
 running it. Without `--resume`, the service starts a new session that is saved
 after its first completed message.
 
-Flags: `--mode jsonl`, `--resume ID`, `--config PATH`, `--no-extend`. Every
+Flags: `--mode jsonl`, `--resume ID`, `--config PATH`, `--no-extend` (see `recur docs cli`). Every
 headless interaction uses this transport.
 
 Framing:
@@ -24,7 +24,7 @@ Framing:
 ## Startup record
 
 ```json
-{"type":"ready","seq":1,"protocol":1,"version":"0.6.1","cwd":"/work/project",
+{"type":"ready","seq":1,"protocol":1,"version":"x.y.z","cwd":"/work/project",
  "state":{"session":{"id":"…","model":"…","provider":"…","effort":"…","ctx_size":null},"busy":false,"cancelling":false,"compacting":false,"queued":0},
  "capabilities":{"requests":["input", "…"],"max_record_bytes":2097152,"max_images":8,"max_file_bytes":65536}}
 ```
@@ -67,15 +67,16 @@ An unknown name is `unknown_command`. Slash-prefixed text sent as `input` is an
 ordinary message.
 
 Attachments:
-- `images`: up to 8 paths per request. Each is captured as a bounded preview and an
-  original snapshot kept in `$RECUR_HOME/attachments/`. Invalid files are
-  `invalid_image`; more than 8 pending images is `attachment_limit`.
+- `images`: up to 8 paths per request. Each is captured like `recur view` (validated, previewed, and
+  copied; see `recur docs images`). The copy goes to `attachment_dir` when it is set, else to
+  `$RECUR_HOME/attachments` (see `recur docs config`). Invalid files are `invalid_image`; more than
+  8 pending images is `attachment_limit`.
 - `files`: each path is a regular UTF-8 text file inside the project root, read
-  when the request is accepted. Content is sent with the prompt as escaped,
-  labelled data, up to `max_file_bytes` per file (default 64 KiB; `0` is unlimited;
-  see `recur docs config`). Larger files are marked truncated.
-  Outside-root, special, binary or unreadable files are `invalid_file`, and no
-  turn starts. At most 32 distinct files per request; more is `invalid_file`.
+  when the request is accepted. It is handled like an `@path` reference (see
+  `recur docs interface`): content is sent as escaped, labelled data, limited by
+  `max_file_bytes` per file, and larger files are marked truncated. Outside-root,
+  special, binary or unreadable files are `invalid_file`, and no turn starts. The
+  distinct-file limit is the same as for `@` references; more is `invalid_file`.
 - A queued input keeps the snapshot taken when it was accepted; promotion to a
   follow-up turn uses that snapshot. An input returned in `unsent` lists its file
   paths; resubmitting it reads the files again.
@@ -169,18 +170,19 @@ request other than `stop`, `quit`, `new`, `resume`, or an interrupt.
 
 ## Hooks
 
-Headless runs load the same configuration as the TUI, including hooks (see
-`recur docs hooks`). The project `recur.toml` and `$RECUR_HOME/config.toml` activate
-hooks without `--config`, and `--no-extend` behaves the same way as in the TUI.
-
-Hooks with `headless_support = false` never run in headless mode; they still run
-in the TUI.
+Headless runs load the same configuration as the TUI, so hooks from the same files run without
+extra flags. Hooks with `headless_support = false` never run in headless mode (see `recur docs hooks`
+and `recur docs config`).
 
 In headless mode:
 - `RECUR_MODE` is `headless`.
-- Interface-only events never fire: `idle` and `steer_queued` are omitted, and
-  `image_attached` is reported only for JSON images (`RECUR_IMAGE_SOURCE=input`),
-  never for terminal paste.
+- Interface-only events never fire: `idle` and `steer_queued` are omitted.
+- `image_attached` fires once per image, with `RECUR_IMAGE_SOURCE` set to one of:
+  - `input`: an image of an accepted JSON `input` request, when the request is accepted (it starts a
+    turn or is queued as steering).
+  - `view`: an image queued by `recur view`, when the agent hands it to the model for the next model
+    request. This happens in headless mode too.
+  - `paste` never fires in headless mode, because there is no terminal paste.
 - Background status bar subprocesses and `@` file path indexing never run.
 
 ## Credentials
@@ -213,11 +215,9 @@ accept up to 128 KiB of text with a bounded queue of 64 entries. Inactive
 sessions reject notifications with an error rather than queuing them on disk.
 Delivered notifications are saved into normal session history.
 
-## Session Ownership and Locks
+## Session Ownership
 
-Each session is guarded by a process lock. Opening an active session owned by
-another process fails with `"session is in use"`. File locks are released
-automatically by the operating system upon process exit or crash.
+A headless process owns its session like the TUI does; see `recur docs sessions`.
 
 ## Example
 

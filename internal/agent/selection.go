@@ -34,7 +34,7 @@ func (a *Agent) SessionInfoFor(records []Record) map[string]any {
 	}
 	return map[string]any{
 		"id":       strings.TrimSuffix(filepath.Base(a.HistoryPath), ".jsonl"),
-		"cwd":      a.REPL.Dir,
+		"cwd":      a.Shell.Dir,
 		"model":    a.settings.Model,
 		"provider": a.settings.Provider,
 		"effort":   a.settings.Effort,
@@ -43,15 +43,12 @@ func (a *Agent) SessionInfoFor(records []Record) map[string]any {
 }
 
 func (a *Agent) patchPrimary(patch func(string) error) error {
-	target := a.primaryConfig
-	if target == "" {
-		target = filepath.Join(a.home, "config.toml")
-	}
+	target := a.PrimaryConfig()
 	data, existed := readFileIfExists(target)
 	if err := patch(target); err != nil {
 		return err
 	}
-	cfg, err := loadConfiguration(a.home, a.REPL.Dir, a.files)
+	cfg, err := loadConfiguration(a.home, a.Shell.Dir, a.files)
 	if err != nil {
 		rollbackFile(target, data, existed)
 		return err
@@ -63,10 +60,7 @@ func (a *Agent) patchPrimary(patch func(string) error) error {
 // Select updates this session and primary config defaults; callers must wait for an idle turn.
 func (a *Agent) Select(provider, model, effort string) error {
 	prev := a.settings
-	target := a.primaryConfig
-	if target == "" {
-		target = filepath.Join(a.home, "config.toml")
-	}
+	target := a.PrimaryConfig()
 	data, existed := readFileIfExists(target)
 	err := a.patchPrimary(func(path string) error {
 		return patchRootKeys(path, map[string]string{"provider": provider, "model": model, "effort": effort})

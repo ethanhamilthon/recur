@@ -24,7 +24,7 @@ func TestStatusEventsDeliveredWithoutHooks(t *testing.T) {
 		t.Fatal("StatusEvents returned nil channel")
 	}
 
-	a.Fire("turn_start", "RECUR_TURN_SOURCE", "user", "CUSTOM_VAR", "val")
+	a.Fire("turn_start", "RECUR_TURN_SOURCE", "user", "CUSTOM_VAR", "val", "RECUR_MODE", "headless")
 
 	select {
 	case ev := <-ch:
@@ -43,6 +43,10 @@ func TestStatusEventsDeliveredWithoutHooks(t *testing.T) {
 		// Non-allowlisted scalar is filtered out early in status bridge
 		if _, ok := ev["CUSTOM_VAR"]; ok {
 			t.Fatalf("expected CUSTOM_VAR to be filtered out, but found: %q", ev["CUSTOM_VAR"])
+		}
+		// RECUR_MODE is exported to hooks only, never to status environments.
+		if _, ok := ev["RECUR_MODE"]; ok {
+			t.Fatalf("expected RECUR_MODE to be filtered out, but found: %q", ev["RECUR_MODE"])
 		}
 	default:
 		t.Fatal("expected status event to be delivered")

@@ -417,20 +417,14 @@ func (c *Controller) stateLocked() StateInfo {
 	return info
 }
 
-// projectConfigLocked reports whether dest lives in the project tree.
+// projectConfigLocked reports whether dest is the project file: ./recur.toml of
+// the session's project directory. The global $RECUR_HOME/recur.toml is never a
+// project file, even when its basename matches.
 func (c *Controller) projectConfigLocked(dest string) bool {
-	if dest == "" {
+	if dest == "" || c.a.LocalConfig == "" {
 		return false
 	}
-	if c.a.LocalConfig != "" || filepath.Base(dest) == "recur.toml" {
-		return true
-	}
-	if cwd := c.a.REPL.Dir; cwd != "" {
-		clean := filepath.Clean(dest)
-		return clean == filepath.Clean(filepath.Join(cwd, "recur.toml")) ||
-			clean == filepath.Clean(filepath.Join(cwd, ".recur", "config.toml"))
-	}
-	return false
+	return filepath.Clean(dest) == filepath.Join(c.a.LocalConfig, "recur.toml")
 }
 
 // sanitizeURL drops credentials and query strings from a provider base URL.

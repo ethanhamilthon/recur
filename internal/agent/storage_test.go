@@ -14,7 +14,7 @@ func TestGlobalHomeDefaultsAndMissingFiles(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("RECUR_HOME", "")
-	a, err := New(t.TempDir())
+	a, err := New(t.TempDir(), ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,11 +25,11 @@ func TestGlobalHomeDefaultsAndMissingFiles(t *testing.T) {
 	if a.System != "You are Recur, a coding agent" {
 		t.Fatalf("unexpected default system: %q", a.System)
 	}
-	cfgPath := filepath.Join(a.home, "config.toml")
+	cfgPath := filepath.Join(a.home, "recur.toml")
 	if err := os.WriteFile(cfgPath, []byte("system = 'Keep this prompt'\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	b, err := New(a.REPL.Dir)
+	b, err := New(a.Shell.Dir, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestScopedJSONLSessionsResumeAndCheckpoint(t *testing.T) {
 	if err := os.Mkdir(cwd, 0700); err != nil {
 		t.Fatal(err)
 	}
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestScopedJSONLSessionsResumeAndCheckpoint(t *testing.T) {
 	if !reflect.DeepEqual(want, a.Records()) {
 		t.Fatal("metadata lost on resume")
 	}
-	b, err := New(cwd)
+	b, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestScopedJSONLSessionsResumeAndCheckpoint(t *testing.T) {
 	}
 	b.Close()
 	a.Close() // release ownership so the session can be reopened
-	resumed, err := New(cwd, id)
+	resumed, err := New(cwd, ConfigFiles{}, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,11 +96,11 @@ func TestScopedJSONLSessionsResumeAndCheckpoint(t *testing.T) {
 	if resumed.HistoryPath != first || !reflect.DeepEqual(want, resumed.Records()) {
 		t.Fatal("explicit resume did not restore session")
 	}
-	other, err := New(filepath.Join(t.TempDir(), "project"))
+	other, err := New(filepath.Join(t.TempDir(), "project"), ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer other.REPL.Close()
+	defer other.Shell.Close()
 	if other.sessionsDir == a.sessionsDir {
 		t.Fatal("same-basename projects collided")
 	}
@@ -145,7 +145,7 @@ func TestScopedJSONLSessionsResumeAndCheckpoint(t *testing.T) {
 
 func TestSessionSwitchPreservesStatusBridgeAndVersion(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
-	a, err := New(t.TempDir())
+	a, err := New(t.TempDir(), ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 // TestInterfaceEvents covers the events only the interface can know about:
@@ -23,7 +23,7 @@ func TestInterfaceEvents(t *testing.T) {
 	m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
 	release()
 	m = awaitIdle(t, m)
-	cmd := m.acceptClipboard(clipboardResult{generation: m.pasteGeneration, image: repl.Image{URL: "data:image/png;base64,AA=="}})
+	cmd := m.acceptClipboard(clipboardResult{generation: m.pasteGeneration, image: shell.Image{URL: "data:image/png;base64,AA=="}})
 	_ = cmd
 	m.input.SetValue("/compact")
 	m = key(m, tea.KeyMsg{Type: tea.KeyEnter})

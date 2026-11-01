@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 func TestRecordsForLegacyItems(t *testing.T) {
@@ -68,7 +68,7 @@ func TestFullTurnLiveAndHistory(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	a, err := New(dir)
+	a, err := New(dir, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestFullTurnLiveAndHistory(t *testing.T) {
 		t.Fatalf("summary or context wrong: %+v", final.Meta)
 	}
 	a.Close() // release ownership so the session can be reopened
-	restored, err := New(dir, a.SessionInfo()["id"].(string))
+	restored, err := New(dir, ConfigFiles{}, a.SessionInfo()["id"].(string))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestItemContentIsLiveAndSurvivesFailedStream(t *testing.T) {
 	}))
 	defer server.Close()
 	dir := t.TempDir()
-	a, err := New(dir)
+	a, err := New(dir, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestItemContentIsLiveAndSurvivesFailedStream(t *testing.T) {
 		t.Fatalf("live=%+v err=%v", live, err)
 	}
 	a.Close() // release ownership so the session can be reopened
-	restored, err := New(dir, a.SessionInfo()["id"].(string))
+	restored, err := New(dir, ConfigFiles{}, a.SessionInfo()["id"].(string))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestUnavailableUsageStaysUnknown(t *testing.T) {
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}\n\n")
 	}))
 	defer server.Close()
-	a, err := New(t.TempDir())
+	a, err := New(t.TempDir(), ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestReasoningSummaryCanBeDisabled(t *testing.T) {
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n")
 	}))
 	defer server.Close()
-	a := &Agent{REPL: &repl.REPL{}}
+	a := &Agent{Shell: &shell.Runner{}}
 	configureTestAgent(t, a, Settings{Provider: "p", Model: "m", ReasoningSummary: "off", Providers: map[string]Provider{"p": {BaseURL: server.URL}}})
 	if _, err := a.request(context.Background(), func(Event) {}); err != nil {
 		t.Fatal(err)
@@ -231,7 +231,7 @@ func TestOmittedCacheUsageStaysUnknown(t *testing.T) {
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[],\"usage\":{\"input_tokens\":100,\"output_tokens\":20}}}\n\n")
 	}))
 	defer server.Close()
-	a := &Agent{REPL: &repl.REPL{}}
+	a := &Agent{Shell: &shell.Runner{}}
 	configureTestAgent(t, a, Settings{Provider: "p", Model: "m", Providers: map[string]Provider{"p": {BaseURL: server.URL}}})
 	if _, err := a.request(context.Background(), func(Event) {}); err != nil {
 		t.Fatal(err)

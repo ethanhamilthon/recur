@@ -11,12 +11,12 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 type clipboardResult struct {
 	generation int
-	image      repl.Image
+	image      shell.Image
 	text       string
 	err        error
 }
@@ -59,24 +59,24 @@ function run(argv) {
 
 type clipboardRunner func(context.Context, int, string, ...string) ([]byte, error)
 
-func readClipboard(ctx context.Context, directory string) (repl.Image, string, error) {
+func readClipboard(ctx context.Context, directory string) (shell.Image, string, error) {
 	return readClipboardWith(ctx, directory, runtime.GOOS, clipboardCommand)
 }
-func readClipboardWith(ctx context.Context, directory, platform string, run clipboardRunner) (repl.Image, string, error) {
+func readClipboardWith(ctx context.Context, directory, platform string, run clipboardRunner) (shell.Image, string, error) {
 	if directory == "" {
 		directory = filepath.Join(os.TempDir(), "recur-images")
 	}
 	if err := os.MkdirAll(directory, 0700); err != nil {
-		return repl.Image{}, "", err
+		return shell.Image{}, "", err
 	}
 	file, err := os.CreateTemp(directory, "paste-*.png")
 	if err != nil {
-		return repl.Image{}, "", err
+		return shell.Image{}, "", err
 	}
 	path := file.Name()
 	if err = file.Close(); err != nil {
 		os.Remove(path)
-		return repl.Image{}, "", err
+		return shell.Image{}, "", err
 	}
 	keep := false
 	defer func() {
@@ -90,12 +90,12 @@ func readClipboardWith(ctx context.Context, directory, platform string, run clip
 	if platform == "darwin" {
 		result, e := run(ctx, 4096, "/usr/bin/osascript", "-l", "JavaScript", "-e", clipboardPNG, path)
 		if e != nil {
-			return repl.Image{}, "", e
+			return shell.Image{}, "", e
 		}
 		if strings.TrimSpace(string(result)) == "image" {
-			image, e := repl.CaptureImage(path)
+			image, e := shell.CaptureImage(path)
 			if e != nil {
-				return repl.Image{}, "", e
+				return shell.Image{}, "", e
 			}
 			image.Path, keep = path, true
 			return image, "", nil
@@ -104,38 +104,38 @@ func readClipboardWith(ctx context.Context, directory, platform string, run clip
 	} else if _, e := exec.LookPath("wl-paste"); e == nil && os.Getenv("WAYLAND_DISPLAY") != "" {
 		types, e := run(ctx, 16384, "wl-paste", "--list-types")
 		if e != nil {
-			return repl.Image{}, "", e
+			return shell.Image{}, "", e
 		}
 		if strings.Contains(string(types), "image/png") {
-			data, err = run(ctx, repl.MaxImageInputBytes, "wl-paste", "--type", "image/png")
+			data, err = run(ctx, shell.MaxImageInputBytes, "wl-paste", "--type", "image/png")
 		}
 		textCommand, textArgs = "wl-paste", []string{"--no-newline"}
 	} else {
 		types, e := run(ctx, 16384, "xclip", "-selection", "clipboard", "-t", "TARGETS", "-o")
 		if e != nil {
-			return repl.Image{}, "", e
+			return shell.Image{}, "", e
 		}
 		if strings.Contains(string(types), "image/png") {
-			data, err = run(ctx, repl.MaxImageInputBytes, "xclip", "-selection", "clipboard", "-t", "image/png", "-o")
+			data, err = run(ctx, shell.MaxImageInputBytes, "xclip", "-selection", "clipboard", "-t", "image/png", "-o")
 		}
 		textCommand, textArgs = "xclip", []string{"-selection", "clipboard", "-o"}
 	}
 	if err != nil {
-		return repl.Image{}, "", err
+		return shell.Image{}, "", err
 	}
 	if len(data) > 0 {
 		if err = os.WriteFile(path, data, 0600); err != nil {
-			return repl.Image{}, "", err
+			return shell.Image{}, "", err
 		}
-		image, e := repl.CaptureImage(path)
+		image, e := shell.CaptureImage(path)
 		if e != nil {
-			return repl.Image{}, "", e
+			return shell.Image{}, "", e
 		}
 		image.Path, keep = path, true
 		return image, "", nil
 	}
 	text, err := run(ctx, 256*1024, textCommand, textArgs...)
-	return repl.Image{}, string(text), err
+	return shell.Image{}, string(text), err
 }
 func (m model) pasteClipboard() (tea.Model, tea.Cmd) {
 	if m.pasting {

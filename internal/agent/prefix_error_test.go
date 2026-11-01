@@ -14,7 +14,7 @@ import (
 
 func TestCancelledTurnDoesNotCommitRequest(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
-	a, err := New(t.TempDir())
+	a, err := New(t.TempDir(), ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestSaveFailurePropagatesAfterSuccessfulTurn(t *testing.T) {
 	}))
 	defer server.Close()
 	cwd := t.TempDir()
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestInputDirectlyCommittedWithoutPrefixNotice(t *testing.T) {
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n")
 	}))
 	defer server.Close()
-	a, err := New(t.TempDir())
+	a, err := New(t.TempDir(), ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}

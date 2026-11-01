@@ -20,7 +20,7 @@ func TestConfigFileOverridesLocalAndSurvivesReload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestConfigFileOverridesLocalAndSurvivesReload(t *testing.T) {
 	}
 	a.Close()
 
-	a, err = NewWith(cwd, ConfigFiles{Config: flagged})
+	a, err = New(cwd, ConfigFiles{Config: flagged})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestConfigFileOverridesLocalAndSurvivesReload(t *testing.T) {
 	if err = a.Reload(); err != nil || a.System != "flag" {
 		t.Fatalf("reload: %q %v", a.System, err)
 	}
-	if _, err = NewWith(cwd, ConfigFiles{Config: "/nonexistent"}); err == nil {
+	if _, err = New(cwd, ConfigFiles{Config: "/nonexistent"}); err == nil {
 		t.Fatal("missing --config file must fail")
 	}
 }

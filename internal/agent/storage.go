@@ -33,7 +33,7 @@ func (a *Agent) openProject(cwd string, target ...string) error {
 	if err != nil {
 		return err
 	}
-	a.REPL.Dir = filepath.Clean(absolute)
+	a.Shell.Dir = filepath.Clean(absolute)
 	a.sessionsDir, err = projectDirectory(cwd, a.home)
 	if err != nil {
 		return err
@@ -161,7 +161,7 @@ func sessionSummary(path string) SessionSummary {
 func (a *Agent) sessionData() ([]byte, error) {
 	var buffer bytes.Buffer
 	encoder := json.NewEncoder(&buffer)
-	if err := encoder.Encode(sessionLine{Version: 2, CWD: a.REPL.Dir, Title: a.title, Selection: a.selection()}); err != nil {
+	if err := encoder.Encode(sessionLine{Version: 2, CWD: a.Shell.Dir, Title: a.title, Selection: a.selection()}); err != nil {
 		return nil, err
 	}
 	var derived []Record
@@ -206,7 +206,7 @@ func (a *Agent) readSession() error {
 		}
 		if i == 0 {
 			selection, title = entry.Selection, entry.Title
-			if entry.Version != 2 || entry.CWD != a.REPL.Dir {
+			if entry.Version != 2 || entry.CWD != a.Shell.Dir {
 				return fmt.Errorf("unsupported session version or project mismatch")
 			}
 		} else if entry.Complete {

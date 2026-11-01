@@ -34,7 +34,7 @@ func TestBottomBarShortensWorkingDirectory(t *testing.T) {
 	if err != nil || home == "" || home == string(filepath.Separator) {
 		t.Skip("no usable home directory")
 	}
-	a, err := agent.New(t.TempDir())
+	a, err := agent.New(t.TempDir(), agent.ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}

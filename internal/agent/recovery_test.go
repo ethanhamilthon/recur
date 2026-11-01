@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"recur/internal/hooks"
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 func TestCompletedItemSavedBeforeResponseFinishes(t *testing.T) {
@@ -30,7 +30,7 @@ func TestCompletedItemSavedBeforeResponseFinishes(t *testing.T) {
 	}))
 	defer server.Close()
 	dir := t.TempDir()
-	a, err := New(dir)
+	a, err := New(dir, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestCompletedItemSavedBeforeResponseFinishes(t *testing.T) {
 		t.Fatal("stream stalled")
 	}
 	// Read the committed snapshot while the writer is still in the response.
-	b := &Agent{HistoryPath: a.HistoryPath, REPL: &repl.REPL{Dir: a.REPL.Dir}, settings: a.settings}
+	b := &Agent{HistoryPath: a.HistoryPath, Shell: &shell.Runner{Dir: a.Shell.Dir}, settings: a.settings}
 	if err = b.readSession(); err != nil {
 		close(release)
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestInterruptedCallsRecoveredWithoutRerunning(t *testing.T) {
 
 func TestCrashDuringSecondToolKeepsFirstResult(t *testing.T) {
 	if os.Getenv("RECUR_CRASH_HELPER") == "1" {
-		a, err := New(os.Getenv("CRASH_DIR"))
+		a, err := New(os.Getenv("CRASH_DIR"), ConfigFiles{})
 		if err != nil {
 			os.Exit(2)
 		}
@@ -153,7 +153,7 @@ func TestCrashDuringSecondToolKeepsFirstResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = cmd.Wait()
-	a, err := New(dir)
+	a, err := New(dir, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestOrphanRepairedBeforeReadyHookOutputsInCapturedRequest(t *testing.T) {
 	defer server.Close()
 
 	dir := t.TempDir()
-	a, err := New(dir)
+	a, err := New(dir, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}

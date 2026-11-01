@@ -12,7 +12,7 @@ import (
 	"sync"
 	"testing"
 
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 func TestImageInputAndSteeringPersist(t *testing.T) {
@@ -38,14 +38,14 @@ func TestImageInputAndSteeringPersist(t *testing.T) {
 	}))
 	defer server.Close()
 	cwd := t.TempDir()
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	configureTestAgent(t, a, Settings{Provider: "p", Model: "m", Providers: map[string]Provider{"p": {BaseURL: server.URL}}})
 	queue := &Steering{}
-	queue.PushInput(Input{Text: "second image", Images: []repl.Image{{URL: "data:image/png;base64,second", Path: "/private/original/second.png"}}})
-	input := Input{Images: []repl.Image{{URL: "data:image/png;base64,first", Path: "/private/original/first.png"}}}
+	queue.PushInput(Input{Text: "second image", Images: []shell.Image{{URL: "data:image/png;base64,second", Path: "/private/original/second.png"}}})
+	input := Input{Images: []shell.Image{{URL: "data:image/png;base64,first", Path: "/private/original/first.png"}}}
 	if err = a.RunInput(context.Background(), input, func(Event) {}, queue); err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestImageInputAndSteeringPersist(t *testing.T) {
 	path := a.HistoryPath
 	id := a.SessionInfo()["id"].(string)
 	a.Close()
-	restored, err := New(cwd, id)
+	restored, err := New(cwd, ConfigFiles{}, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestImageInputAndSteeringPersist(t *testing.T) {
 func TestImageSteeringRecallVersusAcceptance(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		queue := &Steering{}
-		queue.PushInput(Input{Text: "caption", Images: []repl.Image{{URL: "data", Path: "test.png"}}})
+		queue.PushInput(Input{Text: "caption", Images: []shell.Image{{URL: "data", Path: "test.png"}}})
 		var accepted []Input
 		var recalled Input
 		var ok bool
@@ -95,7 +95,7 @@ func TestInputDisplayDoesNotAlterPlainText(t *testing.T) {
 	if (Input{Text: text}).Display() != text {
 		t.Fatal("plain message whitespace changed")
 	}
-	if got := (Input{Text: "look", Images: []repl.Image{{Path: filepath.Join("folder", "photo.png")}}}).Display(); got != "look\n[Image: photo.png]" {
+	if got := (Input{Text: "look", Images: []shell.Image{{Path: filepath.Join("folder", "photo.png")}}}).Display(); got != "look\n[Image: photo.png]" {
 		t.Fatal(got)
 	}
 }

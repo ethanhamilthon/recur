@@ -10,8 +10,9 @@ import (
 	"strings"
 
 	"recur/internal/agent"
-	"recur/internal/repl"
+	"recur/internal/docs"
 	"recur/internal/selfupdate"
+	"recur/internal/shell"
 	"recur/internal/tui"
 )
 
@@ -25,7 +26,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 	if len(args) > 0 && command == "" {
 		switch args[0] {
 		case "docs":
-			return repl.Docs(out, args[1:])
+			return docs.Docs(out, args[1:])
 		case "update":
 			return selfupdate.Run(ctx, tui.Version, args[1:], out)
 		case "version":
@@ -38,7 +39,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 	mode := flags.String("mode", "", "headless JSON/stdio transport: jsonl")
 	sessionID := flags.String("s", "", "target session for notify/view (default: $RECUR_ENDPOINT)")
 	resume := flags.String("resume", "", "resume a project session ID")
-	configPath := flags.String("config", "", "configuration file (overrides recur.toml and $RECUR_HOME/config.toml)")
+	configPath := flags.String("config", "", "configuration file (overrides recur.toml and $RECUR_HOME/recur.toml)")
 	flags.StringVar(configPath, "c", "", "alias for --config")
 	noExtend := flags.Bool("no-extend", false, "skip inheriting from global configuration")
 	if err := flags.Parse(args); err != nil {
@@ -78,7 +79,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 			return err
 		}
 	}
-	a, err := agent.NewWith(cwd, files, *resume)
+	a, err := agent.New(cwd, files, *resume)
 	if err != nil {
 		return err
 	}
@@ -101,7 +102,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 // view queues PNG/JPEG images for the session's next model request.
 func view(cwd, id string, paths []string) error {
 	if len(paths) == 0 {
-		return fmt.Errorf("usage: recur view PATH...")
+		return fmt.Errorf("usage: recur view PATH [PATH ...]")
 	}
 	endpoint, err := agent.Endpoint(cwd, id)
 	if err != nil {
@@ -116,7 +117,7 @@ func view(cwd, id string, paths []string) error {
 		home = filepath.Join(home, ".recur")
 	}
 	for _, path := range paths {
-		image, err := repl.CaptureImageCopy(path, filepath.Join(home, "attachments"))
+		image, err := shell.CaptureImageCopy(path, filepath.Join(home, "attachments"))
 		if err != nil {
 			return fmt.Errorf("%s: %w", path, err)
 		}

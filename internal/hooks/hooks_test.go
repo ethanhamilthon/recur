@@ -13,29 +13,6 @@ import (
 	"time"
 )
 
-func TestParseValidatesHooks(t *testing.T) {
-	list, err := Parse("[[hook]]\nevent = \"turn_start\"\ncommand = \"true\"\n\n[[hook]]\nevents = [\"turn_end\", \"idle\"]\ncommand = \"true\"\ntimeout = 5\n")
-	if err != nil || len(list) != 2 || list[0].Events[0] != "turn_start" || len(list[1].Events) != 2 || list[1].Timeout != 5 {
-		t.Fatalf("list=%+v err=%v", list, err)
-	}
-	if list, err = Parse("# only comments\n"); err != nil || len(list) != 0 {
-		t.Fatalf("empty file: %v %v", list, err)
-	}
-	for name, text := range map[string]string{
-		"unknown event":   "[[hook]]\nevent = \"turn_begin\"\ncommand = \"true\"\n",
-		"no command":      "[[hook]]\nevent = \"idle\"\n",
-		"no event":        "[[hook]]\ncommand = \"true\"\n",
-		"unknown field":   "[[hook]]\nevent = \"idle\"\ncmd = \"true\"\n",
-		"timeout too big": "[[hook]]\nevent = \"idle\"\ncommand = \"true\"\ntimeout = 601\n",
-		"negative":        "[[hook]]\nevent = \"idle\"\ncommand = \"true\"\ntimeout = -1\n",
-		"syntax":          "[[hook]\n",
-	} {
-		if _, err := Parse(text); err == nil {
-			t.Errorf("%s: expected an error", name)
-		}
-	}
-}
-
 func read(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -136,7 +113,7 @@ func TestNilAndEmptyRunnersAreHarmless(t *testing.T) {
 }
 
 func TestEveryEventIsDocumented(t *testing.T) {
-	doc := read(t, filepath.Join("..", "repl", "docs", "hooks.md"))
+	doc := read(t, filepath.Join("..", "docs", "docs", "hooks.md"))
 	for _, event := range Events {
 		if !strings.Contains(doc, "`"+event+"`") {
 			t.Errorf("event %s is missing from recur docs hooks", event)
@@ -186,20 +163,6 @@ func TestSendOutputQueuesResultForSession(t *testing.T) {
 	// Drain again yields nothing (drained once)
 	if out := r.DrainOutputs("sess-1"); len(out) != 0 {
 		t.Fatalf("expected 0 outputs after drain, got %v", out)
-	}
-}
-
-func TestDisabledHookMayOmitCommand(t *testing.T) {
-	tomlText := `
-[hooks.disabled]
-enabled = false
-`
-	list, err := Parse(tomlText)
-	if err != nil {
-		t.Fatalf("unexpected error parsing disabled hook: %v", err)
-	}
-	if len(list) != 1 || list[0].Name != "disabled" || boolVal(list[0].Enabled) {
-		t.Fatalf("unexpected list: %+v", list)
 	}
 }
 

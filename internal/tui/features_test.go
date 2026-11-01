@@ -66,7 +66,7 @@ func TestUpRecallsOnlyPendingSteeringOnEmptyInput(t *testing.T) {
 func TestResumeAutocompleteIsScopedAndExecutesSelectedSession(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
 	cwd := t.TempDir()
-	a, err := agent.New(cwd)
+	a, err := agent.New(cwd, agent.ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestResumeAutocompleteIsScopedAndExecutesSelectedSession(t *testing.T) {
 	if err = a.NewSession(); err != nil {
 		t.Fatal(err)
 	}
-	b, err := agent.New(t.TempDir())
+	b, err := agent.New(t.TempDir(), agent.ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestResumeWaitsAndUIErrorsStayOutOfAPIHistory(t *testing.T) {
 
 func TestResumeCompletionWindowKeepsSelectionVisible(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
-	a, err := agent.New(t.TempDir())
+	a, err := agent.New(t.TempDir(), agent.ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestResumeCompletionWindowKeepsSelectionVisible(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	m := newModel(a, a.REPL.Dir)
+	m := newModel(a, a.Shell.Dir)
 	m.input.SetValue("/resume")
 	matches := m.completions()
 	m.selected = len(matches) - 1

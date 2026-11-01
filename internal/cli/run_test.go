@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"recur/internal/agent"
-	"recur/internal/repl"
+	"recur/internal/docs"
 )
 
 func TestHeadlessSessionsResumeAndFreshStart(t *testing.T) {
@@ -125,7 +125,7 @@ func TestHeadlessRejectsOwnedSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writer, err := agent.New(cwd)
+	writer, err := agent.New(cwd, agent.ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestHeadlessRejectsOwnedSession(t *testing.T) {
 func TestShellCommandsUseEndpoint(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
 	cwd := t.TempDir()
-	a, err := agent.New(cwd)
+	a, err := agent.New(cwd, agent.ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestShellCommandsUseEndpoint(t *testing.T) {
 	if err = Run(context.Background(), []string{"notify", "hi"}, strings.NewReader(""), io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "-s") {
 		t.Fatalf("notify outside a shell: %v", err)
 	}
-	result, err := a.REPL.Execute(context.Background(), `echo "$RECUR_ENDPOINT"`, time.Second)
+	result, err := a.Shell.Execute(context.Background(), `echo "$RECUR_ENDPOINT"`, time.Second)
 	if err != nil || result.Error {
 		t.Fatal(result, err)
 	}
@@ -210,7 +210,7 @@ func TestEveryFlagIsDocumented(t *testing.T) {
 		t.Fatal(err)
 	}
 	var doc bytes.Buffer
-	if err := repl.Docs(&doc, []string{"cli"}); err != nil {
+	if err := docs.Docs(&doc, []string{"cli"}); err != nil {
 		t.Fatal(err)
 	}
 	found := 0

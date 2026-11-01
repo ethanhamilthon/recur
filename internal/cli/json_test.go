@@ -84,7 +84,7 @@ func (p *provider) configure(t *testing.T, extra string) string {
 	home := t.TempDir()
 	t.Setenv("RECUR_HOME", home)
 	config := fmt.Sprintf("provider='test'\nmodel='m'\n%s[providers.test]\nbase_url=%q\n", extra, p.server.URL)
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "recur.toml"), []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}
 	return home
@@ -758,7 +758,7 @@ func TestJSONProtocolBrokenStdoutDuringEOFDrainCancelsWork(t *testing.T) {
 // openTestAgent opens a session in the test project directory.
 func openTestAgent(t *testing.T) *agent.Agent {
 	t.Helper()
-	a, err := agent.New(t.TempDir())
+	a, err := agent.New(t.TempDir(), agent.ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}

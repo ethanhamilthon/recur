@@ -39,7 +39,7 @@ Recur doesn't tell you how to code. It lets you build the context where an AI co
 
 `recur.toml` is the only file you need to think about. All configuration lives here: UI, providers/models, hooks, system prompt, agent behavior, and more.
 
-By default Recur reads `~/.recur/config.toml`. If the current directory has a `recur.toml`, it is applied on top of the global config. You can also pass a config explicitly: `recur -config example.toml`.
+Recur reads `./recur.toml` from the project root, layered over the global `~/.recur/recur.toml`; precedence, merge rules and every key are in `recur docs config`.
 
 A minimal config:
 

@@ -9,7 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 	"recur/internal/agent"
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 // composerModel returns a model whose composer holds value, sized to width x height.
@@ -195,7 +195,7 @@ func TestComposerCtrlCCopiesInsteadOfQuit(t *testing.T) {
 
 func TestComposerCtrlXCutsSelectionKeepsImages(t *testing.T) {
 	m := selectBrave(t)
-	m.images = []repl.Image{{URL: "data:image/png;base64,one"}}
+	m.images = []shell.Image{{URL: "data:image/png;base64,one"}}
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
 	m = next.(model)
 	if cmd == nil {
@@ -209,7 +209,7 @@ func TestComposerCtrlXCutsSelectionKeepsImages(t *testing.T) {
 	}
 
 	m = composerModel("hello world", 40, 20)
-	m.images = []repl.Image{{URL: "data:image/png;base64,one"}}
+	m.images = []shell.Image{{URL: "data:image/png;base64,one"}}
 	m = update(m, tea.KeyMsg{Type: tea.KeyCtrlX})
 	if len(m.images) != 0 {
 		t.Fatal("ctrl+x without a selection did not remove the image")

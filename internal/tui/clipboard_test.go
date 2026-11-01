@@ -20,7 +20,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"recur/internal/agent"
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 func pngBytes(t *testing.T) []byte {
@@ -97,7 +97,7 @@ func TestLinuxClipboardImageBackends(t *testing.T) {
 			calls := 0
 			run := func(_ context.Context, limit int, name string, args ...string) ([]byte, error) {
 				calls++
-				if calls == 2 && limit != repl.MaxImageInputBytes {
+				if calls == 2 && limit != shell.MaxImageInputBytes {
 					t.Fatal("Linux clipboard still limits original bytes before resizing")
 				}
 				expected := "xclip"
@@ -136,7 +136,7 @@ func TestImageAttachmentPreviewRemovalAndStaleResult(t *testing.T) {
 	if err := os.WriteFile(file, pngBytes(t), 0600); err != nil {
 		t.Fatal(err)
 	}
-	img, err := repl.CaptureImage(file)
+	img, err := shell.CaptureImage(file)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestImageAttachmentPreviewRemovalAndStaleResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.pasteGeneration = 2
-	m.acceptClipboard(clipboardResult{generation: 1, image: repl.Image{URL: "data", Path: file}})
+	m.acceptClipboard(clipboardResult{generation: 1, image: shell.Image{URL: "data", Path: file}})
 	if len(m.images) != 0 {
 		t.Fatal("stale image crossed session boundary")
 	}
@@ -171,7 +171,7 @@ func TestImageAttachmentPreviewRemovalAndStaleResult(t *testing.T) {
 func TestAttachmentQueueRecallAndCancellationRecovery(t *testing.T) {
 	m, release := busyModel(t)
 	defer release()
-	m.images = []repl.Image{{URL: "data:image/png;base64,one", Path: "one.png"}}
+	m.images = []shell.Image{{URL: "data:image/png;base64,one", Path: "one.png"}}
 	m.input.SetValue("look")
 	m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if len(m.images) != 0 || len(m.ctl.Status().Queued) != 1 || len(m.ctl.Status().Queued[0].Images) != 1 {
@@ -259,7 +259,7 @@ func TestClipboardShortcutDecodesFromTerminalBytes(t *testing.T) {
 func TestPendingImagesPreventDestructiveSessionSwitch(t *testing.T) {
 	m := newModel(&agent.Agent{}, "/project")
 	m.input.SetValue("caption")
-	m.images = []repl.Image{{URL: "data", Path: "draft.png"}}
+	m.images = []shell.Image{{URL: "data", Path: "draft.png"}}
 	next, cmd := m.runCommand("/new")
 	m = next.(model)
 	if cmd != nil || m.input.Value() != "caption" || len(m.images) != 1 {
@@ -269,13 +269,13 @@ func TestPendingImagesPreventDestructiveSessionSwitch(t *testing.T) {
 func TestClipboardPendingLimitAndPickerRejection(t *testing.T) {
 	m := newModel(&agent.Agent{}, "/project")
 	for i := 0; i < 8; i++ {
-		m.images = append(m.images, repl.Image{URL: "data", Path: fmt.Sprint(i)})
+		m.images = append(m.images, shell.Image{URL: "data", Path: fmt.Sprint(i)})
 	}
 	file := filepath.Join(t.TempDir(), "extra.png")
 	if err := os.WriteFile(file, pngBytes(t), 0600); err != nil {
 		t.Fatal(err)
 	}
-	m.acceptClipboard(clipboardResult{image: repl.Image{URL: "data", Path: file}})
+	m.acceptClipboard(clipboardResult{image: shell.Image{URL: "data", Path: file}})
 	if len(m.images) != 8 {
 		t.Fatal("pending image limit ignored")
 	}
@@ -288,7 +288,7 @@ func TestClipboardPendingLimitAndPickerRejection(t *testing.T) {
 	if err := os.WriteFile(file, pngBytes(t), 0600); err != nil {
 		t.Fatal(err)
 	}
-	m.acceptClipboard(clipboardResult{image: repl.Image{URL: "data", Path: file}})
+	m.acceptClipboard(clipboardResult{image: shell.Image{URL: "data", Path: file}})
 	if len(m.images) != 0 {
 		t.Fatal("image inserted into provider wizard")
 	}

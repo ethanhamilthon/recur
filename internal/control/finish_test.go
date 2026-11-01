@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"recur/internal/agent"
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 // These tests drive the finish rules on operations that never ran a model
@@ -51,10 +51,10 @@ func TestFinishedTurnPromotesQueuedInputsInOrder(t *testing.T) {
 
 func TestWithdrawnTurnReturnsOriginalThenQueuedAsUnsent(t *testing.T) {
 	h := newHarness(t, &fakeModel{}, "")
-	image := repl.Image{URL: "data:image/png;base64,AA==", Path: "original.png"}
+	image := shell.Image{URL: "data:image/png;base64,AA==", Path: "original.png"}
 	var op *operation
 	h.c.view(func() {
-		op = h.c.startLocked("turn", []repl.Image{image})
+		op = h.c.startLocked("turn", []shell.Image{image})
 		h.c.queued = []agent.Input{{Text: "queued"}}
 	})
 	h.c.observe(op, agent.Event{Kind: "withdraw", Text: "original request"})
@@ -90,11 +90,11 @@ func TestWithdrawnTurnReturnsFileSnapshotPaths(t *testing.T) {
 
 func TestSessionSwitchRefusedWhileImagesAreReturnedUnsent(t *testing.T) {
 	h := newHarness(t, &fakeModel{}, "")
-	image := repl.Image{URL: "data:image/png;base64,AA==", Path: "kept.png"}
+	image := shell.Image{URL: "data:image/png;base64,AA==", Path: "kept.png"}
 	before := h.a.HistoryPath
 	var op *operation
 	h.c.view(func() {
-		op = h.c.startLocked("turn", []repl.Image{image})
+		op = h.c.startLocked("turn", []shell.Image{image})
 		h.c.deferred = &deferredAction{kind: "new"}
 	})
 	h.c.observe(op, agent.Event{Kind: "withdraw", Text: "with image"})

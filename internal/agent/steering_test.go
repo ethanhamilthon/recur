@@ -63,7 +63,7 @@ func TestSteeringAtSafeBoundaries(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			a, err := New(t.TempDir())
+			a, err := New(t.TempDir(), ConfigFiles{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -87,7 +87,7 @@ func TestSteeringAtSafeBoundaries(t *testing.T) {
 				t.Fatalf("steering/live journal mismatch: requests=%d", requests)
 			}
 			a.Close() // release ownership so the session can be reopened
-			restored, err := New(a.REPL.Dir, a.SessionInfo()["id"].(string))
+			restored, err := New(a.Shell.Dir, ConfigFiles{}, a.SessionInfo()["id"].(string))
 			if err != nil {
 				t.Fatal(err)
 			}

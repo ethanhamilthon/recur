@@ -3,7 +3,7 @@ package agent
 import (
 	"encoding/json"
 
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 // interruptedOutputs closes incomplete call/output pairs without repeating effects.
@@ -31,7 +31,7 @@ func interruptedOutputs(history []json.RawMessage) []json.RawMessage {
 			continue
 		}
 		outputs[id] = true
-		value := repl.Result{Output: "Tool execution was interrupted; its effects and result are unknown. It was not rerun.", Error: true}
+		value := shell.Result{Output: "Tool execution was interrupted; its effects and result are unknown. It was not rerun.", Error: true}
 		result = append(result, raw(map[string]any{"type": "function_call_output", "call_id": id, "output": string(raw(value))}))
 	}
 	return result

@@ -21,11 +21,11 @@ func retryAgent(t *testing.T, handler http.HandlerFunc) (*Agent, *int, func()) {
 		handler(w, r)
 	}))
 	cwd := t.TempDir()
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.REPL.Dir = cwd
+	a.Shell.Dir = cwd
 	configureTestAgent(t, a, Settings{Provider: "p", Model: "m", Providers: map[string]Provider{"p": {BaseURL: server.URL}}})
 	return a, &calls, func() { a.Close(); server.Close() }
 }

@@ -44,14 +44,14 @@ func configureTestAgent(t *testing.T, a *Agent, s Settings) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = os.WriteFile(filepath.Join(a.home, "config.toml"), data, 0600); err != nil {
+	if err = os.WriteFile(filepath.Join(a.home, "recur.toml"), data, 0600); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestSessionSelectionDefaultsAndRestoration(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
-	a, err := New(t.TempDir())
+	a, err := New(t.TempDir(), ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestSessionSelectionDefaultsAndRestoration(t *testing.T) {
 
 func TestSessionGlobalAndContextMatchesRecords(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
-	a, err := New(t.TempDir())
+	a, err := New(t.TempDir(), ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,13 +107,13 @@ func TestSessionGlobalAndContextMatchesRecords(t *testing.T) {
 
 	n := int64(36679)
 	a.records = []Record{{Kind: "assistant", Meta: &Metadata{RequestID: "r-1", ContextInput: &n}}}
-	result, err := a.REPL.Execute(context.Background(), `echo "$RECUR_CTX_SIZE $RECUR_SESSION_ID"; sh -c 'echo "$RECUR_ENDPOINT"'`, time.Second)
+	result, err := a.Shell.Execute(context.Background(), `echo "$RECUR_CTX_SIZE $RECUR_SESSION_ID"; sh -c 'echo "$RECUR_ENDPOINT"'`, time.Second)
 	id := strings.TrimSuffix(filepath.Base(a.HistoryPath), ".jsonl")
 	if err != nil || result.Error || !strings.Contains(result.Output, "36679 "+id) || !strings.Contains(result.Output, filepath.Join(a.socketDir, "socket")) {
 		t.Fatalf("metadata: %+v %v", result, err)
 	}
 	a.records = append(a.records, Record{Kind: "assistant", Meta: &Metadata{RequestID: "r-2"}})
-	result, err = a.REPL.Execute(context.Background(), `echo "[$RECUR_CTX_SIZE]"`, time.Second)
+	result, err = a.Shell.Execute(context.Background(), `echo "[$RECUR_CTX_SIZE]"`, time.Second)
 	if err != nil || result.Error || result.Output != "[]\n" {
 		t.Fatalf("unknown context must be empty: %+v %v", result, err)
 	}
@@ -138,7 +138,7 @@ func TestModelListUsesSelectedProvider(t *testing.T) {
 
 func TestLegacyHeaderPinsCurrentDefaultsAndCorruptSelectionPreservesState(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
-	a, err := New(t.TempDir())
+	a, err := New(t.TempDir(), ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestLegacyHeaderPinsCurrentDefaultsAndCorruptSelectionPreservesState(t *tes
 
 func TestReloadPreservesSessionSelectionAndReloadsSettings(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
-	a, err := New(t.TempDir())
+	a, err := New(t.TempDir(), ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ api_key = "new"
 [providers.second]
 base_url = "https://second.example"
 `
-	if err = os.WriteFile(filepath.Join(a.home, "config.toml"), []byte(text), 0600); err != nil {
+	if err = os.WriteFile(filepath.Join(a.home, "recur.toml"), []byte(text), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err = a.Reload(); err != nil {
@@ -231,7 +231,7 @@ model = "global-model"
 [providers.second]
 base_url = "https://second.example"
 `
-	if err = os.WriteFile(filepath.Join(a.home, "config.toml"), []byte(textBad), 0600); err != nil {
+	if err = os.WriteFile(filepath.Join(a.home, "recur.toml"), []byte(textBad), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err = a.Reload(); err == nil {
@@ -291,11 +291,11 @@ model = "m1"
 base_url = "https://existing.example"
 api_key = "key1"
 `
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(initialConfig), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "recur.toml"), []byte(initialConfig), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,5 +313,38 @@ api_key = "key1"
 	}
 	if a.Settings().Model != "new-model-id" || a.Settings().Effort != "high" {
 		t.Fatalf("settings not updated: %+v", a.Settings())
+	}
+}
+
+// Without a project recur.toml, $RECUR_HOME/recur.toml is both the global layer
+// that is read and the file that /model writes.
+func TestGlobalRecurTomlIsReadAndWrittenWithoutProjectFile(t *testing.T) {
+	home, cwd := t.TempDir(), t.TempDir()
+	t.Setenv("RECUR_HOME", home)
+	global := filepath.Join(home, "recur.toml")
+	text := "provider = 'p'\nmodel = 'm1'\n\n[providers.p]\nbase_url = 'https://example.com/v1'\napi_key = 'k'\n"
+	if err := os.WriteFile(global, []byte(text), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a, err := New(cwd, ConfigFiles{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if a.Settings().Model != "m1" || a.PrimaryConfig() != global {
+		t.Fatalf("global recur.toml not loaded: model=%q primary=%q", a.Settings().Model, a.PrimaryConfig())
+	}
+	if err := a.Select("p", "m2", ""); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfiguration(home, cwd, ConfigFiles{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.settings.Model != "m2" || cfg.primary != global {
+		t.Fatalf("/model did not write %s: model=%q primary=%q", global, cfg.settings.Model, cfg.primary)
+	}
+	if _, err := os.Stat(filepath.Join(home, "config.toml")); !os.IsNotExist(err) {
+		t.Fatalf("selection wrote a config.toml: %v", err)
 	}
 }

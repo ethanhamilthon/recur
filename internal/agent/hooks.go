@@ -17,8 +17,8 @@ func (a *Agent) Fire(event string, kv ...string) {
 		"RECUR_MODEL":      a.settings.Model,
 		"RECUR_EFFORT":     a.settings.Effort,
 	}
-	if a.REPL != nil && a.REPL.Dir != "" {
-		vars["RECUR_CWD"] = a.REPL.Dir
+	if a.Shell != nil && a.Shell.Dir != "" {
+		vars["RECUR_CWD"] = a.Shell.Dir
 	}
 	if a.socketDir != "" {
 		vars["RECUR_ENDPOINT"] = filepath.Join(a.socketDir, "socket")

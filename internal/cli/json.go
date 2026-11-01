@@ -16,7 +16,7 @@ import (
 
 	"recur/internal/agent"
 	"recur/internal/control"
-	"recur/internal/repl"
+	"recur/internal/shell"
 	"recur/internal/tui"
 )
 
@@ -219,7 +219,7 @@ func prepare(c *control.Controller, cwd string, req control.Request, imagePaths,
 		return out, &control.Error{Code: "attachment_limit", Message: fmt.Sprintf("at most %d images per request", maxImagesPerInput)}
 	}
 	for _, path := range imagePaths {
-		image, err := repl.CaptureImageCopy(resolvePath(cwd, path), attachmentDirectory(settings, cwd))
+		image, err := shell.CaptureImageCopy(resolvePath(cwd, path), attachmentDirectory(settings, cwd))
 		if err != nil {
 			return out, &control.Error{Code: "invalid_image", Message: fmt.Sprintf("%s: %v", path, err)}
 		}
@@ -243,7 +243,7 @@ func resolvePath(cwd, path string) string {
 	return filepath.Join(cwd, path)
 }
 
-// attachmentDirectory keeps image snapshots where recur view keeps them.
+// attachmentDirectory returns attachment_dir when set, else $RECUR_HOME/attachments (recur view always uses the latter).
 func attachmentDirectory(settings agent.Settings, cwd string) string {
 	if dir := settings.AttachmentDir; dir != "" {
 		return resolvePath(cwd, dir)

@@ -29,7 +29,7 @@ api_key = "k1"
 events = ["turn_end"]
 command = "echo h1"
 `
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(globalCfg), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "recur.toml"), []byte(globalCfg), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -92,7 +92,7 @@ system = "initial system"
 [ui]
 max_code_lines = 100
 `
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(globalCfg), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "recur.toml"), []byte(globalCfg), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -124,19 +124,19 @@ func TestConfigArraysReplace(t *testing.T) {
 
 	globalCfg := `
 [ui]
-status-left = ["echo left1", "echo left2"]
-status-right = ["echo right1"]
+status_left = ["echo left1", "echo left2"]
+status_right = ["echo right1"]
 [hooks.test]
 events = ["turn_start", "turn_end"]
 command = "echo 1"
 `
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(globalCfg), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "recur.toml"), []byte(globalCfg), 0600); err != nil {
 		t.Fatal(err)
 	}
 
 	projectCfg := `
 [ui]
-status-left = []
+status_left = []
 [hooks.test]
 events = ["idle"]
 `
@@ -150,10 +150,10 @@ events = ["idle"]
 	}
 	s := cfg.settings
 	if len(s.StatusLeft) != 0 {
-		t.Fatalf("status-left was not replaced by empty array: %+v", s.StatusLeft)
+		t.Fatalf("status_left was not replaced by empty array: %+v", s.StatusLeft)
 	}
 	if len(s.StatusRight) != 1 || s.StatusRight[0] != "echo right1" {
-		t.Fatalf("status-right was not inherited: %+v", s.StatusRight)
+		t.Fatalf("status_right was not inherited: %+v", s.StatusRight)
 	}
 	if len(cfg.hooks) != 1 || len(cfg.hooks[0].Events) != 1 || cfg.hooks[0].Events[0] != "idle" {
 		t.Fatalf("hook events array was not replaced: %+v", cfg.hooks[0])
@@ -169,7 +169,7 @@ func TestDisabledHookMayOmitCommandAndEvents(t *testing.T) {
 events = ["turn_end"]
 command = "make test"
 `
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(globalCfg), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "recur.toml"), []byte(globalCfg), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -189,6 +189,33 @@ enabled = false
 	}
 	if len(cfg.hooks) != 0 {
 		t.Fatalf("expected 0 active hooks, got %d", len(cfg.hooks))
+	}
+}
+
+func TestHookTimeoutBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		timeout int
+		ok      bool
+	}{
+		{-1, false},
+		{0, true}, // unset: the default applies
+		{1, true},
+		{600, true},
+		{601, false},
+	} {
+		home, cwd := t.TempDir(), t.TempDir()
+		t.Setenv("RECUR_HOME", home)
+		text := fmt.Sprintf("[hooks.h1]\nevents = ['turn_end']\ncommand = 'true'\ntimeout = %d\n", tc.timeout)
+		if err := os.WriteFile(filepath.Join(home, "recur.toml"), []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := loadConfiguration(home, cwd, ConfigFiles{})
+		if tc.ok && err != nil {
+			t.Fatalf("timeout %d rejected: %v", tc.timeout, err)
+		}
+		if !tc.ok && err == nil {
+			t.Fatalf("timeout %d accepted", tc.timeout)
+		}
 	}
 }
 
@@ -279,6 +306,8 @@ func TestUnknownKeysRejected(t *testing.T) {
 		{"[shell]\nunknown_shell = true\n", "unknown_shell"},
 		{"[hooks.h1]\nevents = ['idle']\ncommand = 'true'\nunknown_hook = 5\n", "unknown_hook"},
 		{"[hooks.h2]\nevent = 'idle'\ncommand = 'true'\n", "event"},
+		{"[ui]\nstatus-left = ['echo left']\n", "status-left"},
+		{"[ui]\nstatus-right = ['echo right']\n", "status-right"},
 	} {
 		if err := os.WriteFile(filepath.Join(cwd, "recur.toml"), []byte(tc.text), 0600); err != nil {
 			t.Fatal(err)
@@ -306,17 +335,34 @@ func TestMissingExplicitConfigFails(t *testing.T) {
 func TestSameFileAliasLoadedOnlyOnce(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("RECUR_HOME", home)
-	globalPath := filepath.Join(home, "config.toml")
+	globalPath := filepath.Join(home, "recur.toml")
 	if err := os.WriteFile(globalPath, []byte("model = 'm1'\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
+	// cwd is $RECUR_HOME, so ./recur.toml is the global file itself.
 	cfg, err := loadConfiguration(home, home, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(cfg.sources) != 1 || cfg.sources[0].Origin != "home" {
-		t.Fatalf("expected 1 source for same file alias, got %+v", cfg.sources)
+		t.Fatalf("expected 1 home source for same file alias, got %+v", cfg.sources)
+	}
+	if cfg.local != "" || cfg.primary != globalPath {
+		t.Fatalf("global file treated as project: local=%q primary=%q", cfg.local, cfg.primary)
+	}
+
+	// A symlink to the global file in another project is the same file too.
+	cwd := t.TempDir()
+	if err := os.Symlink(globalPath, filepath.Join(cwd, "recur.toml")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	cfg, err = loadConfiguration(home, cwd, ConfigFiles{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.sources) != 1 || cfg.sources[0].Origin != "home" || cfg.local != "" {
+		t.Fatalf("symlink alias of global file treated as project: sources=%+v local=%q", cfg.sources, cfg.local)
 	}
 }
 
@@ -341,7 +387,7 @@ api_key = "other-key"
 		t.Fatal(err)
 	}
 
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,29 +434,6 @@ api_key = "other-key"
 	}
 }
 
-func TestStatusUnderscoreKeysAccepted(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("RECUR_HOME", home)
-	cfg := `
-[ui]
-status_left = ["echo left_underscore"]
-status_right = ["echo right_underscore"]
-`
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0600); err != nil {
-		t.Fatal(err)
-	}
-	c, err := loadConfiguration(home, t.TempDir(), ConfigFiles{})
-	if err != nil {
-		t.Fatalf("failed loading config with underscore status keys: %v", err)
-	}
-	if len(c.settings.StatusLeft) != 1 || c.settings.StatusLeft[0] != "echo left_underscore" {
-		t.Fatalf("StatusLeft unexpected: %+v", c.settings.StatusLeft)
-	}
-	if len(c.settings.StatusRight) != 1 || c.settings.StatusRight[0] != "echo right_underscore" {
-		t.Fatalf("StatusRight unexpected: %+v", c.settings.StatusRight)
-	}
-}
-
 func TestPatchWithMultilineApparentHeadersAndAssignments(t *testing.T) {
 	home, cwd := t.TempDir(), t.TempDir()
 	t.Setenv("RECUR_HOME", home)
@@ -430,12 +453,12 @@ base_url = "https://orig.example"
 api_key = "secret_key"
 `, strconv.Quote(multilineSystem))
 
-	configPath := filepath.Join(home, "config.toml")
+	configPath := filepath.Join(home, "recur.toml")
 	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -500,7 +523,7 @@ func TestConfigMaxFileBytesLayers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			home, cwd := t.TempDir(), t.TempDir()
 			if tc.global != "" {
-				if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(tc.global), 0600); err != nil {
+				if err := os.WriteFile(filepath.Join(home, "recur.toml"), []byte(tc.global), 0600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -523,5 +546,27 @@ func TestConfigMaxFileBytesLayers(t *testing.T) {
 				t.Fatalf("max_file_bytes = %d, want %d", cfg.settings.MaxFileBytes, tc.want)
 			}
 		})
+	}
+}
+
+// A leftover config.toml from earlier releases is simply ignored: it is neither
+// parsed nor reported, even when its contents would be invalid.
+func TestLeftoverConfigTomlIsIgnored(t *testing.T) {
+	home, cwd := t.TempDir(), t.TempDir()
+	t.Setenv("RECUR_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte("model = 'leftover'\nprovider = [\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfiguration(home, cwd, ConfigFiles{})
+	if err != nil {
+		t.Fatalf("leftover config.toml must be ignored: %v", err)
+	}
+	if cfg.settings.Model != "" || cfg.settings.Provider != "" {
+		t.Fatalf("leftover config.toml was applied: model=%q provider=%q", cfg.settings.Model, cfg.settings.Provider)
+	}
+	for _, src := range cfg.sources {
+		if filepath.Base(src.Path) == "config.toml" {
+			t.Fatalf("leftover config.toml listed as a source: %+v", cfg.sources)
+		}
 	}
 }

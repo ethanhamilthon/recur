@@ -25,7 +25,7 @@ func TestNotifyChild(t *testing.T) {
 func TestNotifyCrossProcessQueueEscapingAndInactive(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
 	cwd := t.TempDir()
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestNotifyAcceptedAfterToolOutput(t *testing.T) {
 		fmt.Fprintf(w, "data: %s\n\n", raw(map[string]any{"type": "response.completed", "response": map[string]any{"output": output}}))
 	}))
 	defer server.Close()
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}

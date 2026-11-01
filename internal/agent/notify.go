@@ -12,14 +12,14 @@ import (
 	"strings"
 	"time"
 
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 // Message is one request on the session socket: notification text or an image
 // queued by recur view for the next model request.
 type Message struct {
-	Text  string      `json:"text,omitempty"`
-	Image *repl.Image `json:"image,omitempty"`
+	Text  string       `json:"text,omitempty"`
+	Image *shell.Image `json:"image,omitempty"`
 }
 
 func (a *Agent) listenNotifications() error {
@@ -37,7 +37,7 @@ func (a *Agent) listenNotifications() error {
 		os.RemoveAll(dir)
 		return err
 	}
-	a.listener, a.socketDir, a.inbox, a.views = listener, dir, make(chan string, 64), make(chan repl.Image, 4)
+	a.listener, a.socketDir, a.inbox, a.views = listener, dir, make(chan string, 64), make(chan shell.Image, 4)
 	inbox, views := a.inbox, a.views
 	go func() {
 		for {
@@ -97,8 +97,8 @@ func (a *Agent) Notifications() []string {
 func (a *Agent) Inbox() <-chan string { return a.inbox }
 
 // viewed drains images queued by recur view.
-func (a *Agent) viewed() []repl.Image {
-	var images []repl.Image
+func (a *Agent) viewed() []shell.Image {
+	var images []shell.Image
 	for {
 		select {
 		case image := <-a.views:

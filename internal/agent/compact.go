@@ -195,16 +195,16 @@ func (a *Agent) compactIfNeeded(ctx context.Context, emit func(Event)) {
 
 // Reload re-reads configuration and applies it while keeping the history.
 func (a *Agent) Reload() error {
-	c, err := loadConfiguration(a.home, a.REPL.Dir, a.files)
+	c, err := loadConfiguration(a.home, a.Shell.Dir, a.files)
 	if err != nil {
 		return err
 	}
-	// Session selection is independent of the defaults in config.toml.
+	// Session selection is independent of the defaults in recur.toml.
 	c.settings.Provider, c.settings.Model, c.settings.Effort = a.settings.Provider, a.settings.Model, a.settings.Effort
 	if err := validateSettings(c.settings); err != nil {
 		return fmt.Errorf("session selection: %w", err)
 	}
-	a.REPL.Close()
+	a.Shell.Close()
 	a.System, a.LocalConfig, a.Sources, a.primaryConfig = c.system, c.local, c.sources, c.primary
 	a.hooks.Set(c.hooks)
 	a.applySettings(c.settings)

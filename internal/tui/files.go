@@ -15,7 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"recur/internal/agent"
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 const (
@@ -40,7 +40,7 @@ type fileScanMsg struct {
 // kept so that edits made while reading can be detected; p identifies it.
 type filePrep struct {
 	text, draft string
-	images      []repl.Image
+	images      []shell.Image
 }
 type filePrepMsg struct {
 	prep  *filePrep

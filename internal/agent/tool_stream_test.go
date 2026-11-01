@@ -67,7 +67,7 @@ func TestToolCallStreamingIsDisplayOnlyAndSequential(t *testing.T) {
 			}))
 			defer server.Close()
 			marker := filepath.Join(t.TempDir(), "marker")
-			a, err := New(t.TempDir())
+			a, err := New(t.TempDir(), ConfigFiles{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -113,7 +113,7 @@ func TestToolCallStreamingIsDisplayOnlyAndSequential(t *testing.T) {
 				}
 			}
 			a.Close() // release ownership so the session can be reopened
-			b, err := New(a.REPL.Dir, a.SessionInfo()["id"].(string))
+			b, err := New(a.Shell.Dir, ConfigFiles{}, a.SessionInfo()["id"].(string))
 			if err != nil {
 				t.Fatal(err)
 			}

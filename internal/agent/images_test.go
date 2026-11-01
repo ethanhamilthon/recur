@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 func TestViewDeliveredAfterAllToolOutputsAndPersists(t *testing.T) {
@@ -83,7 +83,7 @@ func TestViewDeliveredAfterAllToolOutputsAndPersists(t *testing.T) {
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n")
 	}))
 	defer server.Close()
-	a, err := New(dir)
+	a, err := New(dir, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestViewDeliveredAfterAllToolOutputsAndPersists(t *testing.T) {
 	err = a.Run(context.Background(), "inspect image", func(e Event) {
 		if e.Kind == "output" && !removed {
 			// recur view captures bytes in the CLI process, then uses the socket.
-			image, err := repl.CaptureImage(path)
+			image, err := shell.CaptureImage(path)
 			if err == nil {
 				err = Send(a.shellEnv()["RECUR_ENDPOINT"], Message{Image: &image})
 			}
@@ -113,7 +113,7 @@ func TestViewDeliveredAfterAllToolOutputsAndPersists(t *testing.T) {
 		t.Fatalf("image not delivered: requests=%d", requests)
 	}
 	a.Close() // release ownership so the session can be reopened
-	restored, err := New(dir, a.SessionInfo()["id"].(string))
+	restored, err := New(dir, ConfigFiles{}, a.SessionInfo()["id"].(string))
 	if err != nil {
 		t.Fatal(err)
 	}

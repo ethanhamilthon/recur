@@ -55,7 +55,7 @@ func TestDismissedCompletionAllowsLiteralCommandText(t *testing.T) {
 func TestNavigationCommandsAndUnsentSessionNotSaved(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
 	cwd := t.TempDir()
-	writer, err := agent.New(cwd)
+	writer, err := agent.New(cwd, agent.ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestNavigationCommandsAndUnsentSessionNotSaved(t *testing.T) {
 func TestRenameSessionPersistsTitle(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
 	cwd := t.TempDir()
-	a, err := agent.New(cwd)
+	a, err := agent.New(cwd, agent.ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -22,7 +22,7 @@ model = "global-model"
 base_url = "https://global.example"
 api_key = "SUPER_SECRET_GLOBAL_KEY"
 `
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(globalConfig), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "recur.toml"), []byte(globalConfig), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -64,7 +64,7 @@ api_key = "orig-key"
 		t.Fatal(err)
 	}
 
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestLosslessSparsePatchCRLF(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ max_code_lines = 10
 		t.Fatal(err)
 	}
 
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +298,7 @@ api_key = "k"
 		t.Fatal(err)
 	}
 
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ base_url = "https://p1.example"
 		t.Fatal(err)
 	}
 
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}

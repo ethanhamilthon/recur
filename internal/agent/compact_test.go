@@ -189,7 +189,7 @@ func summaryAgent(t *testing.T, summary http.HandlerFunc) (*Agent, func()) {
 	t.Setenv("RECUR_HOME", t.TempDir())
 	server := httptest.NewServer(summary)
 	cwd := t.TempDir()
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,7 +2,12 @@
 package selfupdate
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -10,8 +15,10 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
+	"path"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -23,17 +30,49 @@ const Repo = "ethanhamilthon/recur"
 
 const cacheTTL = 6 * time.Hour
 
-// Release endpoints are variables so tests can serve them locally.
+// Download size limits are variables so tests can shrink them.
 var (
-	apiURL    = "https://api.github.com/" + "repos/" + Repo + "/releases/latest"
-	scriptURL = "https://raw.githubusercontent.com/" + Repo + "/"
+	maxChecksums int64 = 1 << 20
+	maxArchive   int64 = 100 << 20
 )
 
-var client = &http.Client{Timeout: 60 * time.Second}
+// Release endpoints and the executable path are variables so tests can redirect them.
+var (
+	apiURL         = "https://api.github.com/" + "repos/" + Repo + "/releases/latest"
+	releaseBase    = "https://github.com/" + Repo + "/releases/download/"
+	executablePath = os.Executable
+)
+
+var client = &http.Client{Timeout: 5 * time.Minute}
 
 type checkCache struct {
 	Checked time.Time `json:"checked"`
 	Latest  string    `json:"latest"`
+}
+
+// capReader reads from r and fails, instead of truncating, once more than limit bytes arrive.
+type capReader struct {
+	r    io.Reader
+	what string // names the stream in the error, such as "response"
+	max  int64
+	left int64
+}
+
+func newCapReader(r io.Reader, what string, limit int64) *capReader {
+	return &capReader{r: r, what: what, max: limit, left: limit}
+}
+
+func (c *capReader) Read(p []byte) (int, error) {
+	// Ask for one byte past the remaining budget so an overflow is visible.
+	if int64(len(p)) > c.left+1 {
+		p = p[:c.left+1]
+	}
+	n, err := c.r.Read(p)
+	if int64(n) > c.left {
+		return 0, fmt.Errorf("%s exceeds %d bytes", c.what, c.max)
+	}
+	c.left -= int64(n)
+	return n, err
 }
 
 func fetch(ctx context.Context, url string, limit int64) ([]byte, error) {
@@ -51,7 +90,11 @@ func fetch(ctx context.Context, url string, limit int64) ([]byte, error) {
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GET %s: %s", url, response.Status)
 	}
-	return io.ReadAll(io.LimitReader(response.Body, limit))
+	data, err := io.ReadAll(newCapReader(response.Body, "response", limit))
+	if err != nil {
+		return nil, fmt.Errorf("GET %s: %w", url, err)
+	}
+	return data, nil
 }
 
 // Latest returns the newest released version tag, such as v0.2.2.
@@ -69,7 +112,16 @@ func Latest(ctx context.Context) (string, error) {
 	if release.Tag == "" {
 		return "", errors.New("release has no tag")
 	}
+	if !validTag(release.Tag) {
+		return "", fmt.Errorf("release has invalid tag %q", release.Tag)
+	}
 	return release.Tag, nil
+}
+
+// validTag reports whether tag is a semantic version that is safe to place in a download URL.
+func validTag(tag string) bool {
+	return canonical(tag) != "" && tag == strings.TrimSpace(tag) &&
+		!strings.ContainsAny(tag, "/\\?#") && !strings.Contains(tag, "..")
 }
 
 // canonical returns value as a "vX.Y.Z" semantic version, or "" when invalid.
@@ -131,9 +183,15 @@ func Available(ctx context.Context, current string) string {
 	return ""
 }
 
-// Install runs the release's install.sh for the directory of the running binary,
-// so checksum verification and extraction live in one place.
+// Install downloads the latest release for this platform, verifies its checksum, and replaces the binary.
 func Install(ctx context.Context, current string, out io.Writer) error {
+	target, err := executablePath()
+	if err != nil {
+		return err
+	}
+	if resolved, err := filepath.EvalSymlinks(target); err == nil {
+		target = resolved
+	}
 	latest, err := Latest(ctx)
 	if err != nil {
 		return err
@@ -142,21 +200,123 @@ func Install(ctx context.Context, current string, out io.Writer) error {
 		fmt.Fprintf(out, "recur %s is the latest release.\n", current)
 		return nil
 	}
-	target, err := os.Executable()
+	if !slices.Contains([]string{"darwin", "linux"}, runtime.GOOS) || !slices.Contains([]string{"amd64", "arm64"}, runtime.GOARCH) {
+		return fmt.Errorf("no recur release for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	asset := fmt.Sprintf("recur_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	base := releaseBase + latest + "/"
+	sums, err := fetch(ctx, base+"checksums.txt", maxChecksums)
 	if err != nil {
 		return err
 	}
-	if resolved, err := filepath.EvalSymlinks(target); err == nil {
-		target = resolved
+	want, err := checksumFor(sums, asset)
+	if err != nil {
+		return err
 	}
-	// The script is pinned to the release tag, not to the moving main branch.
-	cmd := exec.CommandContext(ctx, "sh", "-c", `curl -fsSL "$0" | sh`, scriptURL+latest+"/scripts/install.sh")
-	cmd.Env = append(os.Environ(), "RECUR_BINDIR="+filepath.Dir(target), "RECUR_VERSION="+latest)
-	cmd.Stdout, cmd.Stderr = out, out
-	if err = cmd.Run(); err != nil {
-		return fmt.Errorf("install.sh failed: %w", err)
+	archive, err := fetch(ctx, base+asset, maxArchive)
+	if err != nil {
+		return err
+	}
+	if sum := sha256.Sum256(archive); hex.EncodeToString(sum[:]) != want {
+		return fmt.Errorf("checksum mismatch for %s", asset)
+	}
+	if err := replaceBinary(target, archive); err != nil {
+		return err
 	}
 	fmt.Fprintf(out, "Updated recur %s -> %s. Restart recur to use it.\n", strings.TrimPrefix(current, "v"), latest)
+	return nil
+}
+
+// checksumFor returns the sha256 listed for asset; lines are "HASH  name" or "HASH *name".
+func checksumFor(sums []byte, asset string) (string, error) {
+	for _, line := range strings.Split(string(sums), "\n") {
+		if fields := strings.Fields(line); len(fields) == 2 && strings.TrimPrefix(fields[1], "*") == asset {
+			return strings.ToLower(fields[0]), nil
+		}
+	}
+	return "", fmt.Errorf("checksums.txt does not list %s", asset)
+}
+
+// replaceBinary writes the extracted binary to a temp file beside target, then renames it over target.
+func replaceBinary(target string, archive []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(target), "recur-update-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name()) // harmless once the file has been renamed
+	if err := writeBinary(tmp, archive); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), target)
+}
+
+// writeBinary extracts the recur binary into f, makes it executable, and flushes it to disk.
+func writeBinary(f *os.File, archive []byte) error {
+	if err := extractBinary(archive, f); err != nil {
+		return err
+	}
+	if err := f.Chmod(0o755); err != nil {
+		return err
+	}
+	return f.Sync()
+}
+
+// unsafeName reports whether an archive entry name could escape the install directory.
+func unsafeName(name string) bool {
+	return strings.Contains(name, "\\") || path.IsAbs(name) || slices.Contains(strings.Split(name, "/"), "..")
+}
+
+// extractBinary copies the regular file "recur" from a gzipped tar into w.
+// It scans the whole archive, rejects unsafe or duplicate entries, and verifies the gzip trailer.
+func extractBinary(archive []byte, w io.Writer) (err error) {
+	gz, err := gzip.NewReader(bytes.NewReader(archive))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := gz.Close(); err == nil {
+			err = cerr
+		}
+	}()
+	body := newCapReader(gz, "decompressed archive", maxArchive) // bounds the decompressed size
+	tr := tar.NewReader(body)
+	found := false
+	for {
+		hdr, herr := tr.Next()
+		if errors.Is(herr, io.EOF) {
+			break
+		}
+		if herr != nil {
+			return herr
+		}
+		if unsafeName(hdr.Name) {
+			return fmt.Errorf("unsafe archive entry %q", hdr.Name)
+		}
+		if path.Clean(hdr.Name) != "recur" {
+			continue
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			return fmt.Errorf("archive entry %q is not a regular file", hdr.Name)
+		}
+		if found {
+			return errors.New("archive has more than one recur binary")
+		}
+		found = true
+		if _, err := io.Copy(w, tr); err != nil {
+			return err
+		}
+	}
+	// The tar reader stops at its end marker; drain the rest so the gzip checksum and length are verified.
+	if _, err := io.Copy(io.Discard, body); err != nil {
+		return err
+	}
+	if !found {
+		return errors.New("archive has no recur binary")
+	}
 	return nil
 }
 

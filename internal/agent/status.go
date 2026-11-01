@@ -46,8 +46,7 @@ func IsAllowedStatusMetadataKey(key string) bool {
 		"RECUR_INPUT_TOKENS",
 		"RECUR_OUTPUT_TOKENS",
 		"RECUR_ATTEMPT",
-		"RECUR_REASON",
-		"RECUR_MODE":
+		"RECUR_REASON":
 		return true
 	default:
 		return false

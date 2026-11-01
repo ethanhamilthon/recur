@@ -19,12 +19,12 @@ import (
 func pickerModel(t *testing.T) (model, *agent.Agent) {
 	t.Helper()
 	t.Setenv("RECUR_HOME", t.TempDir())
-	a, err := agent.New(t.TempDir())
+	a, err := agent.New(t.TempDir(), agent.ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(a.Close)
-	return newModel(a, a.REPL.Dir), a
+	return newModel(a, a.Shell.Dir), a
 }
 func enterPicker(m model) model {
 	next, _, _ := m.pickerKey(tea.KeyMsg{Type: tea.KeyEnter})
@@ -88,7 +88,6 @@ func TestProviderWizardMasksKeyAndDoesNotSaveDraftToHistory(t *testing.T) {
 }
 
 func TestCancelledPickerIgnoresLateModelsAndPreservesSession(t *testing.T) {
-	m, a := pickerModel(t)
 	m, a, release := heldModel(t, "")
 	m = startBusy(t, m)
 	defer release()
@@ -158,7 +157,7 @@ func TestPrimaryConfigMethod(t *testing.T) {
 
 	home := t.TempDir()
 	t.Setenv("RECUR_HOME", home)
-	a, err := agent.New(t.TempDir())
+	a, err := agent.New(t.TempDir(), agent.ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,8 +167,8 @@ func TestPrimaryConfigMethod(t *testing.T) {
 	if dest == "" {
 		t.Fatal("expected non-empty PrimaryConfig()")
 	}
-	if !strings.HasSuffix(dest, "config.toml") {
-		t.Fatalf("PrimaryConfig() = %q, want suffix config.toml", dest)
+	if !strings.HasSuffix(dest, "recur.toml") {
+		t.Fatalf("PrimaryConfig() = %q, want suffix recur.toml", dest)
 	}
 }
 
@@ -180,7 +179,7 @@ func TestCredentialDestinationInLoginAndModelNotices(t *testing.T) {
 	projectToml := filepath.Join(projectDir, "recur.toml")
 	_ = os.WriteFile(projectToml, []byte("model = \"base-model\"\n"), 0600)
 
-	a, err := agent.New(projectDir)
+	a, err := agent.New(projectDir, agent.ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}

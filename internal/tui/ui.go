@@ -15,7 +15,7 @@ import (
 
 	"recur/internal/agent"
 	"recur/internal/control"
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 type entry = agent.Record
@@ -31,7 +31,7 @@ type model struct {
 	input                    textarea.Model
 	viewport                 viewport.Model
 	entries                  []entry
-	images                   []repl.Image
+	images                   []shell.Image
 	pasteGeneration          int
 	pasting                  bool
 	width, height            int

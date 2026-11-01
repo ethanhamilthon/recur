@@ -15,7 +15,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"recur/internal/agent"
-	"recur/prompts"
+	"recur/internal/defaults"
 )
 
 func TestBottomBarWidthsAndPadding(t *testing.T) {
@@ -266,13 +266,13 @@ func TestDefaultBashFormatting(t *testing.T) {
 	demoCwd := filepath.Join(home, "work", "demo")
 
 	// The shipped defaults are the single source of truth for the status bar.
-	var defaults struct {
+	var shipped struct {
 		UI struct {
 			Left  []string `toml:"status_left"`
 			Right []string `toml:"status_right"`
 		} `toml:"ui"`
 	}
-	if err := toml.Unmarshal([]byte(prompts.Config), &defaults); err != nil {
+	if err := toml.Unmarshal([]byte(defaults.Config), &shipped); err != nil {
 		t.Fatal(err)
 	}
 
@@ -285,8 +285,8 @@ func TestDefaultBashFormatting(t *testing.T) {
 			"RECUR_CTX_SIZE": "36679",
 			"RECUR_CWD":      demoCwd,
 		},
-		LeftCmds:  defaults.UI.Left,
-		RightCmds: defaults.UI.Right,
+		LeftCmds:  shipped.UI.Left,
+		RightCmds: shipped.UI.Right,
 	}
 
 	left, right := evalStatusSnapshot(ctx, snap, sem)

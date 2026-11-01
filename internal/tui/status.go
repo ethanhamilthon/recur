@@ -17,7 +17,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"recur/internal/agent"
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 type StatusSnapshot struct {
@@ -71,7 +71,7 @@ func logStatusFailure(home string, cmd string, err error) {
 	if len(msg) > 200 {
 		msg = msg[:200]
 	}
-	repl.AppendLog(filepath.Join(home, "status.log"), "cmd=%q: %s", cmd, msg)
+	shell.AppendLog(filepath.Join(home, "status.log"), "cmd=%q: %s", cmd, msg)
 }
 
 type limitWriter struct {
@@ -138,7 +138,7 @@ func runSingleStatusCommand(ctx context.Context, cmdStr string, snap StatusSnaps
 			env = append(env, k+"="+v)
 		}
 	}
-	cmd := repl.Command(cmdCtx, dir, env, cmdStr)
+	cmd := shell.Command(cmdCtx, dir, env, cmdStr)
 	cmd.WaitDelay = 100 * time.Millisecond
 
 	var buf bytes.Buffer

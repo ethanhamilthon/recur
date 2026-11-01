@@ -1,4 +1,4 @@
-package repl
+package shell
 
 import (
 	"context"
@@ -12,10 +12,10 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
-	"recur/prompts"
+	"recur/internal/defaults"
 )
 
-func run(t *testing.T, r *REPL, command string, timeout time.Duration) Result {
+func run(t *testing.T, r *Runner, command string, timeout time.Duration) Result {
 	t.Helper()
 	result, err := r.Execute(context.Background(), command, timeout)
 	if err != nil {
@@ -26,7 +26,7 @@ func run(t *testing.T, r *REPL, command string, timeout time.Duration) Result {
 
 func TestStatelessFreshVariablesFunctionsAndCWD(t *testing.T) {
 	dir := t.TempDir()
-	r := &REPL{Dir: dir}
+	r := &Runner{Dir: dir}
 
 	// 1. Fresh variables: variable assignment does not persist across calls.
 	res := run(t, r, "x=40; echo $x", 5*time.Second)
@@ -71,7 +71,7 @@ func TestStatelessFreshVariablesFunctionsAndCWD(t *testing.T) {
 
 func TestBashSemantics(t *testing.T) {
 	dir := t.TempDir()
-	r := &REPL{Dir: dir}
+	r := &Runner{Dir: dir}
 
 	for _, tc := range []struct {
 		name    string
@@ -119,7 +119,7 @@ func TestBASHENVExcluded(t *testing.T) {
 
 	// 1. Inherited host BASH_ENV must be excluded.
 	t.Setenv("BASH_ENV", badScript)
-	r := &REPL{Dir: dir}
+	r := &Runner{Dir: dir}
 	res := run(t, r, `echo clean; echo "[$BASH_ENV]"`, 5*time.Second)
 	if strings.Contains(res.Output, "EVIL") || !strings.Contains(res.Output, "clean\n[]") {
 		t.Fatalf("host BASH_ENV executed or passed: %+v", res)
@@ -129,7 +129,7 @@ func TestBASHENVExcluded(t *testing.T) {
 	}
 
 	// 2. Configured Environment BASH_ENV must also be excluded.
-	rConfigured := &REPL{
+	rConfigured := &Runner{
 		Dir: dir,
 		Environment: map[string]string{
 			"BASH_ENV": badScript,
@@ -147,7 +147,7 @@ func TestBASHENVExcluded(t *testing.T) {
 
 func TestEnvironmentAndMetadata(t *testing.T) {
 	dir := t.TempDir()
-	r := &REPL{
+	r := &Runner{
 		Dir: dir,
 		Environment: map[string]string{
 			"CONFIG_KEY": "config_val",
@@ -184,7 +184,7 @@ func TestEnvironmentAndMetadata(t *testing.T) {
 
 func TestTimeoutKillsDescendants(t *testing.T) {
 	dir := t.TempDir()
-	r := &REPL{Dir: dir}
+	r := &Runner{Dir: dir}
 
 	started := time.Now()
 	result := run(t, r, "sh -c 'sleep 30 & echo $! > child.pid; wait'", 300*time.Millisecond)
@@ -216,7 +216,7 @@ func TestTimeoutKillsDescendants(t *testing.T) {
 }
 
 func TestCancellation(t *testing.T) {
-	r := &REPL{Dir: t.TempDir()}
+	r := &Runner{Dir: t.TempDir()}
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(100*time.Millisecond, cancel)
 
@@ -227,7 +227,7 @@ func TestCancellation(t *testing.T) {
 }
 
 func TestOutputLimit(t *testing.T) {
-	r := &REPL{Dir: t.TempDir()}
+	r := &Runner{Dir: t.TempDir()}
 
 	for _, command := range []string{
 		"yes x | head -c 400000",
@@ -252,7 +252,7 @@ func TestOutputLimit(t *testing.T) {
 }
 
 func TestMissingExecutableScenarios(t *testing.T) {
-	r := &REPL{Dir: t.TempDir()}
+	r := &Runner{Dir: t.TempDir()}
 
 	// Nonexistent command executed within bash returns 127
 	result := run(t, r, "nonexistent-command-xyz-12345", 5*time.Second)
@@ -261,7 +261,7 @@ func TestMissingExecutableScenarios(t *testing.T) {
 	}
 
 	// Nonexistent working directory
-	rBad := &REPL{Dir: filepath.Join(t.TempDir(), "nonexistent-directory")}
+	rBad := &Runner{Dir: filepath.Join(t.TempDir(), "nonexistent-directory")}
 	result, err := rBad.Execute(context.Background(), "echo hello", 5*time.Second)
 	if err != nil || result.ExitCode == 0 || !result.Error {
 		t.Fatalf("bad dir: %+v %v", result, err)
@@ -269,7 +269,7 @@ func TestMissingExecutableScenarios(t *testing.T) {
 }
 
 func TestNoStuckWaitFromPipes(t *testing.T) {
-	r := &REPL{Dir: t.TempDir()}
+	r := &Runner{Dir: t.TempDir()}
 
 	// Background process holding pipes open is terminated by WaitDelay rather than hanging
 	started := time.Now()
@@ -293,7 +293,7 @@ func TestNoStuckWaitFromPipes(t *testing.T) {
 }
 
 func TestCloseTerminatesActive(t *testing.T) {
-	r := &REPL{
+	r := &Runner{
 		Dir: t.TempDir(),
 	}
 
@@ -318,7 +318,7 @@ func TestCloseTerminatesActive(t *testing.T) {
 		t.Fatal("Close did not terminate active process")
 	}
 
-	// REPL is stateless: calls succeed after Close without reinitialization
+	// Runner is stateless: calls succeed after Close without reinitialization
 	res := run(t, r, "echo still works", 5*time.Second)
 	if res.Output != "still works\n" || res.ExitCode != 0 {
 		t.Fatalf("Execute after Close: %+v", res)
@@ -326,7 +326,7 @@ func TestCloseTerminatesActive(t *testing.T) {
 }
 
 func TestConcurrentRace(t *testing.T) {
-	r := &REPL{Dir: t.TempDir()}
+	r := &Runner{Dir: t.TempDir()}
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -357,7 +357,7 @@ func TestCommandKillsProcessGroupOnCancel(t *testing.T) {
 	}
 }
 
-// config.toml is the source of truth for shell limits; repl constants are only
+// defaults.toml is the source of truth for shell limits; shell constants are only
 // the engine fallback and must never drift from it.
 func TestShellDefaultsMatchShippedConfig(t *testing.T) {
 	var cfg struct {
@@ -367,12 +367,12 @@ func TestShellDefaultsMatchShippedConfig(t *testing.T) {
 			MaxOutput  int `toml:"max_output"`
 		} `toml:"shell"`
 	}
-	if err := toml.Unmarshal([]byte(prompts.Config), &cfg); err != nil {
+	if err := toml.Unmarshal([]byte(defaults.Config), &cfg); err != nil {
 		t.Fatal(err)
 	}
 	if time.Duration(cfg.Shell.Timeout)*time.Second != DefaultTimeout ||
 		time.Duration(cfg.Shell.MaxTimeout)*time.Second != MaxTimeout ||
 		cfg.Shell.MaxOutput != DefaultOutputLimit {
-		t.Fatalf("repl defaults drifted from prompts/config.toml: %+v", cfg.Shell)
+		t.Fatalf("shell defaults drifted from internal/defaults/defaults.toml: %+v", cfg.Shell)
 	}
 }

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"recur/internal/agent"
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 // Request is one application operation. Adapters prepare image and file
@@ -19,7 +19,7 @@ type Request struct {
 	ID     string                 // transport correlation, never interpreted here
 	Type   string                 // one of Types, or "command" for slash commands
 	Text   string                 // input or steer message; compact guidance
-	Images []repl.Image           // prepared image snapshots
+	Images []shell.Image          // prepared image snapshots
 	Files  []agent.FileAttachment // prepared file snapshots
 	Name   string                 // command: slash command name such as /rename
 	Args   map[string]string      // structured parameters, see the request table
@@ -76,13 +76,13 @@ type CommandInfo struct {
 }
 
 var commandList = []CommandInfo{
-	{"/new", "Start a new chat and shell; reload prompt files"},
+	{"/new", "Start a new chat and shell; re-read configuration"},
 	{"/help", "Show commands and keyboard shortcuts"},
 	{"/quit", "Save the chat and exit"},
 	{"/resume", "Resume a saved session in this project"},
 	{"/rename", "Rename this session; empty name restores the default"},
 	{"/compact", "Summarize older turns; add a prompt to guide it"},
-	{"/reload", "Reload settings and prompts; restart the shell"},
+	{"/reload", "Re-read recur.toml; restart the shell"},
 	{"/model", "Choose model; Left/Right changes effort"},
 	{"/login", "Select or create a provider"},
 }
@@ -100,7 +100,7 @@ func Help(keyboard string) string {
 	if keyboard != "" {
 		help.WriteString("\n" + keyboard + "\n")
 	}
-	help.WriteString("\nConfiguration: --config PATH, ./recur.toml, or $RECUR_HOME/config.toml (default ~/.recur/config.toml).\n" +
+	help.WriteString("\nConfiguration: --config PATH, ./recur.toml, or $RECUR_HOME/recur.toml (default ~/.recur/recur.toml).\n" +
 		"Edit configuration, then /reload to apply changes to this chat.\n" +
 		"Host access: the bash tool runs commands with your permissions; not an OS security sandbox.")
 	return help.String()

@@ -12,16 +12,20 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
+	"recur/internal/defaults"
 	"recur/internal/hooks"
-	"recur/prompts"
 )
 
+// ConfigFiles overrides configuration lookup. Config replaces the primary file
+// (relative paths resolve against the working directory); NoExtend skips the
+// global $RECUR_HOME/recur.toml layer; Headless drops hooks without headless support.
 type ConfigFiles struct {
 	Config   string
 	NoExtend bool
 	Headless bool
 }
 
+// Source names one configuration layer that contributed to the session.
 type Source struct {
 	Name, Path, Origin string
 }
@@ -33,6 +37,20 @@ type configuration struct {
 	local    string
 	sources  []Source
 	primary  string
+}
+
+// PrimaryConfig returns the primary configuration file path, the write target for /model and /login.
+func (a *Agent) PrimaryConfig() string {
+	if a == nil {
+		return ""
+	}
+	if a.primaryConfig != "" {
+		return a.primaryConfig
+	}
+	if a.home != "" {
+		return filepath.Join(a.home, "recur.toml")
+	}
+	return ""
 }
 
 type rawConfig struct {
@@ -63,10 +81,8 @@ type rawUI struct {
 	MaxCodeLines     *int      `toml:"max_code_lines"`
 	MaxResultLines   *int      `toml:"max_result_lines"`
 	MaxThinkingLines *int      `toml:"max_thinking_lines"`
-	StatusLeft       *[]string `toml:"status-left"`
-	StatusLeftAlt    *[]string `toml:"status_left"`
-	StatusRight      *[]string `toml:"status-right"`
-	StatusRightAlt   *[]string `toml:"status_right"`
+	StatusLeft       *[]string `toml:"status_left"`
+	StatusRight      *[]string `toml:"status_right"`
 }
 
 type rawShell struct {
@@ -128,13 +144,9 @@ func applyLayer(s *Settings, system *string, hooksMap map[string]hooks.Hook, raw
 	setInt(&s.ShellMaxOutput, raw.Shell.MaxOutput)
 	if raw.UI.StatusLeft != nil {
 		s.StatusLeft = slices.Clone(*raw.UI.StatusLeft)
-	} else if raw.UI.StatusLeftAlt != nil {
-		s.StatusLeft = slices.Clone(*raw.UI.StatusLeftAlt)
 	}
 	if raw.UI.StatusRight != nil {
 		s.StatusRight = slices.Clone(*raw.UI.StatusRight)
-	} else if raw.UI.StatusRightAlt != nil {
-		s.StatusRight = slices.Clone(*raw.UI.StatusRightAlt)
 	}
 	for k, v := range raw.Env {
 		if s.Environment == nil {
@@ -185,18 +197,18 @@ func validateHooks(m map[string]hooks.Hook) ([]hooks.Hook, error) {
 			continue
 		}
 		if len(h.Events) == 0 || strings.TrimSpace(h.Command) == "" {
-			return nil, fmt.Errorf("hook %q needs event (or events) and command", name)
+			return nil, fmt.Errorf("hook %q needs events and command", name)
 		}
 		for _, e := range h.Events {
 			if e != "*" && !slices.Contains(hooks.Events, e) {
 				return nil, fmt.Errorf("hook %q: unknown event %q; see recur docs hooks", name, e)
 			}
 		}
-		if h.Timeout < 0 || h.Timeout > 600 {
-			return nil, fmt.Errorf("hook %q: timeout must be 1..600 seconds", name)
+		if h.Timeout < 0 || h.Timeout > hooks.MaxTimeout {
+			return nil, fmt.Errorf("hook %q: timeout must be 1..%d seconds", name, hooks.MaxTimeout)
 		}
 		if h.Timeout == 0 {
-			h.Timeout = 10
+			h.Timeout = hooks.DefaultTimeout
 		}
 		b := enabled
 		h.Enabled = &b
@@ -222,7 +234,13 @@ func isFile(path string) bool {
 	return err == nil && info.Mode().IsRegular()
 }
 
+// loadConfiguration merges the built-in defaults, the global $RECUR_HOME/recur.toml
+// (the base layer) and the primary file (--config, else ./recur.toml, else the
+// global file itself). Files from earlier releases are never read.
 func loadConfiguration(home, cwd string, files ConfigFiles) (c configuration, err error) {
+	globalPath := filepath.Join(home, "recur.toml")
+	globalExists := isFile(globalPath)
+
 	primaryPath, primaryOrigin := "", ""
 	if files.Config != "" {
 		p := files.Config
@@ -237,29 +255,19 @@ func loadConfiguration(home, cwd string, files ConfigFiles) (c configuration, er
 			return c, fmt.Errorf("config %s: is a directory", p)
 		}
 		primaryPath, primaryOrigin = p, "flag"
-	} else if localRecur := filepath.Join(cwd, "recur.toml"); isFile(localRecur) {
+	} else if localRecur := filepath.Join(cwd, "recur.toml"); isFile(localRecur) && !sameFile(localRecur, globalPath) {
+		// ./recur.toml is the project file only when it is not the global file
+		// (cwd may be $RECUR_HOME itself or an alias of it).
 		primaryPath, primaryOrigin = localRecur, "project"
 	} else {
-		primaryPath, primaryOrigin = filepath.Join(home, "config.toml"), "home"
-	}
-
-	globalPath := filepath.Join(home, "config.toml")
-	globalExists := isFile(globalPath)
-
-	if files.Config == "" && primaryOrigin == "home" && !globalExists {
-		if legacy := filepath.Join(home, "settings.toml"); isFile(legacy) {
-			return c, fmt.Errorf("legacy configuration %s found but %s does not exist; migrate settings to config.toml", legacy, globalPath)
-		}
-		if legacy := filepath.Join(cwd, ".recur", "settings.toml"); isFile(legacy) {
-			return c, fmt.Errorf("legacy configuration %s found; migrate settings to config.toml", legacy)
-		}
+		primaryPath, primaryOrigin = globalPath, "home"
 	}
 
 	var s Settings
 	var system string
 	hooksMap := map[string]hooks.Hook{}
 
-	defRaw, err := parseRaw([]byte(prompts.Config))
+	defRaw, err := parseRaw([]byte(defaults.Config))
 	if err != nil {
 		return c, fmt.Errorf("builtin defaults: %w", err)
 	}
@@ -276,11 +284,11 @@ func loadConfiguration(home, cwd string, files ConfigFiles) (c configuration, er
 			return c, fmt.Errorf("%s: %w", globalPath, err)
 		}
 		applyLayer(&s, &system, hooksMap, raw)
-		sources = append(sources, Source{Name: "config.toml", Path: globalPath, Origin: "home"})
+		sources = append(sources, Source{Name: filepath.Base(globalPath), Path: globalPath, Origin: "home"})
 	}
 
 	if primaryOrigin == "home" && !globalExists {
-		sources = append(sources, Source{Name: "config.toml", Path: primaryPath, Origin: "none"})
+		sources = append(sources, Source{Name: filepath.Base(primaryPath), Path: primaryPath, Origin: "none"})
 	} else {
 		data, err := os.ReadFile(primaryPath)
 		if err != nil {

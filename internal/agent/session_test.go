@@ -12,11 +12,11 @@ func TestConfigFileAndNewSession(t *testing.T) {
 	dir := t.TempDir()
 
 	cfg := "system = 'Custom system instructions.'\n"
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "recur.toml"), []byte(cfg), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	a, err := New(dir)
+	a, err := New(dir, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestConfigFileAndNewSession(t *testing.T) {
 		t.Fatal("new session must clear history and reload config")
 	}
 
-	next, err := New(dir)
+	next, err := New(dir, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestConfigFileAndNewSession(t *testing.T) {
 
 func TestReloadFailurePreservesSession(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
-	a, err := New(t.TempDir())
+	a, err := New(t.TempDir(), ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestReloadFailurePreservesSession(t *testing.T) {
 	a.records = []Record{{Kind: "user", Text: "keep history"}}
 	previousSystem := a.System
 
-	if err = os.WriteFile(filepath.Join(a.home, "config.toml"), []byte("invalid toml [["), 0600); err != nil {
+	if err = os.WriteFile(filepath.Join(a.home, "recur.toml"), []byte("invalid toml [["), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err = a.NewSession(); err == nil {
@@ -69,7 +69,7 @@ func TestReloadFailurePreservesSession(t *testing.T) {
 
 func TestSaveFailurePreservesSession(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
-	a, err := New(t.TempDir())
+	a, err := New(t.TempDir(), ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,10 +104,10 @@ func TestProjectLocalConfig(t *testing.T) {
 		}
 	}
 
-	write(filepath.Join(home, "config.toml"), "system = 'global system'\nmodel = 'global-model'\n")
+	write(filepath.Join(home, "recur.toml"), "system = 'global system'\nmodel = 'global-model'\n")
 	write(filepath.Join(cwd, "recur.toml"), "system = 'local system'\nmodel = 'local-model'\n")
 
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,10 +129,15 @@ func TestLocalConfigIgnoredWhenItIsHome(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, "recur.toml"), []byte("system = 'test'\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	_ = a
+	if a.LocalConfig != "" {
+		t.Fatalf("home file treated as project: LocalConfig = %q", a.LocalConfig)
+	}
+	if len(a.Sources) != 1 || a.Sources[0].Origin != "home" {
+		t.Fatalf("expected exactly one home source, got %+v", a.Sources)
+	}
 }

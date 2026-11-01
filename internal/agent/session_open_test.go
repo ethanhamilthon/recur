@@ -11,7 +11,7 @@ import (
 func TestSessionOpenRejectsInvalidTargetsWithoutChangingCurrentSession(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
 	cwd := t.TempDir()
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestSessionOpenRejectsInvalidTargetsWithoutChangingCurrentSession(t *testin
 			if a.HistoryPath != path || !reflect.DeepEqual(a.Records(), records) {
 				t.Fatal("failed resume changed current session")
 			}
-			if opened, err := New(cwd, id); err == nil {
+			if opened, err := New(cwd, ConfigFiles{}, id); err == nil {
 				opened.Close()
 				t.Fatal("invalid startup target accepted")
 			}
@@ -46,12 +46,12 @@ func TestSessionOpenRejectsInvalidTargetsWithoutChangingCurrentSession(t *testin
 		t.Fatal(err)
 	}
 	id := strings.TrimSuffix(filepath.Base(path), ".jsonl")
-	if second, err := New(cwd, id); err == nil {
+	if second, err := New(cwd, ConfigFiles{}, id); err == nil {
 		second.Close()
 		t.Fatal("an owned session opened twice")
 	}
 	a.Close()
-	opened, err := New(cwd, id)
+	opened, err := New(cwd, ConfigFiles{}, id)
 	if err != nil {
 		t.Fatal(err)
 	}

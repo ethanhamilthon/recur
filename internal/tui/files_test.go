@@ -19,7 +19,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"recur/internal/agent"
 	"recur/internal/control"
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 func TestFindFileTokenBasics(t *testing.T) {
@@ -305,7 +305,7 @@ func TestFileCompletionEnterDoesNotSubmit(t *testing.T) {
 
 func TestFileCompletionEnterWithImageAcceptsFileFirst(t *testing.T) {
 	m := newModel(&agent.Agent{}, t.TempDir())
-	m.images = []repl.Image{{URL: "data:image/png;base64,AA=="}}
+	m.images = []shell.Image{{URL: "data:image/png;base64,AA=="}}
 	m.fileCompletions = []string{"config.json"}
 	m.fileTokenStart = 0
 	m.fileTokenEnd = 3
@@ -474,7 +474,7 @@ func TestUpDownNavigatesFileCompletions(t *testing.T) {
 func TestReloadClearsFileCache(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
 	dir := t.TempDir()
-	a, err := agent.New(dir)
+	a, err := agent.New(dir, agent.ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -793,7 +793,7 @@ func TestFileCompletionWithAttachedImageAndSteering(t *testing.T) {
 
 	m, _, release := heldModel(t, "")
 	m.cwd = dir
-	m.images = []repl.Image{{URL: "data:image/png;base64,AA==", Path: filepath.Join(dir, "img.png")}}
+	m.images = []shell.Image{{URL: "data:image/png;base64,AA==", Path: filepath.Join(dir, "img.png")}}
 
 	for _, r := range "@ma" {
 		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
@@ -1075,10 +1075,10 @@ func fileSubmitAgent(t *testing.T, dir, url string) *agent.Agent {
 	t.Helper()
 	t.Setenv("RECUR_HOME", t.TempDir())
 	config := fmt.Sprintf("provider = \"p\"\nmodel = \"m\"\n[providers.p]\nbase_url = %q\napi_key = \"k\"\n", url)
-	if err := os.WriteFile(filepath.Join(os.Getenv("RECUR_HOME"), "config.toml"), []byte(config), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(os.Getenv("RECUR_HOME"), "recur.toml"), []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}
-	a, err := agent.New(dir)
+	a, err := agent.New(dir, agent.ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1198,7 +1198,7 @@ func TestFileSubmitWhileBusyQueuesCompleteInput(t *testing.T) {
 	}
 	m, requests, release := heldFileModel(t, dir)
 	m = startHeldTurn(t, m, requests)
-	m.images = []repl.Image{{URL: "data:image/png;base64,AA==", Path: "pic.png"}}
+	m.images = []shell.Image{{URL: "data:image/png;base64,AA==", Path: "pic.png"}}
 	m.input.SetValue("@main.go")
 	m, cmd := pressEnter(m)
 	m = deliver(t, m, cmd)

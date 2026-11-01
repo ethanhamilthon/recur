@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"recur/internal/agent"
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 // maxPendingImages bounds images waiting in the queue plus the running turn.
@@ -48,7 +48,7 @@ type operation struct {
 	cancel    context.CancelFunc
 	started   time.Time
 	steering  *agent.Steering
-	images    []repl.Image           // submitted images, restored when the turn is withdrawn
+	images    []shell.Image          // submitted images, restored when the turn is withdrawn
 	files     []agent.FileAttachment // submitted file snapshots, returned with a withdrawn turn
 	cancelled bool
 	retry     bool
@@ -239,7 +239,7 @@ func (c *Controller) beginTurnLocked(input agent.Input, source string) string {
 	return op.id
 }
 
-func (c *Controller) startLocked(kind string, images []repl.Image) *operation {
+func (c *Controller) startLocked(kind string, images []shell.Image) *operation {
 	c.count++
 	ctx, cancel := context.WithCancel(context.Background())
 	op := &operation{id: fmt.Sprintf("%s-%d", kind, c.count), kind: kind, ctx: ctx, cancel: cancel,

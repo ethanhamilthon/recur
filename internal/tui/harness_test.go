@@ -55,10 +55,10 @@ func testModelConfig(t *testing.T, hold <-chan struct{}, extra string) (model, *
 	}))
 	t.Cleanup(server.Close)
 	config := fmt.Sprintf("provider='p'\nmodel='m'\n%s[providers.p]\nbase_url=%q\n", extra, server.URL)
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "recur.toml"), []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}
-	a, err := agent.New(t.TempDir())
+	a, err := agent.New(t.TempDir(), agent.ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,8 +11,8 @@ import (
 
 	"recur/internal/agent"
 	"recur/internal/control"
-	"recur/internal/repl"
 	"recur/internal/selfupdate"
+	"recur/internal/shell"
 )
 
 // Version is shown on the start screen; main sets it from the VERSION file.
@@ -148,7 +148,7 @@ func (m model) handleControl(e control.Event) (tea.Model, tea.Cmd) {
 // ahead of the text already typed there.
 func (m *model) restoreUnsent(unsent []agent.Input) {
 	var texts []string
-	var images []repl.Image
+	var images []shell.Image
 	for _, in := range unsent {
 		if in.Text != "" {
 			texts = append(texts, in.Text)

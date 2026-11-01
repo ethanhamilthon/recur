@@ -112,7 +112,7 @@ func TestCommandCompletionAndHelp(t *testing.T) {
 }
 func TestNewCommand(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
-	a, err := agent.New(t.TempDir())
+	a, err := agent.New(t.TempDir(), agent.ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}

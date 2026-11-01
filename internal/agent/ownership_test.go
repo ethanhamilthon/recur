@@ -15,7 +15,7 @@ func TestOwnershipChild(t *testing.T) {
 	if mode == "" {
 		return
 	}
-	a, err := New(os.Getenv("RECUR_TEST_CWD"), os.Getenv("RECUR_TEST_SESSION"))
+	a, err := New(os.Getenv("RECUR_TEST_CWD"), ConfigFiles{}, os.Getenv("RECUR_TEST_SESSION"))
 	if mode == "reader" {
 		if err == nil || !strings.Contains(err.Error(), "in use") {
 			t.Fatalf("second process opened an owned session: %v", err)
@@ -33,7 +33,7 @@ func TestOwnershipChild(t *testing.T) {
 func TestOwnershipAcrossProcessesAndCrashRelease(t *testing.T) {
 	home, cwd := t.TempDir(), t.TempDir()
 	t.Setenv("RECUR_HOME", home)
-	a, err := New(cwd)
+	a, err := New(cwd, ConfigFiles{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestOwnershipAcrossProcessesAndCrashRelease(t *testing.T) {
 	if !scanner.Scan() || scanner.Text() != "OWNER" {
 		t.Fatal("child owner did not initialize")
 	}
-	if second, err := New(cwd, id); err == nil {
+	if second, err := New(cwd, ConfigFiles{}, id); err == nil {
 		second.Close()
 		t.Fatal("second client stole ownership")
 	}
@@ -84,7 +84,7 @@ func TestOwnershipAcrossProcessesAndCrashRelease(t *testing.T) {
 	if err = cmd.Wait(); err == nil {
 		t.Fatal("expected killed child exit")
 	}
-	replacement, err := New(cwd, id)
+	replacement, err := New(cwd, ConfigFiles{}, id)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,13 +6,13 @@ import (
 	"strings"
 	"sync"
 
-	"recur/internal/repl"
+	"recur/internal/shell"
 )
 
 // Input keeps attachments with their instruction through acceptance and recall.
 type Input struct {
 	Text   string
-	Images []repl.Image
+	Images []shell.Image
 	Files  []FileAttachment // snapshot taken when the prompt was submitted
 	ID     string           // controller identity of queued steering; empty when the agent queued it itself
 }
@@ -49,7 +49,7 @@ func (a *Agent) commitInput(input Input) {
 }
 
 // Keep original paths in model context without cluttering the terminal labels.
-func imageOriginals(images []repl.Image) string {
+func imageOriginals(images []shell.Image) string {
 	var text strings.Builder
 	for _, img := range images {
 		if img.Path != "" {
