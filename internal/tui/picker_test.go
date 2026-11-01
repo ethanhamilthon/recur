@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"recur/internal/agent"
@@ -246,5 +248,41 @@ func TestCredentialDestinationInLoginAndModelNotices(t *testing.T) {
 	entriesStr = fmt.Sprint(m.entries)
 	if !strings.Contains(entriesStr, "(saved to "+projectToml+")") {
 		t.Fatalf("model selection notice missing destination: %v", m.entries)
+	}
+}
+
+func TestClosingModelPickerCancelsModelListing(t *testing.T) {
+	m, a := pickerModel(t)
+	started, cancelled, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var startOnce, cancelOnce sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startOnce.Do(func() { close(started) })
+		select {
+		case <-r.Context().Done():
+			cancelOnce.Do(func() { close(cancelled) })
+		case <-release:
+		case <-time.After(10 * time.Second):
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { close(release) })
+	if err := a.AddProvider("test", agent.Provider{BaseURL: server.URL}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := m.openPicker("model")
+	go func() { _ = cmd() }()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("model listing did not reach the provider")
+	}
+	next, _, _ := m.pickerKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if next.(model).menuKind != "" {
+		t.Fatal("esc did not close the picker")
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("closing the picker left the model listing running")
 	}
 }

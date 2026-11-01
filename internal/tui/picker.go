@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -21,6 +22,10 @@ type modelChoices struct {
 func (m *model) openPicker(kind string) tea.Cmd {
 	m.pasteGeneration++
 	m.pasting = false
+	if m.menuCancel != nil {
+		m.menuCancel()
+		m.menuCancel = nil
+	}
 	m.menuKind, m.selected = kind, 0
 	m.menu = nil
 	m.input.Reset()
@@ -43,9 +48,11 @@ func (m *model) openPicker(kind string) tea.Cmd {
 			m.effort = i
 		}
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	m.menuCancel = cancel
 	generation, ctl := m.menuGeneration, m.ctl
 	return func() tea.Msg {
-		resp, err := ctl.Submit(control.Request{Type: "models"})
+		resp, err := ctl.SubmitContext(ctx, control.Request{Type: "models"})
 		if err != nil {
 			return modelChoices{generation: generation, err: err}
 		}
