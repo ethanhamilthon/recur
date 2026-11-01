@@ -43,10 +43,11 @@ func hooksConfig(t *testing.T, record, serverURL string) string {
 	return path
 }
 
-func TestHeadlessRunsHooksOnlyWithExplicitFlag(t *testing.T) {
+func TestHeadlessInheritsGlobalHooksUnlessSupportDisabled(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("RECUR_HOME", home)
 	record := filepath.Join(t.TempDir(), "events")
+	tuiRecord := filepath.Join(t.TempDir(), "tui-events")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -54,7 +55,11 @@ func TestHeadlessRunsHooksOnlyWithExplicitFlag(t *testing.T) {
 	}))
 	defer server.Close()
 
-	homeCfg := fmt.Sprintf("provider='test'\nmodel='m'\n[providers.test]\nbase_url=%q\n[hooks.implicit]\nevents = [\"*\"]\ncommand = 'echo \"$RECUR_EVENT|$RECUR_MODE|$RECUR_EXIT_CODE\" >> %s'\n", server.URL, record)
+	// Implicit global hooks run in headless mode; the headless_support = false hook does not.
+	homeCfg := fmt.Sprintf("provider='test'\nmodel='m'\n[providers.test]\nbase_url=%q\n"+
+		"[hooks.implicit]\nevents = [\"*\"]\ncommand = 'echo \"$RECUR_EVENT|$RECUR_MODE|$RECUR_EXIT_CODE\" >> %s'\n"+
+		"[hooks.tui_only]\nevents = [\"*\"]\ncommand = 'echo \"$RECUR_EVENT\" >> %s'\nheadless_support = false\n",
+		server.URL, record, tuiRecord)
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(homeCfg), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -63,21 +68,27 @@ func TestHeadlessRunsHooksOnlyWithExplicitFlag(t *testing.T) {
 	if err := Run(context.Background(), []string{"--prompt", "hi"}, strings.NewReader(""), &out, &diagnostics); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := os.ReadFile(record); len(got) != 0 {
-		t.Fatalf("headless run used implicit hooks: %q", got)
+	got, _ := os.ReadFile(record)
+	want := "recur_start|headless|\nsession_start|headless|\nturn_start|headless|\nsession_title_change|headless|\nmodel_request_start|headless|\nmodel_request_end|headless|\nturn_end|headless|\nsession_end|headless|\nrecur_exit|headless|0\n"
+	if string(got) != want {
+		t.Fatalf("implicit global hook:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+	if tui, _ := os.ReadFile(tuiRecord); len(tui) != 0 {
+		t.Fatalf("headless_support = false hook ran in headless mode: %q", tui)
 	}
 
+	// --no-extend with an explicit --config isolates the global hooks.
+	os.Remove(record)
 	explicitFile := hooksConfig(t, record, server.URL)
 	if err := Run(context.Background(), []string{"--prompt", "hi", "--config", explicitFile, "--no-extend"}, strings.NewReader(""), &out, &diagnostics); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := os.ReadFile(record)
-	want := "recur_start|headless|\nsession_start|headless|\nturn_start|headless|\nsession_title_change|headless|\nmodel_request_start|headless|\nmodel_request_end|headless|\nturn_end|headless|\nsession_end|headless|\nrecur_exit|headless|0\n"
+	got, _ = os.ReadFile(record)
 	if string(got) != want {
-		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+		t.Fatalf("--no-extend run:\ngot:\n%s\nwant:\n%s", got, want)
 	}
 
-	// Without --no-extend, explicit --config inherits global hooks too
+	// Without --no-extend, explicit --config inherits global hooks too.
 	os.Remove(record)
 	if err := Run(context.Background(), []string{"--prompt", "hi", "--config", explicitFile}, strings.NewReader(""), &out, &diagnostics); err != nil {
 		t.Fatal(err)

@@ -49,6 +49,8 @@ type Hook struct {
 	Timeout    int      `toml:"timeout,omitempty"`
 	Enabled    *bool    `toml:"enabled,omitempty"`
 	SendOutput bool     `toml:"send_output,omitempty"`
+	// HeadlessSupport reports whether the hook runs in headless mode; nil means true.
+	HeadlessSupport *bool `toml:"headless_support,omitempty"`
 }
 
 func boolVal(b *bool) bool { return b == nil || *b }

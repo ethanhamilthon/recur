@@ -36,6 +36,15 @@ func source(a *Agent, name string) Source {
 	return Source{}
 }
 
+// hookNames lists the active hook names of a in sorted order, comma separated.
+func hookNames(a *Agent) string {
+	var names []string
+	for _, h := range a.hooks.List() {
+		names = append(names, h.Name)
+	}
+	return strings.Join(names, ",")
+}
+
 func TestConfigSourcesPriority(t *testing.T) {
 	home, cwd := t.TempDir(), t.TempDir()
 	t.Setenv("RECUR_HOME", home)
@@ -84,15 +93,17 @@ func TestConfigSourcesPriority(t *testing.T) {
 		t.Fatalf("no-extend sources: %+v", a.Sources)
 	}
 
-	// Headless without explicit config has no hooks
+	// Headless inherits the global and project hooks, same as the TUI
 	a = open(ConfigFiles{Headless: true})
-	if len(a.hooks.DrainOutputs("any")) != 0 {
-		t.Fatalf("headless without explicit config must have no hooks")
+	if got := hookNames(a); got != "h1,h2" {
+		t.Fatalf("headless implicit hooks = %q, want h1,h2", got)
 	}
 
 	// Headless with explicit config has hooks
 	a = open(ConfigFiles{Headless: true, Config: flagged})
-	_ = a
+	if got := hookNames(a); got != "h1,h3" {
+		t.Fatalf("headless explicit hooks = %q, want h1,h3", got)
+	}
 
 	// Missing explicit --config must fail
 	if _, err := NewWith(cwd, ConfigFiles{Config: filepath.Join(cwd, "missing.toml")}); err == nil {
@@ -308,14 +319,14 @@ timeout = 10
 		t.Fatal(err)
 	}
 
-	// 1. Implicit headless: no hooks active
+	// 1. Implicit headless: global hooks are active, as in the TUI
 	aImplicit, err := NewWith(cwd, ConfigFiles{Headless: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer aImplicit.Close()
-	if aImplicit.hooks != nil && len(aImplicit.hooks.List()) > 0 {
-		t.Fatalf("expected 0 hooks in implicit headless, got %d", len(aImplicit.hooks.List()))
+	if got := hookNames(aImplicit); got != "global_hook,partial_override" {
+		t.Fatalf("implicit headless hooks = %q, want global_hook,partial_override", got)
 	}
 
 	// 2. Explicit headless without --no-extend: inherits global hooks, and partial override inherits command/events
@@ -390,5 +401,68 @@ timeout = 5
 	_, err = NewWith(cwd, ConfigFiles{Headless: true, Config: missingReqPath})
 	if err == nil {
 		t.Fatal("expected validateHooks error for incomplete hook, but got nil")
+	}
+}
+
+func TestHeadlessSupportField(t *testing.T) {
+	home, cwd := t.TempDir(), t.TempDir()
+	t.Setenv("RECUR_HOME", home)
+	write(t, filepath.Join(home, "config.toml"), `provider = "p"
+model = "m"
+[providers.p]
+base_url = "https://example.com"
+
+[hooks.default_on]
+events = ["turn_end"]
+command = "true"
+
+[hooks.tui_only]
+events = ["turn_end"]
+command = "true"
+headless_support = false
+`)
+	open := func(files ConfigFiles) *Agent {
+		t.Helper()
+		a, err := NewWith(cwd, files)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(a.Close)
+		return a
+	}
+
+	// Default is true; the TUI runs every hook, including headless_support = false.
+	tui := open(ConfigFiles{})
+	if got := hookNames(tui); got != "default_on,tui_only" {
+		t.Fatalf("tui hooks = %q", got)
+	}
+	for _, h := range tui.hooks.List() {
+		if h.HeadlessSupport == nil {
+			t.Fatalf("hook %s: headless_support not resolved", h.Name)
+		}
+		if want := h.Name != "tui_only"; *h.HeadlessSupport != want {
+			t.Fatalf("hook %s: headless_support = %v, want %v", h.Name, *h.HeadlessSupport, want)
+		}
+	}
+
+	// Headless skips the hook with headless_support = false.
+	if got := hookNames(open(ConfigFiles{Headless: true})); got != "default_on" {
+		t.Fatalf("headless hooks = %q, want default_on", got)
+	}
+
+	// A project recur.toml can flip the flag for an inherited hook by name.
+	write(t, filepath.Join(cwd, "recur.toml"), "[hooks.default_on]\nheadless_support = false\n\n[hooks.tui_only]\nheadless_support = true\n")
+	if got := hookNames(open(ConfigFiles{Headless: true})); got != "tui_only" {
+		t.Fatalf("headless hooks with project override = %q, want tui_only", got)
+	}
+	if got := hookNames(open(ConfigFiles{})); got != "default_on,tui_only" {
+		t.Fatalf("tui hooks with project override = %q", got)
+	}
+
+	// Non-boolean values are rejected by strict parsing.
+	bad := filepath.Join(t.TempDir(), "bad.toml")
+	write(t, bad, "[hooks.bad]\nevents = [\"turn_end\"]\ncommand = \"true\"\nheadless_support = \"no\"\n")
+	if _, err := NewWith(cwd, ConfigFiles{Config: bad}); err == nil {
+		t.Fatal("non-boolean headless_support must fail")
 	}
 }

@@ -76,11 +76,12 @@ type rawShell struct {
 }
 
 type rawHook struct {
-	Events     *[]string `toml:"events"`
-	Command    *string   `toml:"command"`
-	Timeout    *int      `toml:"timeout"`
-	Enabled    *bool     `toml:"enabled"`
-	SendOutput *bool     `toml:"send_output"`
+	Events          *[]string `toml:"events"`
+	Command         *string   `toml:"command"`
+	Timeout         *int      `toml:"timeout"`
+	Enabled         *bool     `toml:"enabled"`
+	SendOutput      *bool     `toml:"send_output"`
+	HeadlessSupport *bool     `toml:"headless_support"`
 }
 
 func parseRaw(data []byte) (rawConfig, error) {
@@ -169,6 +170,9 @@ func applyLayer(s *Settings, system *string, hooksMap map[string]hooks.Hook, raw
 		if h.SendOutput != nil {
 			cur.SendOutput = *h.SendOutput
 		}
+		if h.HeadlessSupport != nil {
+			cur.HeadlessSupport = h.HeadlessSupport
+		}
 		hooksMap[k] = cur
 	}
 }
@@ -196,6 +200,8 @@ func validateHooks(m map[string]hooks.Hook) ([]hooks.Hook, error) {
 		}
 		b := enabled
 		h.Enabled = &b
+		headless := h.HeadlessSupport == nil || *h.HeadlessSupport
+		h.HeadlessSupport = &headless
 		list = append(list, h)
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
@@ -293,8 +299,8 @@ func loadConfiguration(home, cwd string, files ConfigFiles) (c configuration, er
 		return c, fmt.Errorf("%s: %w", primaryPath, err)
 	}
 
-	if files.Headless && files.Config == "" {
-		hookList = nil
+	if files.Headless {
+		hookList = slices.DeleteFunc(hookList, func(h hooks.Hook) bool { return !*h.HeadlessSupport })
 	}
 
 	if err := validateSettings(s); err != nil {

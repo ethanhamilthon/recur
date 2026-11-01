@@ -31,7 +31,8 @@ physical file (a same-file alias), the file is read only once.
 The `--no-extend` flag tells Recur to skip reading the separate global base
 configuration (`$RECUR_HOME/config.toml`). It does not disable built-in defaults,
 nor does it prevent loading `$RECUR_HOME/config.toml` when that file is itself
-the selected primary configuration.
+the selected primary configuration. It applies to headless runs the same way as
+to the TUI; the default is to inherit the global configuration.
 
 Merging rules:
 - Tables merge recursively by key (`[ui]`, `[shell]`, `[env]`, `[providers]`, `[hooks]`).
@@ -239,12 +240,15 @@ timeout = 180
   inherited hook with the same name.
 - `send_output`: boolean flag (default `false`). When `true`, stdout/stderr output
   is captured and queued for delivery at the start of the next turn.
+- `headless_support`: boolean flag (default `true`). Setting `headless_support = false`
+  keeps the hook from running in headless runs (`recur -prompt` or `--mode jsonl`).
+  The hook still runs in the TUI.
 
 See `recur docs hooks` for full hook details and lifecycle events.
 
 ## Headless Mode Hooks
 
-In headless runs (`recur -prompt '...'` or `recur --mode jsonl`), implicit hooks
-defined in `./recur.toml` or `$RECUR_HOME/config.toml` are disabled. Hooks only run
-when an explicit configuration file is provided via `--config PATH`. To prevent
-inheriting global hooks in headless mode, combine with `--no-extend`.
+Headless runs (`recur -prompt '...'` or `recur --mode jsonl`) load the same
+configuration as the TUI, so hooks from `./recur.toml` and `$RECUR_HOME/config.toml`
+run without `--config`. Hooks with `headless_support = false` are skipped in
+headless runs only.

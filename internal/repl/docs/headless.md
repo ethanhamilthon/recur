@@ -19,14 +19,14 @@ Output modes:
 In headless mode, stdout contains raw program output without terminal escape
 sequences.
 
-## Hook Isolation
+## Hooks
 
-Hooks (see `recur docs hooks`) are disabled by default in headless runs. Implicit
-project or global configuration files do not activate hooks.
+Headless runs load the same configuration as the TUI, including hooks (see
+`recur docs hooks`). The project `recur.toml` and `$RECUR_HOME/config.toml` activate
+hooks without `--config`, and `--no-extend` behaves the same way as in the TUI.
 
-Hooks run in headless mode ONLY when an explicit configuration file is supplied
-via `--config PATH`. Combine `--config PATH` with `--no-extend` to ensure no
-global hooks are inherited.
+Hooks with `headless_support = false` never run in headless mode; they still run
+in the TUI.
 
 In headless mode:
 - `RECUR_MODE` is set to `headless`.
