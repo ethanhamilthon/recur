@@ -25,16 +25,21 @@ type provider struct {
 	server  *httptest.Server
 	hold    chan struct{}
 	started chan struct{}
+	listed  chan struct{} // one value per model listing request that reaches the provider
 	mu      sync.Mutex
 	bodies  []string
 }
 
 func newProvider(t *testing.T, hold chan struct{}) *provider {
 	t.Helper()
-	p := &provider{hold: hold, started: make(chan struct{}, 64)}
+	p := &provider{hold: hold, started: make(chan struct{}, 64), listed: make(chan struct{}, 64)}
 	p.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		if r.Method == http.MethodGet {
+			select {
+			case p.listed <- struct{}{}:
+			default:
+			}
 			if p.hold != nil {
 				select {
 				case <-p.hold:
