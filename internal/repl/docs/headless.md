@@ -62,7 +62,8 @@ project directory.
 
 `command` names: `/new`, `/resume` (`args.session_id`), `/rename`
 (`args.title`), `/compact` (`args.prompt`), `/reload`, `/quit`, `/help`, `/model`
-(no arguments lists models; `args.provider`/`args.model` selects),
+(no arguments lists models and runs in the background like `models`;
+`args.provider`/`args.model` selects),
 `/login` (`args.base_url` adds; `args.name` selects; no arguments lists providers).
 An unknown name is `unknown_command`. Slash-prefixed text sent as `input` is an
 ordinary message.
@@ -147,12 +148,16 @@ terminal `done` with `status: cancelled`.
 ## Lifecycle
 
 - stdin end (EOF): no new inputs are accepted; accepted work drains (its `done`
-  is emitted), the session is saved, then `shutdown` with `reason: eof`.
+  is emitted) and pending model listings finish (their `result` is emitted). The
+  session is saved, then `shutdown` with `reason: eof`. Work and listings share a
+  10-second grace period; after it, work is interrupted and listings are cancelled.
 - `quit`: cancels active work, reports unaccepted inputs in `done.unsent`, saves,
   and exits with `reason: quit`. A save failure is reported and the service
   keeps running.
-- Interrupt (SIGINT/SIGTERM): active work is stopped, the session is saved, and
-  the process exits with `reason: signal`.
+- Interrupt (SIGINT/SIGTERM): active work is stopped, pending model listings are
+  cancelled, the session is saved, and the process exits with `reason: signal`.
+  A cancelled listing is answered with `ok: false` and code `cancelled`, before
+  `shutdown`.
 - Broken stdout, or a backlog beyond the 4096-line output limit: active work is
   stopped and the process exits with `broken_output` or `output_overflow`.
 - A failed turn is reported in `done` and does not end the service. The process

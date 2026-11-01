@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"path/filepath"
 	"slices"
@@ -15,26 +16,44 @@ import (
 // Submit applies one request. Synchronous requests return their outcome; background
 // work reports through events. A "command" runs the operation its slash name names.
 func (c *Controller) Submit(req Request) (Response, error) {
-	if req.Type == "command" {
-		mapped, err := commandRequest(req)
-		if err != nil {
-			return Response{}, err
-		}
-		req = mapped
+	return c.SubmitContext(context.Background(), req)
+}
+
+// SubmitContext is Submit for callers that can abandon a request. Cancelling ctx
+// ends a model listing with a "cancelled" error; other requests are not affected.
+func (c *Controller) SubmitContext(ctx context.Context, req Request) (Response, error) {
+	mapped, err := Normalize(req)
+	if err != nil {
+		return Response{}, err
 	}
-	if req.Type == "models" {
-		return c.models()
+	if mapped.Type == "models" {
+		return c.models(ctx)
 	}
 	var resp Response
-	var err error
 	c.view(func() {
 		if c.shut {
 			err = fail("closed", "the session is closed")
 			return
 		}
-		resp, err = c.dispatchLocked(req)
+		resp, err = c.dispatchLocked(mapped)
 	})
 	return resp, err
+}
+
+// Normalize maps a "command" request onto the request type its slash name
+// names, keeping the request ID. Other requests are returned unchanged. Adapters
+// classify by the normalized type, so a command gets the handling of its
+// operation: "/model" is a listing, just like type "models".
+func Normalize(req Request) (Request, error) {
+	if req.Type != "command" {
+		return req, nil
+	}
+	mapped, err := commandRequest(req)
+	if err != nil {
+		return Request{}, err
+	}
+	mapped.ID = req.ID
+	return mapped, nil
 }
 
 func (c *Controller) dispatchLocked(req Request) (Response, error) {
@@ -172,7 +191,10 @@ func (c *Controller) queueLocked(input agent.Input) (Response, error) {
 	if err := c.admit(input); err != nil {
 		return Response{}, err
 	}
+	c.inputs++
+	input.ID = fmt.Sprintf("steer-%d", c.inputs)
 	if !c.active.steering.PushInput(input) {
+		c.inputs--
 		return Response{}, fail("queue_full", "Steering queue is full; your message remains in the input.")
 	}
 	c.queued = append(c.queued, input)
@@ -194,7 +216,7 @@ func (c *Controller) recall() (Response, error) {
 		return Response{}, notRecallable
 	}
 	for i := len(c.queued) - 1; i >= 0; i-- {
-		if c.queued[i].Display() == input.Display() {
+		if c.queued[i].ID == input.ID {
 			c.queued = slices.Delete(c.queued, i, i+1)
 			break
 		}
@@ -288,7 +310,7 @@ func (c *Controller) compact(prompt string) (Response, error) {
 }
 
 // models lists provider models without holding the lock during network calls.
-func (c *Controller) models() (Response, error) {
+func (c *Controller) models(parent context.Context) (Response, error) {
 	var settings agent.Settings
 	var err error
 	c.view(func() {
@@ -300,9 +322,15 @@ func (c *Controller) models() (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if parent.Err() != nil {
+		return Response{}, fail("cancelled", "the model listing was cancelled")
+	}
+	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 	choices, failures := agent.AllModels(ctx, settings.Providers, settings.Environment)
+	if parent.Err() != nil {
+		return Response{}, fail("cancelled", "the model listing was cancelled")
+	}
 	list := ModelList{Models: []ModelInfo{}, Errors: map[string]string{}}
 	for _, choice := range choices {
 		list.Models = append(list.Models, ModelInfo{Provider: choice.Provider, Model: choice.Model})

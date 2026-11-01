@@ -14,6 +14,7 @@ type Input struct {
 	Text   string
 	Images []repl.Image
 	Files  []FileAttachment // snapshot taken when the prompt was submitted
+	ID     string           // controller identity of queued steering; empty when the agent queued it itself
 }
 
 func (input Input) Display() string {
@@ -28,7 +29,9 @@ func (input Input) Display() string {
 }
 func (a *Agent) addInput(input Input, emit func(Event), steering bool) {
 	a.commitInput(input)
-	emit(inputEvent(input, steering))
+	e := inputEvent(input, steering)
+	e.InputID = input.ID // lets the controller drop exactly the instruction it accepted
+	emit(e)
 }
 
 // commitInput appends the input to API history without displaying it.

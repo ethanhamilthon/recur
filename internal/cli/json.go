@@ -53,38 +53,55 @@ func serveJSON(ctx context.Context, a *agent.Agent, cwd string, in io.Reader, ou
 	c := control.New(a, func(e control.Event) { t.emit(e) })
 	c.SetInteractive(false)
 	runCtx, stopRun := context.WithCancel(ctx)
-	defer stopRun()
-	go func() { _ = c.Run(runCtx) }()
-	defer t.close()
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		_ = c.Run(runCtx)
+	}()
+
+	// Model listings run under listCtx. Shutdown cancels them and waits for their
+	// results to be written, so the final record always comes last.
+	listCtx, cancelListings := context.WithCancel(ctx)
+	pending := newInFlight()
+	reader := startReader(in)
+	records := reader.records
+	var drained <-chan struct{} // closed once stdin has ended and accepted work has settled
+	defer func() {
+		stopListings(cancelListings, pending)
+		stopRun()
+		joinWithin(runDone, shutdownGrace)
+		if drained != nil {
+			joinWithin(drained, shutdownGrace)
+		}
+		reader.closeReader(shutdownGrace)
+		t.close()
+	}()
 
 	t.emit(readyRecord(c, cwd))
-	records := make(chan inputRecord)
-	stopReader := make(chan struct{})
-	defer close(stopReader)
-	go readRecords(in, records, stopReader)
-
-	pending := newInFlight()
-	var drained <-chan struct{} // closed once stdin has ended and accepted work has settled
 	for {
 		select {
 		case <-ctx.Done():
+			stopListings(cancelListings, pending)
 			interrupt(c)
 			t.finish("signal")
 			return ctx.Err()
 		case <-t.broken:
+			stopListings(cancelListings, pending)
 			interrupt(c)
 			t.finish("broken_output")
 			return fmt.Errorf("writing protocol output: %w", t.failure())
 		case <-t.overflow:
+			stopListings(cancelListings, pending)
 			interrupt(c)
 			t.finish("output_overflow")
 			fmt.Fprintln(diagnostics, "recur: JSON output backlog exceeded; the session was stopped")
 			return errors.New("JSON output backlog exceeded")
 		case <-c.Closed():
+			stopListings(cancelListings, pending)
 			t.finish(c.Reason())
 			return nil
 		case <-drained:
-			// Accepted work has finished (or the grace period ended): save and exit.
+			// Accepted work and listings have finished (or the grace period ended): save and exit.
 			err := c.Shutdown("eof")
 			t.finish("eof")
 			if err == nil && t.failure() != nil {
@@ -96,27 +113,40 @@ func serveJSON(ctx context.Context, a *agent.Agent, cwd string, in io.Reader, ou
 				// Stdin ended: stop reading and let accepted work drain. The other
 				// cases stay live, so a broken stdout still cancels that work.
 				records = nil
-				drained = waitIdle(ctx, c)
+				drained = drain(c, pending, cancelListings)
 				continue
 			}
-			handleRecord(c, cwd, rec, t, pending)
+			handleRecord(listCtx, c, cwd, rec, t, pending)
 		}
 	}
 }
 
-// waitIdle closes the returned channel once no operation is active, or once the
-// shutdown grace period ends. If work is still running at that point it is interrupted.
-func waitIdle(ctx context.Context, c *control.Controller) <-chan struct{} {
+// drain runs after stdin ends. It waits for accepted operations and listings;
+// one shutdownGrace deadline covers both. When it passes, the operation is
+// interrupted and listings are cancelled, and their results are still written.
+func drain(c *control.Controller, pending *inFlight, cancelListings context.CancelFunc) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		waitCtx, cancel := context.WithTimeout(ctx, shutdownGrace)
+		ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 		defer cancel()
-		if err := c.Wait(waitCtx); err != nil {
+		if err := c.Wait(ctx); err != nil {
 			interrupt(c)
+		}
+		if err := pending.wait(ctx); err != nil {
+			stopListings(cancelListings, pending)
 		}
 	}()
 	return done
+}
+
+// stopListings cancels accepted listings and waits, for at most shutdownGrace,
+// until each has written its result. Call it before the transport closes.
+func stopListings(cancel context.CancelFunc, pending *inFlight) {
+	cancel()
+	ctx, done := context.WithTimeout(context.Background(), shutdownGrace)
+	defer done()
+	_ = pending.wait(ctx)
 }
 
 // interrupt stops active work so its turn ends with a cancelled done event.
@@ -127,9 +157,11 @@ func interrupt(c *control.Controller) {
 	_ = c.Wait(waitCtx)
 }
 
-// handleRecord decodes one stdin record and answers it. Model listings run in
-// the background so stop and steering stay responsive while they wait.
-func handleRecord(c *control.Controller, cwd string, rec inputRecord, t *transport, pending *inFlight) {
+// handleRecord decodes one stdin record and answers it. A slash command is
+// normalized before anything else, so it is classified by the operation it
+// names. Model listings run in the background so stop and steering stay
+// responsive while they wait.
+func handleRecord(listCtx context.Context, c *control.Controller, cwd string, rec inputRecord, t *transport, pending *inFlight) {
 	if rec.tooLong {
 		t.protocolError("record_too_large", fmt.Sprintf("input record exceeds %d bytes", maxRecordBytes))
 		return
@@ -143,7 +175,9 @@ func handleRecord(c *control.Controller, cwd string, rec inputRecord, t *transpo
 		t.protocolError("missing_id", "every request needs a non-empty id")
 		return
 	}
-	if !pending.begin(req.ID, req.Type == "models") {
+	mapped, normErr := control.Normalize(control.Request{ID: req.ID, Type: req.Type, Text: req.Text, Name: req.Name, Args: req.Args})
+	listing := normErr == nil && mapped.Type == "models"
+	if !pending.begin(req.ID, listing) {
 		busy := &control.Error{Code: "busy", Message: "too many model listings are in flight"}
 		code := &control.Error{Code: "duplicate_id", Message: "a request with this id is still in flight"}
 		if pending.has(req.ID) {
@@ -153,16 +187,21 @@ func handleRecord(c *control.Controller, cwd string, rec inputRecord, t *transpo
 		}
 		return
 	}
-	if req.Type == "models" {
+	if normErr != nil {
+		t.result(req.ID, control.Response{}, normErr)
+		pending.end(req.ID, false)
+		return
+	}
+	if listing {
 		go func() {
 			defer pending.end(req.ID, true)
-			resp, err := c.Submit(control.Request{Type: "models"})
+			resp, err := c.SubmitContext(listCtx, mapped)
 			t.result(req.ID, resp, err)
 		}()
 		return
 	}
 	defer pending.end(req.ID, false)
-	prepared, err := prepare(c, cwd, req)
+	prepared, err := prepare(c, cwd, mapped, req.Images, req.Files)
 	if err != nil {
 		t.result(req.ID, control.Response{}, err)
 		return
@@ -172,21 +211,22 @@ func handleRecord(c *control.Controller, cwd string, rec inputRecord, t *transpo
 }
 
 // prepare converts paths into image and file snapshots before the controller sees the request.
-func prepare(c *control.Controller, cwd string, req request) (control.Request, error) {
+func prepare(c *control.Controller, cwd string, req control.Request, imagePaths, filePaths []string) (control.Request, error) {
 	settings := c.Settings()
-	out := control.Request{Type: req.Type, Text: req.Text, Name: req.Name, Args: req.Args}
-	if len(req.Images) > maxImagesPerInput {
+	out := req
+	out.Images, out.Files = nil, nil
+	if len(imagePaths) > maxImagesPerInput {
 		return out, &control.Error{Code: "attachment_limit", Message: fmt.Sprintf("at most %d images per request", maxImagesPerInput)}
 	}
-	for _, path := range req.Images {
+	for _, path := range imagePaths {
 		image, err := repl.CaptureImageCopy(resolvePath(cwd, path), attachmentDirectory(settings, cwd))
 		if err != nil {
 			return out, &control.Error{Code: "invalid_image", Message: fmt.Sprintf("%s: %v", path, err)}
 		}
 		out.Images = append(out.Images, image)
 	}
-	if len(req.Files) > 0 {
-		files, err := agent.ReadTextFiles(cwd, req.Files, settings.MaxFileBytes)
+	if len(filePaths) > 0 {
+		files, err := agent.ReadTextFiles(cwd, filePaths, settings.MaxFileBytes)
 		if err != nil {
 			return out, &control.Error{Code: "invalid_file", Message: err.Error()}
 		}
@@ -292,14 +332,69 @@ func readRecord(reader *bufio.Reader) ([]byte, bool, error) {
 	}
 }
 
+// joinWithin waits for done to close, for at most grace. It reports whether done closed.
+func joinWithin(done <-chan struct{}, grace time.Duration) bool {
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
+	}
+}
+
+// inputReader owns the goroutine that frames stdin. Go cannot interrupt a
+// goroutine blocked in a read, so closeReader unblocks a read only when the
+// input supports deadlines (pipes from os.Pipe, network connections). os.Stdin
+// is usually a plain descriptor without deadlines. There the goroutine stays
+// blocked until the next read completes, and that read's record is discarded.
+// The process exits soon after, so nothing else reads stdin; callers must not
+// read it again after serveJSON returns.
+type inputReader struct {
+	records  chan inputRecord
+	stop     chan struct{}
+	done     chan struct{} // closed when the goroutine returns
+	in       io.Reader
+	stopOnce sync.Once
+}
+
+func startReader(in io.Reader) *inputReader {
+	r := &inputReader{records: make(chan inputRecord), stop: make(chan struct{}), done: make(chan struct{}), in: in}
+	go func() {
+		defer close(r.done)
+		readRecords(in, r.records, r.stop)
+	}()
+	return r
+}
+
+// closeReader signals the goroutine. With a deadline-capable input it unblocks a
+// pending read and waits up to grace for the goroutine to return. Otherwise it
+// does not wait at all: a blocked read could not be interrupted, and waiting
+// would hold up shutdown for the whole grace period on an idle terminal. It
+// reports whether the goroutine had already returned.
+func (r *inputReader) closeReader(grace time.Duration) bool {
+	r.stopOnce.Do(func() { close(r.stop) })
+	if d, ok := r.in.(interface{ SetReadDeadline(time.Time) error }); ok {
+		_ = d.SetReadDeadline(time.Now())
+		return joinWithin(r.done, grace)
+	}
+	return joinWithin(r.done, 0)
+}
+
 // inFlight tracks request ids whose results are still pending, and how many model listings run.
 type inFlight struct {
 	mu       sync.Mutex
 	ids      map[string]bool
 	listings int
+	quiet    chan struct{} // closed while no listing is in flight
 }
 
-func newInFlight() *inFlight { return &inFlight{ids: map[string]bool{}} }
+func newInFlight() *inFlight {
+	quiet := make(chan struct{})
+	close(quiet)
+	return &inFlight{ids: map[string]bool{}, quiet: quiet}
+}
 
 // begin reserves id; it fails for a duplicate id or when too many listings run.
 func (f *inFlight) begin(id string, listing bool) bool {
@@ -310,6 +405,9 @@ func (f *inFlight) begin(id string, listing bool) bool {
 	}
 	f.ids[id] = true
 	if listing {
+		if f.listings == 0 {
+			f.quiet = make(chan struct{})
+		}
 		f.listings++
 	}
 	return true
@@ -321,28 +419,47 @@ func (f *inFlight) has(id string) bool {
 	return f.ids[id]
 }
 
+// end releases id. Call it after the result has been written, so that waiting for
+// listings means their results are out.
 func (f *inFlight) end(id string, listing bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	delete(f.ids, id)
 	if listing {
 		f.listings--
+		if f.listings == 0 {
+			close(f.quiet)
+		}
+	}
+}
+
+// wait blocks until no listing is in flight or ctx ends. It reports ctx's error in the latter case.
+func (f *inFlight) wait(ctx context.Context) error {
+	f.mu.Lock()
+	quiet := f.quiet
+	f.mu.Unlock()
+	select {
+	case <-quiet:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
 // transport is the single writer of stdout. Emission never blocks: a full
 // backlog is reported through overflow so the controller can stop safely.
 type transport struct {
-	out      io.Writer
-	mu       sync.Mutex
-	seq      int
-	closed   bool
-	ended    bool
-	err      error
-	ch       chan map[string]any
-	done     chan struct{}
-	broken   chan struct{}
-	overflow chan struct{}
+	out       io.Writer
+	mu        sync.Mutex
+	seq       int
+	closed    bool
+	ended     bool
+	err       error
+	ch        chan map[string]any
+	done      chan struct{}
+	broken    chan struct{}
+	overflow  chan struct{}
+	closeOnce sync.Once
 }
 
 func newTransport(out io.Writer) *transport {
@@ -403,21 +520,24 @@ func (t *transport) emit(v any) {
 	}
 }
 
-// close stops accepting records and waits briefly for the writer to flush. It is
-// safe to call more than once; only the first call waits.
+// close stops accepting records and waits up to flushGrace for the writer to flush.
+// A writer still blocked in Write is unblocked through SetWriteDeadline when the
+// output supports deadlines; otherwise it stays blocked until that Write returns
+// (see inputReader for the same limit on stdin). Only the first call does this work.
 func (t *transport) close() {
-	t.mu.Lock()
-	if t.closed {
+	t.closeOnce.Do(func() {
+		t.mu.Lock()
+		t.closed = true
+		close(t.ch)
 		t.mu.Unlock()
-		return
-	}
-	t.closed = true
-	close(t.ch)
-	t.mu.Unlock()
-	select {
-	case <-t.done:
-	case <-time.After(flushGrace):
-	}
+		if joinWithin(t.done, flushGrace) {
+			return
+		}
+		if d, ok := t.out.(interface{ SetWriteDeadline(time.Time) error }); ok {
+			_ = d.SetWriteDeadline(time.Now())
+			joinWithin(t.done, flushGrace)
+		}
+	})
 }
 
 // finish writes the shutdown record once and closes the transport.

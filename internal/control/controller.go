@@ -31,6 +31,7 @@ type Controller struct {
 	active   *operation
 	idle     chan struct{} // closed when active ends; nil while idle
 	queued   []agent.Input // steering accepted by Submit but not yet taken by the agent
+	inputs   int           // counts queued steering, for their identities
 	deferred *deferredAction
 	journal  []agent.Record // display journal, the same records the agent persists
 	closing  bool
@@ -267,14 +268,21 @@ func (c *Controller) runTurn(op *operation, input agent.Input) {
 // observe applies one agent event to controller state before reporting it.
 func (c *Controller) observe(op *operation, e agent.Event) {
 	c.view(func() {
-		if e.Kind == "user" && e.Steering && len(c.queued) > 0 && c.queued[0].Display() == e.Text {
-			c.queued = c.queued[1:]
+		if e.Steering && e.InputID != "" {
+			c.acknowledge(e.InputID)
 		}
 		if e.Kind == "withdraw" {
 			op.retry, op.retryText = true, e.Text
 		}
 		c.publish(Event{Kind: "agent", Turn: op.id, Agent: &e})
 	})
+}
+
+// acknowledge drops the queued input the agent accepted. Identity decides, not
+// the display kind or the text: <notify> steering is shown as a notice, and two
+// inputs may carry the same text.
+func (c *Controller) acknowledge(id string) {
+	c.queued = slices.DeleteFunc(c.queued, func(in agent.Input) bool { return in.ID == id })
 }
 
 // finishTurn ends a turn exactly once. Queued instructions either start the next

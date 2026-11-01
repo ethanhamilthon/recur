@@ -18,7 +18,8 @@ func TestFinishedTurnPromotesQueuedInputsInOrder(t *testing.T) {
 	var op *operation
 	h.c.view(func() {
 		op = h.c.startLocked("turn", nil)
-		h.c.queued = []agent.Input{{Text: "next"}, {Text: "after"}}
+		// Queued steering always carries the identity queueLocked gives it.
+		h.c.queued = []agent.Input{{ID: "steer-1", Text: "next"}, {ID: "steer-2", Text: "after"}}
 		for _, in := range h.c.queued {
 			op.steering.PushInput(in)
 		}
