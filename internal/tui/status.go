@@ -3,6 +3,7 @@ package tui
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -139,6 +140,7 @@ func runSingleStatusCommand(ctx context.Context, cmdStr string, snap StatusSnaps
 	defer cancel()
 
 	cmd := exec.CommandContext(cmdCtx, "/bin/bash", "--noprofile", "--norc", "-c", cmdStr)
+	cmd.WaitDelay = 100 * time.Millisecond
 	if snap.Cwd != "" {
 		if fi, err := os.Stat(snap.Cwd); err == nil && fi.IsDir() {
 			cmd.Dir = snap.Cwd
@@ -160,12 +162,15 @@ func runSingleStatusCommand(ctx context.Context, cmdStr string, snap StatusSnaps
 		env = append(env, e)
 	}
 	for k, v := range snap.Environment {
-		if k == "BASH_ENV" {
+		if k == "BASH_ENV" || strings.HasSuffix(k, "_FILE") {
 			continue
 		}
 		env = append(env, k+"="+v)
 	}
 	for k, v := range snap.Metadata {
+		if strings.HasSuffix(k, "_FILE") || !agent.IsAllowedStatusMetadataKey(k) {
+			continue
+		}
 		env = append(env, k+"="+v)
 	}
 	env = append(env, "PAGER=cat", "GIT_PAGER=cat")
@@ -176,7 +181,9 @@ func runSingleStatusCommand(ctx context.Context, cmdStr string, snap StatusSnaps
 	cmd.Stderr = nil
 
 	if err := cmd.Run(); err != nil {
-		logStatusFailure(snap.Home, cmdStr, err)
+		if ctx.Err() == nil && cmdCtx.Err() != context.Canceled && !errors.Is(err, context.Canceled) {
+			logStatusFailure(snap.Home, cmdStr, err)
+		}
 		return "", err
 	}
 	return sanitizeStatusSegment(buf.String()), nil
@@ -322,9 +329,10 @@ func (m *model) triggerStatusRefresh(eventVars map[string]string) tea.Cmd {
 
 	meta := make(map[string]string, len(eventVars)+10)
 	for k, v := range eventVars {
-		if strings.HasPrefix(k, "RECUR_") {
-			meta[k] = v
+		if strings.HasSuffix(k, "_FILE") || !agent.IsAllowedStatusMetadataKey(k) {
+			continue
 		}
+		meta[k] = v
 	}
 	meta["RECUR_CWD"] = m.cwd
 	meta["RECUR_VERSION"] = Version

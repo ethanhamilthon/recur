@@ -2,9 +2,12 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -279,5 +282,183 @@ func TestDefaultBashFormatting(t *testing.T) {
 	}
 	if right != "~/work/demo" {
 		t.Fatalf("default right = %q, want '~/work/demo'", right)
+	}
+}
+
+func TestStatusPayloadRegressionExecStillWorks(t *testing.T) {
+	ctx := context.Background()
+	sem := make(chan struct{}, 4)
+
+	hugeMessage := strings.Repeat("M", 200*1024)  // 200 KB
+	hugeCommand := strings.Repeat("C", 1024*1024) // 1 MB
+	hugeNotify := strings.Repeat("N", 1024*1024)  // 1 MB
+
+	// Test 1: Via triggerStatusRefresh with model
+	m := newModel(&agent.Agent{}, t.TempDir())
+	eventVars := map[string]string{
+		"RECUR_EVENT":        "turn_start",
+		"RECUR_TURN_SOURCE":  "user",
+		"RECUR_MESSAGE_FILE": hugeMessage,
+		"RECUR_COMMAND_FILE": hugeCommand,
+		"RECUR_NOTIFY_FILE":  hugeNotify,
+		"RANDOM_UNALLOWED":   "drop_me",
+	}
+	cmd := m.triggerStatusRefresh(eventVars)
+	if cmd == nil {
+		t.Fatal("expected non-nil cmd from triggerStatusRefresh")
+	}
+
+	// Test 2: StatusSnapshot evaluation with commands checking for payload leak
+	snap := StatusSnapshot{
+		Cwd: t.TempDir(),
+		Metadata: map[string]string{
+			"RECUR_EVENT":       "turn_start",
+			"RECUR_TURN_SOURCE": "user",
+			// Maliciously / accidentally injected payloads:
+			"RECUR_MESSAGE_FILE": hugeMessage,
+			"RECUR_COMMAND_FILE": hugeCommand,
+			"RECUR_NOTIFY_FILE":  hugeNotify,
+			"RANDOM_UNALLOWED":   "drop_me",
+		},
+		LeftCmds: []string{
+			`echo "event=$RECUR_EVENT source=$RECUR_TURN_SOURCE"`,
+			`echo "msg=${RECUR_MESSAGE_FILE:-none} cmd=${RECUR_COMMAND_FILE:-none} notify=${RECUR_NOTIFY_FILE:-none} unallowed=${RANDOM_UNALLOWED:-none}"`,
+		},
+		RightCmds: []string{
+			// Verify that env size is small and execution succeeds without E2BIG (argument list too long)
+			`echo "exec_ok"`,
+		},
+	}
+
+	left, right := evalStatusSnapshot(ctx, snap, sem)
+	expectedLeft := "event=turn_start source=user · msg=none cmd=none notify=none unallowed=none"
+	if left != expectedLeft {
+		t.Fatalf("left = %q, want %q", left, expectedLeft)
+	}
+	if right != "exec_ok" {
+		t.Fatalf("right = %q, want 'exec_ok'", right)
+	}
+}
+
+func TestStatusCancellationNotLogged(t *testing.T) {
+	home := t.TempDir()
+	logFile := filepath.Join(home, "status.log")
+
+	statusLogMu.Lock()
+	lastStatusLog = time.Time{}
+	statusLogMu.Unlock()
+
+	sem := make(chan struct{}, 4)
+	snap := StatusSnapshot{
+		Home: home,
+		Cwd:  t.TempDir(),
+		LeftCmds: []string{
+			`sleep 1`,
+		},
+	}
+
+	// 1. Cancelled execution: should not log anything to status.log
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = evalStatusSnapshot(ctx, snap, sem)
+	}()
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+	<-done
+
+	if _, err := os.Stat(logFile); err == nil {
+		content, _ := os.ReadFile(logFile)
+		t.Fatalf("status.log should not exist after normal cancellation, found: %q", string(content))
+	}
+
+	// 2. Genuine failure: should log immediately (not blocked by rate-limit since cancellation didn't log)
+	snapFail := StatusSnapshot{
+		Home: home,
+		Cwd:  t.TempDir(),
+		LeftCmds: []string{
+			`exit 42`,
+		},
+	}
+	_, _ = evalStatusSnapshot(context.Background(), snapFail, sem)
+
+	content, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("expected status.log to exist for genuine failure: %v", err)
+	}
+	if !strings.Contains(string(content), "cmd=\"exit 42\"") {
+		t.Fatalf("expected genuine failure logged, got: %q", string(content))
+	}
+
+	// 3. Deadline exceeded: should also log
+	home2 := t.TempDir()
+	logFile2 := filepath.Join(home2, "status.log")
+	statusLogMu.Lock()
+	lastStatusLog = time.Time{}
+	statusLogMu.Unlock()
+
+	snapTimeout := StatusSnapshot{
+		Home: home2,
+		Cwd:  t.TempDir(),
+		LeftCmds: []string{
+			`sleep 2`,
+		},
+	}
+	_, _ = evalStatusSnapshot(context.Background(), snapTimeout, sem)
+
+	content2, err2 := os.ReadFile(logFile2)
+	if err2 != nil {
+		t.Fatalf("expected status.log for deadline exceeded: %v", err2)
+	}
+	if !strings.Contains(string(content2), "cmd=\"sleep 2\"") {
+		t.Fatalf("expected deadline failure logged, got: %q", string(content2))
+	}
+}
+
+func TestStatusEscapedDescendantCannotHangSlot(t *testing.T) {
+	ctx := context.Background()
+	// Strict single slot to ensure slot is not pinned
+	sem := make(chan struct{}, 1)
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "descendant.pid")
+
+	t.Cleanup(func() {
+		// Clean up specifically the test descendant process to avoid leaving orphan sleep
+		if data, err := os.ReadFile(pidFile); err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil && pid > 0 {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	})
+
+	snap := StatusSnapshot{
+		Cwd:  dir,
+		Home: dir,
+		LeftCmds: []string{
+			// Spawn background descendant that inherits stdout (holding pipe open)
+			fmt.Sprintf("sleep 5 & echo $! > %q; echo parent_done", pidFile),
+		},
+	}
+
+	start := time.Now()
+	_, _ = evalStatusSnapshot(ctx, snap, sem)
+	elapsed := time.Since(start)
+
+	// With WaitDelay ~100ms, this command should return in ~100-250ms, well below 5 seconds.
+	if elapsed > 1*time.Second {
+		t.Fatalf("command took %v; expected WaitDelay ~100ms to unblock stdout pipe", elapsed)
+	}
+
+	// Verify the semaphore slot is freed and can immediately run another command
+	snapNext := StatusSnapshot{
+		Cwd: dir,
+		LeftCmds: []string{
+			`echo "slot_free"`,
+		},
+	}
+	left, _ := evalStatusSnapshot(ctx, snapNext, sem)
+	if left != "slot_free" {
+		t.Fatalf("expected slot to be free, got: %q", left)
 	}
 }
