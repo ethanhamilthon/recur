@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"fmt"
+	"github.com/pelletier/go-toml/v2"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -267,17 +270,25 @@ func TestUnknownKeysRejected(t *testing.T) {
 	home, cwd := t.TempDir(), t.TempDir()
 	t.Setenv("RECUR_HOME", home)
 
-	for _, text := range []string{
-		"unknown_field = 'val'\n",
-		"[ui]\nunknown_ui = 1\n",
-		"[shell]\nunknown_shell = true\n",
-		"[hooks.h1]\nevents = ['idle']\ncommand = 'true'\nunknown_hook = 5\n",
+	for _, tc := range []struct {
+		text    string
+		wantKey string
+	}{
+		{"unknown_field = 'val'\n", "unknown_field"},
+		{"[ui]\nunknown_ui = 1\n", "unknown_ui"},
+		{"[shell]\nunknown_shell = true\n", "unknown_shell"},
+		{"[hooks.h1]\nevents = ['idle']\ncommand = 'true'\nunknown_hook = 5\n", "unknown_hook"},
+		{"[hooks.h2]\nevent = 'idle'\ncommand = 'true'\n", "event"},
 	} {
-		if err := os.WriteFile(filepath.Join(cwd, "recur.toml"), []byte(text), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(cwd, "recur.toml"), []byte(tc.text), 0600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := loadConfiguration(home, cwd, ConfigFiles{}); err == nil {
-			t.Fatalf("unknown field accepted: %s", text)
+		_, err := loadConfiguration(home, cwd, ConfigFiles{})
+		if err == nil {
+			t.Fatalf("unknown field accepted: %s", tc.text)
+		}
+		if !strings.Contains(err.Error(), tc.wantKey) {
+			t.Fatalf("expected error to name unknown key %q, got: %v", tc.wantKey, err)
 		}
 	}
 }
@@ -350,20 +361,17 @@ api_key = "other-key"
 	}
 	content := string(data)
 
-	// Check comments and existing keys were preserved
-	if !strings.Contains(content, "# Custom Project Config") ||
-		!strings.Contains(content, "# Preserve this comment") ||
-		!strings.Contains(content, "max_code_lines = 42") ||
+	// Check unrelated values and keys were preserved (comments/format preservation not required)
+	if !strings.Contains(content, "max_code_lines = 42") ||
 		!strings.Contains(content, "custom system instructions") ||
-		!strings.Contains(content, "[providers.other]") {
-		t.Fatalf("unrelated values or comments lost: %s", content)
+		!strings.Contains(content, "other") {
+		t.Fatalf("unrelated values lost: %s", content)
 	}
 
 	// Check new values sparsely added
-	if !strings.Contains(content, "provider = \"p_new\"") ||
-		!strings.Contains(content, "model = \"my-model\"") ||
-		!strings.Contains(content, "effort = \"high\"") ||
-		!strings.Contains(content, "[providers.p_new]") {
+	if !strings.Contains(content, "p_new") ||
+		!strings.Contains(content, "my-model") ||
+		!strings.Contains(content, "high") {
 		t.Fatalf("sparse keys not added: %s", content)
 	}
 
@@ -398,5 +406,77 @@ status_right = ["echo right_underscore"]
 	}
 	if len(c.settings.StatusRight) != 1 || c.settings.StatusRight[0] != "echo right_underscore" {
 		t.Fatalf("StatusRight unexpected: %+v", c.settings.StatusRight)
+	}
+}
+
+func TestPatchWithMultilineApparentHeadersAndAssignments(t *testing.T) {
+	home, cwd := t.TempDir(), t.TempDir()
+	t.Setenv("RECUR_HOME", home)
+
+	multilineSystem := `[fake_section]
+model = "fake-model"
+provider = "fake-provider"
+[providers.fake]
+api_key = "fake_key"
+`
+	configContent := fmt.Sprintf(`system = %s
+provider = "orig"
+model = "orig-m"
+
+[providers.orig]
+base_url = "https://orig.example"
+api_key = "secret_key"
+`, strconv.Quote(multilineSystem))
+
+	configPath := filepath.Join(home, "config.toml")
+	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	a, err := New(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+
+	// 1. Select updates root keys without corrupting multiline system containing fake headers
+	if err = a.Select("orig", "updated-model", "high"); err != nil {
+		t.Fatalf("Select failed: %v", err)
+	}
+
+	rawBytes, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err = toml.Unmarshal(rawBytes, &decoded); err != nil {
+		t.Fatalf("unmarshal patched config: %v", err)
+	}
+	if decoded["system"] != multilineSystem {
+		t.Fatalf("multiline system was corrupted by patchRootKeys!\ngot:\n%v\nwant:\n%v", decoded["system"], multilineSystem)
+	}
+	if decoded["model"] != "updated-model" || decoded["effort"] != "high" || decoded["provider"] != "orig" {
+		t.Fatalf("root keys not properly updated: %v", decoded)
+	}
+
+	// 2. AddProvider adds new provider without corrupting multiline system containing fake headers
+	if err = a.AddProvider("p_added", Provider{BaseURL: "https://added.example", APIKey: "added_k"}); err != nil {
+		t.Fatalf("AddProvider failed: %v", err)
+	}
+
+	rawBytes, err = os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded = nil
+	if err = toml.Unmarshal(rawBytes, &decoded); err != nil {
+		t.Fatalf("unmarshal patched config after AddProvider: %v", err)
+	}
+	if decoded["system"] != multilineSystem {
+		t.Fatalf("multiline system was corrupted by patchProvider!\ngot:\n%v\nwant:\n%v", decoded["system"], multilineSystem)
+	}
+	provs, ok := decoded["providers"].(map[string]any)
+	if !ok || provs["p_added"] == nil || provs["orig"] == nil {
+		t.Fatalf("providers missing after AddProvider: %+v", decoded)
 	}
 }

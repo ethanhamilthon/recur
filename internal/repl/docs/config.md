@@ -197,7 +197,7 @@ provider is currently selected, not for unused providers.
 
 The `/login` and `/model` commands update credentials and active selections by
 atomically patching the raw TOML keys in the selected primary configuration file,
-preserving formatting, comments, and sparse inheritance. The write destination
+preserving unrelated values and sparse inheritance. The write destination
 is displayed on completion.
 
 ### [hooks.NAME]
@@ -221,8 +221,8 @@ make test > /tmp/test-hook.log 2>&1 || recur notify "make test failed"
 timeout = 180
 ```
 
-- `events`: array of lifecycle event names to handle (or single string `event`).
-  Wildcard `"*"` matches all events.
+- `events`: array of lifecycle event names to handle. Wildcard `"*"` matches all
+  events. Hook declarations require the `events = [...]` array syntax.
 - `command`: Bash command to execute.
 - `timeout`: deadline in seconds (default `10`, maximum `600`).
 - `enabled`: boolean flag (default `true`). Setting `enabled = false` disables an
@@ -271,11 +271,23 @@ Follow this mapping to migrate existing configurations:
      command = "cat AGENTS.md"
      send_output = true
      ```
-     Unlike the old prefix, this hook is asynchronous and does not act as a
-     startup barrier or alter system instructions. Its output is delivered at
-     the start of the first turn as ordinary user history.
+     Unlike the old prefix, this hook is strictly asynchronous and does not act as
+     a startup barrier or alter system instructions. Only READY hook outputs are
+     delivered at the start of the next turn; because execution is asynchronous,
+     a `session_start` hook may miss the first turn if not yet completed.
 4. `hooks.toml` -> `[hooks.NAME]`:
    - Convert `[[hook]]` entries into named tables `[hooks.<name>]`.
-   - Update event declarations to use the `events = [...]` array syntax (e.g.,
-     `events = ["turn_start"]`).
+   - Update event declarations to use the `events = [...]` array syntax. Single-string
+     `event = "..."` is retired and rejected in strict TOML parsing. Example migration:
+     ```toml
+     # Legacy syntax (hooks.toml):
+     # [[hook]]
+     # event = "turn_end"
+     # command = "make test"
+
+     # 0.6.0 syntax (config.toml / recur.toml):
+     [hooks.test_gate]
+     events = ["turn_end"]
+     command = "make test"
+     ```
    - Remove retired events `prefix_start` and `prefix_end`.

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,9 +35,10 @@ var Events = []string{
 }
 
 const (
-	defaultTimeout = 10
-	queueSize      = 64
-	maxPending     = 64
+	defaultTimeout   = 10
+	queueSize        = 64
+	maxPending       = 64
+	maxPendingGlobal = 512
 )
 
 type Hook struct {
@@ -125,6 +127,7 @@ func Parse(text string) ([]Hook, error) {
 type job struct {
 	env             []string
 	dir, name, sess string
+	maxOutput       int
 	done            func()
 }
 
@@ -139,11 +142,24 @@ type Runner struct {
 	Environment map[string]string
 	MaxOutput   int
 
-	mu      sync.Mutex
-	list    []Hook
-	workers []*worker
-	outputs map[string][]Result
-	wg      sync.WaitGroup
+	mu          sync.Mutex
+	environment map[string]string
+	maxOutput   int
+	list        []Hook
+	workers     []*worker
+	outputs     map[string][]Result
+	wg          sync.WaitGroup
+}
+
+// SetConfig updates the Runner environment and max output limit under lock.
+func (r *Runner) SetConfig(env map[string]string, maxOutput int) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.environment = maps.Clone(env)
+	r.maxOutput = maxOutput
 }
 
 var sequence atomic.Uint64
@@ -151,6 +167,16 @@ var sequence atomic.Uint64
 func sameHook(a, b Hook) bool {
 	return a.Name == b.Name && a.Command == b.Command && a.Timeout == b.Timeout &&
 		slices.Equal(a.Events, b.Events) && a.SendOutput == b.SendOutput && boolVal(a.Enabled) == boolVal(b.Enabled)
+}
+
+// List returns a snapshot of active hooks.
+func (r *Runner) List() []Hook {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.list)
 }
 
 func (r *Runner) Set(list []Hook) {
@@ -246,7 +272,11 @@ func (r *Runner) Fire(event string, vars map[string]string) {
 			env = append(env, e)
 		}
 	}
-	for k, v := range r.Environment {
+	cfgEnv := r.environment
+	if cfgEnv == nil {
+		cfgEnv = r.Environment
+	}
+	for k, v := range cfgEnv {
 		if k != "BASH_ENV" {
 			env = append(env, k+"="+v)
 		}
@@ -275,10 +305,14 @@ func (r *Runner) Fire(event string, vars map[string]string) {
 			os.RemoveAll(dir)
 		}
 	}
+	limit := r.maxOutput
+	if limit == 0 && r.MaxOutput != 0 {
+		limit = r.MaxOutput
+	}
 	sess := vars["RECUR_SESSION_ID"]
 	for _, w := range targets {
 		select {
-		case w.jobs <- job{env: env, dir: vars["RECUR_CWD"], name: event, sess: sess, done: done}:
+		case w.jobs <- job{env: env, dir: vars["RECUR_CWD"], name: event, sess: sess, maxOutput: limit, done: done}:
 		default:
 			r.fail(w.hook, event, "queue full, event dropped")
 			done()
@@ -326,7 +360,7 @@ func (r *Runner) run(h Hook, j job) {
 	if seconds <= 0 {
 		seconds = defaultTimeout
 	}
-	limit := r.MaxOutput
+	limit := j.maxOutput
 	if !h.SendOutput && (limit <= 0 || limit > 2048) {
 		limit = 2048
 	}
@@ -377,6 +411,14 @@ func (r *Runner) recordOutput(res Result) {
 	defer r.mu.Unlock()
 	if r.outputs == nil {
 		r.outputs = make(map[string][]Result)
+	}
+	total := 0
+	for _, q := range r.outputs {
+		total += len(q)
+	}
+	if total >= maxPendingGlobal {
+		r.fail(Hook{Name: res.HookName}, res.Event, fmt.Sprintf("global pending output queue full (%d results), result dropped for session %s", total, res.SessionID))
+		return
 	}
 	if len(r.outputs[res.SessionID]) >= maxPending {
 		r.fail(Hook{Name: res.HookName}, res.Event, fmt.Sprintf("pending output queue full for session %s, result dropped", res.SessionID))

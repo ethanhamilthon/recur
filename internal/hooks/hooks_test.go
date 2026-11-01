@@ -1,9 +1,12 @@
 package hooks
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -213,5 +216,131 @@ func TestSendOutputTruncationAndXMLEscape(t *testing.T) {
 	xml := res.XML()
 	if !strings.Contains(xml, "&lt;test &amp; escape&gt;") && !strings.Contains(xml, "truncated=\"true\"") {
 		t.Fatalf("expected escaped XML and truncated=true: %s", xml)
+	}
+}
+
+func TestRunnerConfigRaceAndNoGlobalEnvMutation(t *testing.T) {
+	initialEnv := os.Environ()
+	r := &Runner{Mode: "tui"}
+	r.Set([]Hook{
+		{
+			Name:    "fast_hook",
+			Events:  []string{"*"},
+			Command: "true",
+		},
+	})
+	dir := t.TempDir()
+
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+
+	// Concurrently update config via SetConfig with changing maps
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+					r.SetConfig(map[string]string{
+						"CUSTOM_VAR": fmt.Sprintf("val-%d", id),
+						"EXTRA_VAR":  "static",
+					}, 1024+id)
+				}
+			}
+		}(i)
+	}
+
+	// Concurrently fire events
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+					r.Fire("turn_start", map[string]string{
+						"RECUR_SESSION_ID": fmt.Sprintf("session-%d", id),
+						"RECUR_CWD":        dir,
+					})
+				}
+			}
+		}(i)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	close(done)
+	wg.Wait()
+	r.Wait(2 * time.Second)
+
+	currentEnv := os.Environ()
+	if !slices.Equal(initialEnv, currentEnv) {
+		t.Fatalf("global environment was mutated!\ninitial: %v\ncurrent: %v", initialEnv, currentEnv)
+	}
+}
+
+func TestGlobalPendingOutputBound(t *testing.T) {
+	logDir := t.TempDir()
+	logFile := filepath.Join(logDir, "hooks.log")
+	r := &Runner{
+		Log:  logFile,
+		Mode: "tui",
+	}
+	r.Set([]Hook{
+		{
+			Name:       "pnd",
+			Events:     []string{"*"},
+			Command:    "echo out",
+			SendOutput: true,
+		},
+	})
+
+	// Fill up to maxPendingGlobal (512 results across multiple sessions)
+	for i := 0; i < maxPendingGlobal; i++ {
+		sess := fmt.Sprintf("session-%d", i)
+		r.recordOutput(Result{
+			SessionID: sess,
+			HookName:  "pnd",
+			Event:     "test_event",
+			Output:    "queued",
+		})
+	}
+
+	// 513th output across any session must overflow and be logged
+	r.recordOutput(Result{
+		SessionID: "new-session",
+		HookName:  "pnd",
+		Event:     "test_event",
+		Output:    "should-drop",
+	})
+
+	logData, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("expected log file to exist: %v", err)
+	}
+	if !strings.Contains(string(logData), "global pending output queue full") {
+		t.Fatalf("expected global pending output queue full message, got: %s", string(logData))
+	}
+
+	// Draining a session frees global capacity
+	drained := r.DrainOutputs("session-0")
+	if len(drained) != 1 {
+		t.Fatalf("expected 1 drained output, got %d", len(drained))
+	}
+
+	// Now another output can be recorded without overflowing
+	r.recordOutput(Result{
+		SessionID: "new-session",
+		HookName:  "pnd",
+		Event:     "test_event",
+		Output:    "now-accepted",
+	})
+	drainedNew := r.DrainOutputs("new-session")
+	if len(drainedNew) != 1 || drainedNew[0].Output != "now-accepted" {
+		t.Fatalf("expected output to be accepted after drain, got %+v", drainedNew)
 	}
 }

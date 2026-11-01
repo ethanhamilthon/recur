@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"maps"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -53,6 +54,10 @@ func validateSettings(s Settings) error {
 	}
 	if s.ShellTimeout <= 0 || s.ShellMaxTimeout <= 0 {
 		return fmt.Errorf("shell timeout and max_timeout must be positive")
+	}
+	const maxDurationSeconds = int64(math.MaxInt64 / time.Second)
+	if int64(s.ShellTimeout) > maxDurationSeconds || int64(s.ShellMaxTimeout) > maxDurationSeconds {
+		return fmt.Errorf("shell timeout and max_timeout must not exceed %d seconds", maxDurationSeconds)
 	}
 	if s.ShellTimeout > s.ShellMaxTimeout {
 		return fmt.Errorf("shell timeout (%d) cannot exceed max_timeout (%d)", s.ShellTimeout, s.ShellMaxTimeout)
@@ -141,8 +146,7 @@ func (a *Agent) applySettings(s Settings) {
 	}
 	a.client = newClient(p)
 	if a.hooks != nil {
-		a.hooks.Environment = s.Environment
-		a.hooks.MaxOutput = s.ShellMaxOutput
+		a.hooks.SetConfig(s.Environment, s.ShellMaxOutput)
 	}
 }
 

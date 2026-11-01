@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -112,9 +113,7 @@ func NewWith(dir string, files ConfigFiles, target ...string) (*Agent, error) {
 		Sources:       cfg.sources,
 		primaryConfig: cfg.primary,
 		hooks: &hooks.Runner{
-			Log:         filepath.Join(config, "hooks.log"),
-			Environment: cfg.settings.Environment,
-			MaxOutput:   cfg.settings.ShellMaxOutput,
+			Log: filepath.Join(config, "hooks.log"),
 		},
 		REPL: &repl.REPL{Dir: dir},
 	}
@@ -168,6 +167,18 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 	if a.hooks != nil {
 		readyResults = a.hooks.DrainOutputs(sessionID)
 	}
+
+	// A crash may leave calls without outputs. Their effects are unknown, so
+	// never rerun them; supply an explicit interrupted result on continuation.
+	// Orphan calls must be repaired BEFORE appending hook outputs so user messages
+	// do not split tool call/output pairing in API requests.
+	for _, output := range interruptedOutputs(a.History) {
+		a.History = append(a.History, output)
+		for _, r := range RecordsForItem(output) {
+			emit(Event{Kind: r.Kind, Text: r.Text, Final: true})
+		}
+	}
+
 	for _, res := range readyResults {
 		msg := res.XML()
 		a.message("user", msg)
@@ -180,15 +191,6 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 		source = "notify"
 	}
 	a.Fire("turn_start", "RECUR_TURN_SOURCE", source, "RECUR_MESSAGE_FILE", input.Display())
-
-	// A crash may leave calls without outputs. Their effects are unknown, so
-	// never rerun them; supply an explicit interrupted result on continuation.
-	for _, output := range interruptedOutputs(a.History) {
-		a.History = append(a.History, output)
-		for _, r := range RecordsForItem(output) {
-			emit(Event{Kind: r.Kind, Text: r.Text, Final: true})
-		}
-	}
 	defer func() {
 		if err != nil && !errors.Is(err, context.Canceled) {
 			emit(Event{Kind: "error", Text: err.Error()})
@@ -401,13 +403,18 @@ func (a *Agent) runTool(ctx context.Context, name, arguments string) repl.Result
 	timeout, limit := defaultTimeout, defaultLimit
 	err := json.Unmarshal([]byte(arguments), &args)
 	if err == nil && args.Timeout != nil {
-		if timeout = time.Duration(*args.Timeout) * time.Second; timeout <= 0 || timeout > maxTimeout {
-			err = fmt.Errorf("timeout must be 1..%d seconds", int(maxTimeout/time.Second))
+		maxSec := int64(maxTimeout / time.Second)
+		if *args.Timeout <= 0 || *args.Timeout > maxSec {
+			err = fmt.Errorf("timeout must be 1..%d seconds", maxSec)
+		} else {
+			timeout = time.Duration(*args.Timeout) * time.Second
 		}
 	}
 	if err == nil && args.MaxOutput != nil {
-		if limit = int(*args.MaxOutput); limit < 0 {
+		if *args.MaxOutput < 0 || *args.MaxOutput > int64(math.MaxInt) {
 			err = fmt.Errorf("max_output must be >= 0 bytes (0 = no truncation)")
+		} else {
+			limit = int(*args.MaxOutput)
 		}
 	}
 	if err == nil {

@@ -250,3 +250,110 @@ func TestHookSendOutputDrainedOnNextTurn(t *testing.T) {
 		t.Fatalf("expected hook output delivered as notice on second turn, got %v", notices)
 	}
 }
+
+func TestHeadlessHookInheritanceAndValidation(t *testing.T) {
+	home, cwd := t.TempDir(), t.TempDir()
+	t.Setenv("RECUR_HOME", home)
+
+	globalCfg := `provider = "p"
+model = "m"
+[providers.p]
+base_url = "https://example.com"
+
+[hooks.global_hook]
+events = ["turn_end"]
+command = "echo global"
+
+[hooks.partial_override]
+events = ["turn_start"]
+command = "echo from-global"
+timeout = 10
+`
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(globalCfg), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Implicit headless: no hooks active
+	aImplicit, err := NewWith(cwd, ConfigFiles{Headless: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer aImplicit.Close()
+	if aImplicit.hooks != nil && len(aImplicit.hooks.List()) > 0 {
+		t.Fatalf("expected 0 hooks in implicit headless, got %d", len(aImplicit.hooks.List()))
+	}
+
+	// 2. Explicit headless without --no-extend: inherits global hooks, and partial override inherits command/events
+	explicitCfg := `provider = "p"
+model = "m"
+[providers.p]
+base_url = "https://example.com"
+
+[hooks.partial_override]
+timeout = 5
+
+[hooks.explicit_hook]
+events = ["turn_end"]
+command = "echo explicit"
+`
+	explicitPath := filepath.Join(cwd, "explicit.toml")
+	if err := os.WriteFile(explicitPath, []byte(explicitCfg), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	aExplicit, err := NewWith(cwd, ConfigFiles{Headless: true, Config: explicitPath})
+	if err != nil {
+		t.Fatalf("explicit headless with partial override should succeed, got: %v", err)
+	}
+	defer aExplicit.Close()
+	hooksList := aExplicit.hooks.List()
+	hookNames := map[string]bool{}
+	for _, h := range hooksList {
+		hookNames[h.Name] = true
+	}
+	if !hookNames["global_hook"] || !hookNames["partial_override"] || !hookNames["explicit_hook"] {
+		t.Fatalf("expected global_hook, partial_override, and explicit_hook; got: %+v", hookNames)
+	}
+
+	// 3. Explicit headless with --no-extend: global hooks are skipped
+	noExtendCfg := `provider = "p"
+model = "m"
+[providers.p]
+base_url = "https://example.com"
+
+[hooks.explicit_hook]
+events = ["turn_end"]
+command = "echo explicit"
+`
+	noExtendPath := filepath.Join(cwd, "no_extend.toml")
+	if err := os.WriteFile(noExtendPath, []byte(noExtendCfg), 0600); err != nil {
+		t.Fatal(err)
+	}
+	aNoExt, err := NewWith(cwd, ConfigFiles{Headless: true, Config: noExtendPath, NoExtend: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer aNoExt.Close()
+	noExtHooks := aNoExt.hooks.List()
+	if len(noExtHooks) != 1 || noExtHooks[0].Name != "explicit_hook" {
+		t.Fatalf("expected only explicit_hook with --no-extend, got: %+v", noExtHooks)
+	}
+
+	// 4. Missing required fields without global definition fails validateHooks (not discarded)
+	missingReqCfg := `provider = "p"
+model = "m"
+[providers.p]
+base_url = "https://example.com"
+
+[hooks.incomplete]
+timeout = 5
+`
+	missingReqPath := filepath.Join(cwd, "incomplete.toml")
+	if err := os.WriteFile(missingReqPath, []byte(missingReqCfg), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewWith(cwd, ConfigFiles{Headless: true, Config: missingReqPath})
+	if err == nil {
+		t.Fatal("expected validateHooks error for incomplete hook, but got nil")
+	}
+}

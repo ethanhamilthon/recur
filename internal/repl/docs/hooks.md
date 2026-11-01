@@ -36,7 +36,8 @@ send_output = true
 
 Hook handler fields:
 - `events`: array of lifecycle event names to handle. Wildcard `"*"` matches all
-  events. A single string `event` is also accepted.
+  events. Hook declarations require the `events = [...]` array syntax; single-string
+  `event = "..."` is retired and rejected in strict TOML parsing.
 - `command`: Bash command to execute. Required for active hooks.
 - `timeout`: deadline in seconds (default `10`, maximum `600`).
 - `enabled`: boolean flag (default `true`). Setting `enabled = false` disables an
@@ -48,6 +49,17 @@ Hook handler fields:
 Hooks merge by name: an entry in `./recur.toml` overrides or disables an entry
 with the same name in `$RECUR_HOME/config.toml`. Array fields like `events`
 replace inherited arrays completely.
+
+Migrating legacy hooks:
+```toml
+# Legacy (invalid in 0.6.0):
+# [hooks.alert]
+# event = "turn_end"
+
+# 0.6.0 syntax:
+[hooks.alert]
+events = ["turn_end"]
+```
 
 In headless runs (`recur -prompt '...'` or `recur --mode jsonl`), implicit hooks
 are disabled. Hooks only run if an explicit configuration file is provided via

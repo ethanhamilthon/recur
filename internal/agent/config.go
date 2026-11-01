@@ -2,12 +2,12 @@ package agent
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -86,7 +86,14 @@ type rawHook struct {
 func parseRaw(data []byte) (rawConfig, error) {
 	var cf rawConfig
 	err := toml.NewDecoder(bytes.NewReader(data)).DisallowUnknownFields().Decode(&cf)
-	return cf, err
+	if err != nil {
+		var strictErr *toml.StrictMissingError
+		if errors.As(err, &strictErr) {
+			return cf, errors.New(strictErr.String())
+		}
+		return cf, err
+	}
+	return cf, nil
 }
 
 func applyLayer(s *Settings, system *string, hooksMap map[string]hooks.Hook, raw rawConfig) {
@@ -285,16 +292,8 @@ func loadConfiguration(home, cwd string, files ConfigFiles) (c configuration, er
 		return c, fmt.Errorf("%s: %w", primaryPath, err)
 	}
 
-	if files.Headless {
-		if files.Config == "" {
-			hookList = nil
-		} else {
-			data, _ := os.ReadFile(primaryPath)
-			raw, _ := parseRaw(data)
-			explicitHooks := map[string]hooks.Hook{}
-			applyLayer(&Settings{}, &system, explicitHooks, raw)
-			hookList, _ = validateHooks(explicitHooks)
-		}
+	if files.Headless && files.Config == "" {
+		hookList = nil
 	}
 
 	if err := validateSettings(s); err != nil {
@@ -329,69 +328,70 @@ func rollbackFile(path string, backup []byte, existed bool) {
 }
 
 func patchRootKeys(path string, keys map[string]string) error {
-	data, _ := os.ReadFile(path)
-	lines := strings.Split(string(data), "\n")
-	tableIdx := len(lines)
-	for i, l := range lines {
-		t := strings.TrimSpace(l)
-		if strings.HasPrefix(t, "[") && strings.HasSuffix(t, "]") && !strings.HasPrefix(t, "#") {
-			tableIdx = i
-			break
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	var m map[string]any
+	if len(data) > 0 {
+		if err := toml.Unmarshal(data, &m); err != nil {
+			return err
 		}
 	}
-	seen := map[string]bool{}
-	for i := 0; i < tableIdx; i++ {
-		t := strings.TrimSpace(lines[i])
-		if strings.HasPrefix(t, "#") || !strings.Contains(t, "=") {
-			continue
-		}
-		k := strings.TrimSpace(strings.SplitN(t, "=", 2)[0])
-		if v, ok := keys[k]; ok {
-			lines[i] = fmt.Sprintf("%s = %s", k, strconv.Quote(v))
-			seen[k] = true
-		}
+	if m == nil {
+		m = make(map[string]any)
 	}
-	var ins []string
 	for k, v := range keys {
-		if !seen[k] {
-			ins = append(ins, fmt.Sprintf("%s = %s", k, strconv.Quote(v)))
-		}
+		m[k] = v
 	}
-	sort.Strings(ins)
-	if len(ins) > 0 {
-		lines = append(lines[:tableIdx], append(ins, lines[tableIdx:]...)...)
+	out, err := toml.Marshal(m)
+	if err != nil {
+		return err
 	}
-	return writePrivate(path, []byte(strings.TrimRight(strings.Join(lines, "\n"), "\n")+"\n"))
+	return writePrivate(path, out)
 }
 
 func patchProvider(path string, name string, p Provider) error {
-	data, _ := os.ReadFile(path)
-	hdr := fmt.Sprintf("[providers.%s]", name)
-	if strings.ContainsAny(name, ". \"") {
-		hdr = fmt.Sprintf("[providers.%s]", strconv.Quote(name))
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
 	}
-	block := hdr + fmt.Sprintf("\nbase_url = %s", strconv.Quote(p.BaseURL))
-	if p.APIKey != "" {
-		block += fmt.Sprintf("\napi_key = %s", strconv.Quote(p.APIKey))
-	}
-	if p.APIKeyEnv != "" {
-		block += fmt.Sprintf("\napi_key_env = %s", strconv.Quote(p.APIKeyEnv))
-	}
-	lines := strings.Split(string(data), "\n")
-	start, end := -1, len(lines)
-	for i, l := range lines {
-		t := strings.TrimSpace(l)
-		if t == hdr {
-			start = i
-		} else if start >= 0 && strings.HasPrefix(t, "[") && strings.HasSuffix(t, "]") && !strings.HasPrefix(t, "#") {
-			end = i
-			break
+	var m map[string]any
+	if len(data) > 0 {
+		if err := toml.Unmarshal(data, &m); err != nil {
+			return err
 		}
 	}
-	if start >= 0 {
-		lines = append(lines[:start], append([]string{block}, lines[end:]...)...)
-	} else {
-		lines = append(lines, "", block)
+	if m == nil {
+		m = make(map[string]any)
 	}
-	return writePrivate(path, []byte(strings.TrimSpace(strings.Join(lines, "\n"))+"\n"))
+	var providers map[string]any
+	if rawProv, ok := m["providers"]; ok {
+		if provMap, ok := rawProv.(map[string]any); ok {
+			providers = provMap
+		} else {
+			return fmt.Errorf("invalid providers table in config")
+		}
+	} else {
+		providers = make(map[string]any)
+		m["providers"] = providers
+	}
+	if _, exists := providers[name]; exists {
+		return fmt.Errorf("provider %q already exists", name)
+	}
+	entry := map[string]any{
+		"base_url": p.BaseURL,
+	}
+	if p.APIKey != "" {
+		entry["api_key"] = p.APIKey
+	}
+	if p.APIKeyEnv != "" {
+		entry["api_key_env"] = p.APIKeyEnv
+	}
+	providers[name] = entry
+	out, err := toml.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return writePrivate(path, out)
 }

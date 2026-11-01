@@ -87,17 +87,21 @@ func (a *Agent) Select(provider, model, effort string) error {
 type ModelChoice struct{ Provider, Model string }
 
 // AllModels lists models from every configured provider concurrently.
-func AllModels(ctx context.Context, providers map[string]Provider) (choices []ModelChoice, errs map[string]error) {
+func AllModels(ctx context.Context, providers map[string]Provider, environment ...map[string]string) (choices []ModelChoice, errs map[string]error) {
 	type result struct {
 		name   string
 		models []string
 		err    error
 	}
+	var env map[string]string
+	if len(environment) > 0 {
+		env = environment[0]
+	}
 	results := make(chan result, len(providers))
 	for name, p := range providers {
-		go func(p Provider) {
+		go func(name string, p Provider) {
 			if p.APIKey == "" && p.APIKeyEnv != "" {
-				p.APIKey = resolveEnv(p.APIKeyEnv, nil)
+				p.APIKey = resolveEnv(p.APIKeyEnv, env)
 			}
 			client := newClient(p)
 			page := client.Models.ListAutoPaging(ctx)
@@ -106,7 +110,7 @@ func AllModels(ctx context.Context, providers map[string]Provider) (choices []Mo
 				models = append(models, page.Current().ID)
 			}
 			results <- result{name, models, page.Err()}
-		}(p)
+		}(name, p)
 	}
 	errs = map[string]error{}
 	for range providers {
@@ -130,8 +134,12 @@ func AllModels(ctx context.Context, providers map[string]Provider) (choices []Mo
 
 // AddProvider patches the provider into the primary configuration.
 func (a *Agent) AddProvider(name string, provider Provider) error {
-	if strings.TrimSpace(name) == "" {
+	name = strings.TrimSpace(name)
+	if name == "" {
 		return fmt.Errorf("provider name is required")
+	}
+	if _, exists := a.settings.Providers[name]; exists {
+		return fmt.Errorf("provider %q already exists", name)
 	}
 	return a.patchPrimary(func(path string) error {
 		return patchProvider(path, name, provider)

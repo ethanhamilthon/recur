@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -144,5 +146,82 @@ func TestCompactionSettingsValidation(t *testing.T) {
 	base.CompactKeepTurns = 0
 	if err := validateSettings(base); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestShellTimeoutDurationOverflowAndBoundaries(t *testing.T) {
+	const maxDurSec = int64(9223372036) // math.MaxInt64 / time.Second
+
+	// Config boundary checks
+	base := Settings{
+		Provider:        "p",
+		Providers:       map[string]Provider{"p": {BaseURL: "https://example.com"}},
+		ShellTimeout:    int(maxDurSec),
+		ShellMaxTimeout: int(maxDurSec),
+		ShellMaxOutput:  0,
+	}
+	if err := validateSettings(base); err != nil {
+		t.Fatalf("boundary max duration should be valid, got: %v", err)
+	}
+
+	overflowTimeout := base
+	overflowTimeout.ShellTimeout = int(maxDurSec) + 1
+	overflowTimeout.ShellMaxTimeout = int(maxDurSec) + 1
+	if err := validateSettings(overflowTimeout); err == nil {
+		t.Fatal("expected duration overflow error for timeout exceeding maxDurSec")
+	}
+
+	overflowMax := base
+	overflowMax.ShellTimeout = 120
+	overflowMax.ShellMaxTimeout = int(maxDurSec) + 1
+	if err := validateSettings(overflowMax); err == nil {
+		t.Fatal("expected duration overflow error for max_timeout exceeding maxDurSec")
+	}
+
+	// Per-call tool checks
+	cwd := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("RECUR_HOME", home)
+	a, err := New(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	configureTestAgent(t, a, Settings{
+		Provider:        "p",
+		Providers:       map[string]Provider{"p": {BaseURL: "https://example.com"}},
+		ShellTimeout:    120,
+		ShellMaxTimeout: 600,
+		ShellMaxOutput:  1024,
+	})
+
+	// Per-call timeout with math.MaxInt64 must fail before multiplying, without wrapping
+	res := a.runTool(t.Context(), "bash", fmt.Sprintf(`{"command":"echo hi","timeout":%d}`, math.MaxInt64))
+	if !res.Error || !strings.Contains(res.Output, "timeout must be 1..600 seconds") {
+		t.Fatalf("expected 1..600 timeout error on math.MaxInt64, got: %+v", res)
+	}
+
+	// Per-call timeout = 0
+	res = a.runTool(t.Context(), "bash", `{"command":"echo hi","timeout":0}`)
+	if !res.Error || !strings.Contains(res.Output, "timeout must be 1..600 seconds") {
+		t.Fatalf("expected 1..600 timeout error on 0, got: %+v", res)
+	}
+
+	// Per-call timeout exceeding ceiling (601)
+	res = a.runTool(t.Context(), "bash", `{"command":"echo hi","timeout":601}`)
+	if !res.Error || !strings.Contains(res.Output, "timeout must be 1..600 seconds") {
+		t.Fatalf("expected 1..600 timeout error on 601, got: %+v", res)
+	}
+
+	// Per-call max_output < 0
+	res = a.runTool(t.Context(), "bash", `{"command":"echo hi","max_output":-1}`)
+	if !res.Error || !strings.Contains(res.Output, "max_output must be >= 0 bytes") {
+		t.Fatalf("expected >= 0 bytes error on -1, got: %+v", res)
+	}
+
+	// Per-call max_output = 0 (zero output semantics: unlimited / no truncation)
+	res = a.runTool(t.Context(), "bash", `{"command":"printf 'hello world'","max_output":0}`)
+	if res.Error || res.Output != "hello world" {
+		t.Fatalf("expected zerooutput / no truncation, got: %+v", res)
 	}
 }

@@ -14,8 +14,10 @@ with a provider name, HTTP(S) base URL, and API key.
 
 When `/model` or `/login` changes configuration, Recur atomically patches the
 raw TOML keys in the selected primary configuration file (`recur.toml` or
-`config.toml`), preserving unrelated values, comments, and sparse inheritance.
-The destination configuration file is displayed upon saving.
+`config.toml`), preserving unrelated values and sparse inheritance.
+The destination configuration file is displayed upon saving. Existing provider
+names cannot be overwritten by `/login`; use unique provider names or edit the
+configuration file directly.
 
 Each session header stores its own provider identity, model, and reasoning
 effort. Resuming an older session restores the model selection under which it was

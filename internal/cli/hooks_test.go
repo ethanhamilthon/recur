@@ -68,13 +68,23 @@ func TestHeadlessRunsHooksOnlyWithExplicitFlag(t *testing.T) {
 	}
 
 	explicitFile := hooksConfig(t, record, server.URL)
-	if err := Run(context.Background(), []string{"--prompt", "hi", "--config", explicitFile}, strings.NewReader(""), &out, &diagnostics); err != nil {
+	if err := Run(context.Background(), []string{"--prompt", "hi", "--config", explicitFile, "--no-extend"}, strings.NewReader(""), &out, &diagnostics); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(record)
 	want := "recur_start|headless|\nsession_start|headless|\nturn_start|headless|\nsession_title_change|headless|\nmodel_request_start|headless|\nmodel_request_end|headless|\nturn_end|headless|\nsession_end|headless|\nrecur_exit|headless|0\n"
 	if string(got) != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+
+	// Without --no-extend, explicit --config inherits global hooks too
+	os.Remove(record)
+	if err := Run(context.Background(), []string{"--prompt", "hi", "--config", explicitFile}, strings.NewReader(""), &out, &diagnostics); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = os.ReadFile(record)
+	if strings.Count(string(got), "turn_start|headless|") != 2 {
+		t.Fatalf("expected 2 turn_start events when global hooks inherited, got: %s", got)
 	}
 }
 
