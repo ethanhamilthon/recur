@@ -694,6 +694,62 @@ func TestJSONProtocolBrokenStdoutEndsTheSession(t *testing.T) {
 	}
 }
 
+// gatedWriter accepts its first write (the ready record) and then holds every
+// later write until gate closes, after which it fails like a closed stdout.
+type gatedWriter struct {
+	mu     sync.Mutex
+	writes int
+	gate   chan struct{}
+}
+
+func (w *gatedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	w.writes++
+	first := w.writes == 1
+	w.mu.Unlock()
+	if first {
+		return len(p), nil
+	}
+	<-w.gate
+	return 0, io.ErrClosedPipe
+}
+
+// Stdin ending starts the drain, not a licence to ignore a broken stdout: the
+// accepted turn must be cancelled as soon as its output is gone.
+func TestJSONProtocolBrokenStdoutDuringEOFDrainCancelsWork(t *testing.T) {
+	hold := make(chan struct{})
+	defer close(hold)
+	p := newProvider(t, hold)
+	p.configure(t, "")
+	out := &gatedWriter{gate: make(chan struct{})}
+	stdin, writer := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		done <- serveJSON(context.Background(), openTestAgent(t), t.TempDir(), stdin, out, io.Discard)
+	}()
+	if _, err := io.WriteString(writer, `{"id":"r1","type":"input","text":"hold the turn"}`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-p.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the turn never reached the model")
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond) // let the transport enter the EOF drain
+	close(out.gate)
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "writing protocol output") {
+			t.Fatalf("broken stdout during the drain ended with %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("broken stdout during the EOF drain did not cancel the accepted turn")
+	}
+}
+
 // openTestAgent opens a session in the test project directory.
 func openTestAgent(t *testing.T) *agent.Agent {
 	t.Helper()

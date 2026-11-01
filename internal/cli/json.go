@@ -64,6 +64,7 @@ func serveJSON(ctx context.Context, a *agent.Agent, cwd string, in io.Reader, ou
 	go readRecords(in, records, stopReader)
 
 	pending := newInFlight()
+	var drained <-chan struct{} // closed once stdin has ended and accepted work has settled
 	for {
 		select {
 		case <-ctx.Done():
@@ -82,24 +83,40 @@ func serveJSON(ctx context.Context, a *agent.Agent, cwd string, in io.Reader, ou
 		case <-c.Closed():
 			t.finish(c.Reason())
 			return nil
+		case <-drained:
+			// Accepted work has finished (or the grace period ended): save and exit.
+			err := c.Shutdown("eof")
+			t.finish("eof")
+			if err == nil && t.failure() != nil {
+				err = fmt.Errorf("writing protocol output: %w", t.failure())
+			}
+			return err
 		case rec, ok := <-records:
 			if !ok {
-				// Stdin ended: accepted work drains, then the session saves.
-				waitCtx, cancel := context.WithTimeout(ctx, shutdownGrace)
-				if err := c.Wait(waitCtx); err != nil {
-					interrupt(c)
-				}
-				cancel()
-				err := c.Shutdown("eof")
-				t.finish("eof")
-				if err == nil && t.failure() != nil {
-					err = fmt.Errorf("writing protocol output: %w", t.failure())
-				}
-				return err
+				// Stdin ended: stop reading and let accepted work drain. The other
+				// cases stay live, so a broken stdout still cancels that work.
+				records = nil
+				drained = waitIdle(ctx, c)
+				continue
 			}
 			handleRecord(c, cwd, rec, t, pending)
 		}
 	}
+}
+
+// waitIdle closes the returned channel once no operation is active, or once the
+// shutdown grace period ends. If work is still running at that point it is interrupted.
+func waitIdle(ctx context.Context, c *control.Controller) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		waitCtx, cancel := context.WithTimeout(ctx, shutdownGrace)
+		defer cancel()
+		if err := c.Wait(waitCtx); err != nil {
+			interrupt(c)
+		}
+	}()
+	return done
 }
 
 // interrupt stops active work so its turn ends with a cancelled done event.

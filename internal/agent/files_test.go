@@ -134,6 +134,27 @@ func TestTextFileRootContainment(t *testing.T) {
 	}
 }
 
+// The number of files per message is bounded: each one may be up to the byte
+// limit, so an unbounded list could load arbitrarily much memory from one request.
+func TestTextFileCountIsBounded(t *testing.T) {
+	root := t.TempDir()
+	var paths []string
+	for i := 0; i <= maxFilesPerInput; i++ {
+		name := fmt.Sprintf("f%03d.txt", i)
+		if err := os.WriteFile(filepath.Join(root, name), []byte("x"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, name)
+	}
+	if _, err := ReadTextFiles(root, paths, 0); err == nil || !strings.Contains(err.Error(), "at most") {
+		t.Fatalf("%d files were accepted: %v", len(paths), err)
+	}
+	files, err := ReadTextFiles(root, paths[:maxFilesPerInput], 0)
+	if err != nil || len(files) != maxFilesPerInput {
+		t.Fatalf("the limit itself must be accepted: %d files, %v", len(files), err)
+	}
+}
+
 func TestTextFileDedupeOrderAndDirectories(t *testing.T) {
 	root := t.TempDir()
 	for name, body := range map[string]string{"a.txt": "A", "b.txt": "B"} {

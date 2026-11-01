@@ -76,7 +76,7 @@ Attachments:
   labelled data, up to `max_file_bytes` per file (default 64 KiB; `0` is unlimited;
   see `recur docs config`). Larger files are marked truncated.
   Outside-root, special, binary or unreadable files are `invalid_file`, and no
-  turn starts.
+  turn starts. At most 32 distinct files per request; more is `invalid_file`.
 - A queued input keeps the snapshot taken when it was accepted; promotion to a
   follow-up turn uses that snapshot. An input returned in `unsent` lists its file
   paths; resubmitting it reads the files again.

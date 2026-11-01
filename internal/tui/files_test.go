@@ -1012,6 +1012,11 @@ func TestFileReferencesWholeMessage(t *testing.T) {
 		{"bare at ignored", "a @ b", nil},
 		{"empty quoted ignored", `@""`, nil},
 		{"nested at rejected", "@a@b.go", nil},
+		// An unterminated quote is not a complete reference: nothing may attach.
+		{"unterminated quote ignored", `read @"main.go`, nil},
+		{"unterminated quoted space ignored", `@"my docs/a b.md`, nil},
+		{"unterminated single quote ignored", `@'main.go`, nil},
+		{"unterminated quote ends at newline", "@\"a.go\n@b.go", []string{"b.go"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := fileReferences(tc.text); !slices.Equal(got, tc.want) {
@@ -1136,6 +1141,29 @@ func requestsContain(bodies []string, text string) bool {
 		}
 	}
 	return false
+}
+
+// An unterminated quote is still completable, but submitting it must not read
+// or attach the file; the text is sent as ordinary prompt text.
+func TestFileSubmitUnterminatedQuoteDoesNotAttach(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main // secret"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	url, requests := fakeProvider(t, nil)
+	m := newModel(fileSubmitAgent(t, dir, url), dir)
+	t.Cleanup(m.ctl.Close)
+	m.input.SetValue(`explain @"main.go`)
+	m.input.CursorEnd()
+	m, cmd := pressEnter(m)
+	if m.prep != nil || cmd != nil {
+		t.Fatal("an unterminated quote must not start file preparation")
+	}
+	m = awaitIdle(t, m)
+	bodies := requests()
+	if len(bodies) != 1 || strings.Contains(bodies[0], "package main // secret") || !strings.Contains(bodies[0], `explain @\"main.go`) {
+		t.Fatalf("unterminated reference attached content or lost the prompt: %v", bodies)
+	}
 }
 
 func TestFileSubmitIdleSendsPreparedSnapshot(t *testing.T) {

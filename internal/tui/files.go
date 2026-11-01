@@ -51,6 +51,9 @@ type fileToken struct {
 	start, end int
 	query      string
 	dir        bool
+	// unterminated marks a quoted reference with no closing quote on its line.
+	// Completion may still use it, but it is not a complete reference to attach.
+	unterminated bool
 }
 
 func hasControl(s string) bool {
@@ -128,6 +131,7 @@ func parseFileToken(runes []rune, at, cursor int) (fileToken, bool) {
 	}
 	var tokenEnd int
 	var query string
+	var unterminated bool
 	if at+1 < len(runes) && (runes[at+1] == '"' || runes[at+1] == '\'') {
 		quote := runes[at+1]
 		qEnd := at + 2
@@ -144,6 +148,8 @@ func parseFileToken(runes []rune, at, cursor int) (fileToken, bool) {
 		tokenEnd = qEnd
 		if qEnd < len(runes) && runes[qEnd] == quote {
 			tokenEnd++
+		} else {
+			unterminated = true
 		}
 		if cursor < 0 {
 			cursor = tokenEnd
@@ -170,7 +176,7 @@ func parseFileToken(runes []rune, at, cursor int) (fileToken, bool) {
 	if strings.ContainsRune(query, '@') || hasControl(query) {
 		return fileToken{}, false
 	}
-	return fileToken{start: at, end: tokenEnd, query: query, dir: strings.HasSuffix(query, "/")}, true
+	return fileToken{start: at, end: tokenEnd, query: query, dir: strings.HasSuffix(query, "/"), unterminated: unterminated}, true
 }
 
 // fileReferences lists the distinct file paths referenced anywhere in a
@@ -185,7 +191,7 @@ func fileReferences(text string) []string {
 			continue
 		}
 		token, ok := parseFileToken(runes, at, -1)
-		if !ok || token.dir || token.query == "" || seen[token.query] {
+		if !ok || token.dir || token.unterminated || token.query == "" || seen[token.query] {
 			continue
 		}
 		seen[token.query] = true

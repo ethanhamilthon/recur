@@ -12,6 +12,10 @@ import (
 	"unicode/utf8"
 )
 
+// maxFilesPerInput bounds the distinct paths one message may attach. Each file
+// is separately limited by max_file_bytes, so the count is the only other bound.
+const maxFilesPerInput = 32
+
 var (
 	bodyEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 	attrEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
@@ -61,6 +65,9 @@ func ReadTextFiles(root string, paths []string, maxBytes int) ([]FileAttachment,
 			continue
 		}
 		seen[rel] = true
+		if len(seen) > maxFilesPerInput {
+			return nil, fmt.Errorf("at most %d files per message", maxFilesPerInput)
+		}
 		info, err := os.Stat(resolved)
 		if err != nil {
 			return nil, fmt.Errorf("@%s: %w", p, err)

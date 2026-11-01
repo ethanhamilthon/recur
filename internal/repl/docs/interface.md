@@ -46,7 +46,8 @@ autocompletion:
 
 A submitted prompt attaches the content of each `@path` it names:
 - Each distinct path is read once, in first-mention order, relative to the launch
-  project root. Repeated references attach once.
+  project root. Repeated references attach once. A prompt may attach at most 32
+  distinct files; more report an error and keep the draft.
 - Only regular UTF-8 text files attach. Directory references are not expanded.
   NUL-containing or non-UTF-8 files, special files, and paths or symlinks that
   resolve outside the project root report an error. Images keep their own flow.
