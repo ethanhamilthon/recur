@@ -66,6 +66,14 @@ type model struct {
 	menuCancel              context.CancelFunc
 	setup                   []string
 	sessions                []agent.SessionSummary
+	statusEvents            <-chan map[string]string
+	statusGen               uint64
+	statusCancel            context.CancelFunc
+	statusLeft              string
+	statusRight             string
+	statusSem               chan struct{}
+	statusInit              bool
+	statusTornDown          bool
 }
 
 func newModel(a *agent.Agent, cwd string) model {
@@ -83,7 +91,10 @@ func newModel(a *agent.Agent, cwd string) model {
 	style := textarea.Style{Base: base, CursorLine: base, Text: base, Placeholder: base.Foreground(muted), EndOfBuffer: base}
 	input.FocusedStyle = style
 	input.BlurredStyle = style
-	m := model{a: a, input: input, viewport: viewport.New(80, 24), width: 80, height: 24, cwd: cwd}
+	m := model{a: a, input: input, viewport: viewport.New(80, 24), width: 80, height: 24, cwd: cwd, statusSem: make(chan struct{}, 4)}
+	if a != nil {
+		m.statusEvents = a.StatusEvents()
+	}
 	m.restoreHistory()
 	m.refresh(true)
 	return m
@@ -110,7 +121,15 @@ func (m model) idleNotifications() []string {
 func followerPulse() tea.Cmd {
 	return tea.Tick(time.Second, func(time.Time) tea.Msg { return followerTick{} })
 }
-func (m model) Init() tea.Cmd { return tea.Batch(textarea.Blink, followerPulse(), checkUpdate()) }
+func (m model) Init() tea.Cmd {
+	return tea.Batch(
+		textarea.Blink,
+		followerPulse(),
+		checkUpdate(),
+		listenForStatusEvents(m.statusEvents),
+		func() tea.Msg { return statusInitMsg{} },
+	)
+}
 func (m model) wait() tea.Cmd { ch := m.events; return func() tea.Msg { return <-ch } }
 func (m *model) resizeInput() {
 	value, width, height := m.input.Value(), max(1, m.width-2), max(1, m.height/2)
@@ -242,6 +261,34 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.refresh(true)
 		return m, nil
+	case statusInitMsg:
+		m.statusInit = true
+		return m, m.triggerStatusRefresh(map[string]string{"RECUR_EVENT": "init"})
+
+	case statusEventMsg:
+		cmds := []tea.Cmd{listenForStatusEvents(m.statusEvents)}
+		if refCmd := m.triggerStatusRefresh(v); refCmd != nil {
+			cmds = append(cmds, refCmd)
+		}
+		return m, tea.Batch(cmds...)
+
+	case statusResultMsg:
+		if v.gen != m.statusGen {
+			return m, nil
+		}
+		m.statusLeft = v.left
+		m.statusRight = v.right
+		m.statusInit = true
+		return m, nil
+
+	case tea.QuitMsg:
+		if m.statusCancel != nil {
+			m.statusCancel()
+			m.statusCancel = nil
+		}
+		m.statusTornDown = true
+		return m, nil
+
 	case updateCheckMsg:
 		if v.latest != "" && v.latest != m.latest {
 			m.latest = v.latest
@@ -336,7 +383,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.pending != "" {
 				name := m.pending
 				m.pending = ""
-				return m.runCommand(name)
+				return m.executeCommand(name)
 			}
 			m.refresh(follow)
 			return m, nil
@@ -372,10 +419,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.requestCancel()
 				return m, nil
 			}
-			return m.runCommand("/quit")
+			return m.executeCommand("/quit")
 		case "ctrl+d":
 			if !m.busy && m.input.Value() == "" {
-				return m.runCommand("/quit")
+				return m.executeCommand("/quit")
 			}
 		case "esc":
 			if len(m.completions()) == 0 && m.busy {
@@ -440,7 +487,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if matches := m.completions(); len(matches) > 0 && len(m.images) == 0 {
-				return m.runCommand(matches[m.selected%len(matches)].name)
+				return m.executeCommand(matches[m.selected%len(matches)].name)
 			}
 			if m.compacting {
 				return m.stop("notice", "Compaction is running; wait before sending.")
@@ -476,4 +523,22 @@ func (m model) View() string {
 		lines = m.sel.highlight(lines, m.viewport.Width)
 	}
 	return strings.Join(m.composerHighlight(lines), "\n")
+}
+
+func (m model) executeCommand(name string) (tea.Model, tea.Cmd) {
+	if name == "/quit" {
+		if m.statusCancel != nil {
+			m.statusCancel()
+			m.statusCancel = nil
+		}
+		m.statusTornDown = true
+	}
+	next, cmd := m.runCommand(name)
+	if name == "/reload" {
+		if nm, ok := next.(model); ok {
+			refCmd := nm.triggerStatusRefresh(map[string]string{"RECUR_EVENT": "reload"})
+			return nm, tea.Batch(cmd, refCmd)
+		}
+	}
+	return next, cmd
 }

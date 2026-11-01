@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/x/ansi"
-
 	"recur/internal/agent"
 )
 
@@ -73,28 +71,4 @@ func shortPath(path string) string {
 		return "~" + path[len(home):]
 	}
 	return path
-}
-func (m model) bottomBar() string {
-	settings := m.a.Settings()
-	model := settings.Model
-	if settings.Effort != "" {
-		model += "/" + settings.Effort
-	}
-	ctx := "ctx ?"
-	if m.contextInput != nil {
-		ctx = "ctx ~" + formatContext(*m.contextInput)
-	}
-	left := settings.Provider + " · " + model + " · " + ctx
-	if settings.Provider == "" || settings.Model == "" {
-		left = "no model selected · " + ctx
-	}
-	right := ansi.Strip(strings.ReplaceAll(shortPath(m.cwd), "\n", " "))
-	left = ansi.Strip(strings.ReplaceAll(left, "\n", " "))
-	width := max(1, m.width)
-	if ansi.StringWidth(left)+ansi.StringWidth(right)+1 > width {
-		right = ansi.TruncateLeft(right, max(0, width/3), "…")
-		left = ansi.Truncate(left, max(0, width-ansi.StringWidth(right)-1), "…")
-	}
-	gap := max(0, width-ansi.StringWidth(left)-ansi.StringWidth(right))
-	return ansi.Truncate(left+strings.Repeat(" ", gap)+right, width, "")
 }

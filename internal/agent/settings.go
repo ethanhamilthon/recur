@@ -39,6 +39,9 @@ type Settings struct {
 	ReasoningSummary string              `toml:"reasoning_summary"`
 	Effort           string              `toml:"effort"`
 	Providers        map[string]Provider `toml:"providers"`
+	StatusLeft       []string            `toml:"status_left"`
+	StatusRight      []string            `toml:"status_right"`
+	Environment      map[string]string   `toml:"environment"`
 }
 
 // Efforts are the reasoning efforts offered by /model; empty uses the provider default.

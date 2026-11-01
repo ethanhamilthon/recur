@@ -11,15 +11,14 @@ import (
 // session variables; names ending in _FILE carry text (see hooks.Runner.Fire).
 // It is safe to call from any goroutine and never blocks.
 func (a *Agent) Fire(event string, kv ...string) {
-	if a.hooks == nil {
-		return
-	}
 	vars := map[string]string{
 		"RECUR_SESSION_ID": strings.TrimSuffix(filepath.Base(a.HistoryPath), ".jsonl"),
-		"RECUR_CWD":        a.REPL.Dir,
 		"RECUR_PROVIDER":   a.settings.Provider,
 		"RECUR_MODEL":      a.settings.Model,
 		"RECUR_EFFORT":     a.settings.Effort,
+	}
+	if a.REPL != nil && a.REPL.Dir != "" {
+		vars["RECUR_CWD"] = a.REPL.Dir
 	}
 	if a.socketDir != "" {
 		vars["RECUR_ENDPOINT"] = filepath.Join(a.socketDir, "socket")
@@ -27,7 +26,10 @@ func (a *Agent) Fire(event string, kv ...string) {
 	for i := 0; i+1 < len(kv); i += 2 {
 		vars[kv[i]] = kv[i+1]
 	}
-	a.hooks.Fire(event, vars)
+	a.emitStatus(event, vars)
+	if a.hooks != nil {
+		a.hooks.Fire(event, vars)
+	}
 }
 
 // SetMode records the run mode ("tui" or "headless") exported as RECUR_MODE.
@@ -35,6 +37,7 @@ func (a *Agent) SetMode(mode string) { a.hooks.Mode = mode }
 
 // Start reports process and session start once the interface is ready.
 func (a *Agent) Start(version string) {
+	a.version = version
 	source := "startup"
 	if a.HasSavedSession() {
 		source = "resume"

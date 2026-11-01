@@ -49,6 +49,9 @@ func Run(a *agent.Agent, cwd string) error {
 		if m.menuCancel != nil {
 			m.menuCancel()
 		}
+		if m.statusCancel != nil {
+			m.statusCancel()
+		}
 	}
 	return err
 }

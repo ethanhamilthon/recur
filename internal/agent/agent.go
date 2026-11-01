@@ -85,6 +85,8 @@ type Agent struct {
 	hooks             *hooks.Runner
 	lastTitle         string // last title reported by session_title_change
 	home, sessionsDir string
+	status            *statusBridge
+	version           string
 }
 
 func New(dir string, target ...string) (*Agent, error) {

@@ -81,7 +81,7 @@ func TestMetadataAndBottomBar(t *testing.T) {
 		}
 	}
 	m.width = 80
-	if !strings.Contains(m.bottomBar(), "ctx ~1K") || !strings.HasSuffix(m.bottomBar(), m.cwd) {
+	if !strings.Contains(m.bottomBar(), "ctx ~1K") || !strings.HasSuffix(strings.TrimRight(m.bottomBar(), " "), m.cwd) {
 		t.Fatal(m.bottomBar())
 	}
 }
