@@ -13,6 +13,9 @@ import (
 	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"recur/internal/agent"
+	"recur/internal/repl"
 )
 
 const (
@@ -31,6 +34,18 @@ type fileScanMsg struct {
 	cwd     string
 	fileGen int
 	err     error
+}
+
+// filePrep is a submission whose @file references are being read. The draft is
+// kept so that edits made while reading can be detected; p identifies it.
+type filePrep struct {
+	text, draft string
+	images      []repl.Image
+}
+type filePrepMsg struct {
+	prep  *filePrep
+	files []agent.FileAttachment
+	err   error
 }
 type fileToken struct {
 	start, end int
@@ -86,62 +101,97 @@ func findFileToken(text string, cursor int) (fileToken, bool) {
 	if cursor < 0 || cursor > len(runes) {
 		return fileToken{}, false
 	}
-	lineStart := 0
-	for i := cursor - 1; i >= 0 && runes[i] != '\n'; i-- {
-		lineStart = i
-	}
-	for at := cursor - 1; at >= lineStart; at-- {
-		if runes[at] != '@' {
-			continue
+	for at := cursor - 1; at >= 0 && runes[at] != '\n'; at-- {
+		if runes[at] == '@' {
+			return parseFileToken(runes, at, cursor)
 		}
-		if at > 0 && (unicode.IsLetter(runes[at-1]) || unicode.IsDigit(runes[at-1]) || strings.ContainsRune("._%+-\\/:", runes[at-1])) {
-			return fileToken{}, false
-		}
-		lp := string(runes[lineStart:at])
-		if sp := strings.LastIndexByte(lp, ' '); sp >= 0 {
-			lp = lp[sp+1:]
-		}
-		if strings.Contains(lp, "://") {
-			return fileToken{}, false
-		}
-		tokenStart, tokenEnd, query := at, cursor, ""
-		if at+1 < len(runes) && (runes[at+1] == '"' || runes[at+1] == '\'') {
-			quote := runes[at+1]
-			qEnd := at + 2
-			for qEnd < len(runes) && runes[qEnd] != '\n' {
-				if runes[qEnd] == '\\' && qEnd+1 < len(runes) && runes[qEnd+1] != '\n' {
-					qEnd += 2
-					continue
-				}
-				if runes[qEnd] == quote {
-					break
-				}
-				qEnd++
-			}
-			tokenEnd = qEnd
-			if qEnd < len(runes) && runes[qEnd] == quote {
-				tokenEnd++
-			}
-			if cursor < at || cursor > tokenEnd {
-				return fileToken{}, false
-			}
-			query = unescapeQuoted(string(runes[at+2 : min(cursor, qEnd)]))
-		} else {
-			tokenEnd = at + 1
-			for tokenEnd < len(runes) && !unicode.IsSpace(runes[tokenEnd]) && !strings.ContainsRune(")]}>\";,`", runes[tokenEnd]) {
-				tokenEnd++
-			}
-			if cursor < at || cursor > tokenEnd {
-				return fileToken{}, false
-			}
-			query = string(runes[at+1 : cursor])
-		}
-		if strings.ContainsRune(query, '@') || hasControl(query) {
-			return fileToken{}, false
-		}
-		return fileToken{start: tokenStart, end: tokenEnd, query: query, dir: strings.HasSuffix(query, "/")}, true
 	}
 	return fileToken{}, false
+}
+
+// parseFileToken parses the reference whose @ is at runes[at]. A cursor limits
+// the query for completion; a negative cursor selects the whole reference.
+func parseFileToken(runes []rune, at, cursor int) (fileToken, bool) {
+	if at > 0 && (unicode.IsLetter(runes[at-1]) || unicode.IsDigit(runes[at-1]) || strings.ContainsRune("._%+-\\/:", runes[at-1])) {
+		return fileToken{}, false
+	}
+	lineStart := at
+	for lineStart > 0 && runes[lineStart-1] != '\n' {
+		lineStart--
+	}
+	lp := string(runes[lineStart:at])
+	if sp := strings.LastIndexByte(lp, ' '); sp >= 0 {
+		lp = lp[sp+1:]
+	}
+	if strings.Contains(lp, "://") {
+		return fileToken{}, false
+	}
+	var tokenEnd int
+	var query string
+	if at+1 < len(runes) && (runes[at+1] == '"' || runes[at+1] == '\'') {
+		quote := runes[at+1]
+		qEnd := at + 2
+		for qEnd < len(runes) && runes[qEnd] != '\n' {
+			if runes[qEnd] == '\\' && qEnd+1 < len(runes) && runes[qEnd+1] != '\n' {
+				qEnd += 2
+				continue
+			}
+			if runes[qEnd] == quote {
+				break
+			}
+			qEnd++
+		}
+		tokenEnd = qEnd
+		if qEnd < len(runes) && runes[qEnd] == quote {
+			tokenEnd++
+		}
+		if cursor < 0 {
+			cursor = tokenEnd
+		}
+		if cursor < at || cursor > tokenEnd {
+			return fileToken{}, false
+		}
+		if end := min(cursor, qEnd); end > at+2 {
+			query = unescapeQuoted(string(runes[at+2 : end]))
+		}
+	} else {
+		tokenEnd = at + 1
+		for tokenEnd < len(runes) && !unicode.IsSpace(runes[tokenEnd]) && !strings.ContainsRune(")]}>\\\";,`", runes[tokenEnd]) {
+			tokenEnd++
+		}
+		if cursor < 0 {
+			cursor = tokenEnd
+		}
+		if cursor < at || cursor > tokenEnd {
+			return fileToken{}, false
+		}
+		query = string(runes[at+1 : cursor])
+	}
+	if strings.ContainsRune(query, '@') || hasControl(query) {
+		return fileToken{}, false
+	}
+	return fileToken{start: at, end: tokenEnd, query: query, dir: strings.HasSuffix(query, "/")}, true
+}
+
+// fileReferences lists the distinct file paths referenced anywhere in a
+// submitted message, in first-mention order. Directory syntax is excluded and
+// nothing is read from disk.
+func fileReferences(text string) []string {
+	runes := []rune(text)
+	var refs []string
+	seen := map[string]bool{}
+	for at, r := range runes {
+		if r != '@' {
+			continue
+		}
+		token, ok := parseFileToken(runes, at, -1)
+		if !ok || token.dir || token.query == "" || seen[token.query] {
+			continue
+		}
+		seen[token.query] = true
+		refs = append(refs, token.query)
+	}
+	return refs
 }
 
 type pathCollector struct {
@@ -370,4 +420,35 @@ func (m *model) acceptFileCompletion() tea.Cmd {
 		m.dismissFileCompletion()
 	}
 	return cmd
+}
+
+// beginFilePrep reads the referenced files in the background. The draft remains
+// in the composer until the read finishes, so Esc or an error keeps it intact.
+func (m *model) beginFilePrep(text string, refs []string) tea.Cmd {
+	p := &filePrep{text: text, draft: m.input.Value(), images: m.images}
+	m.prep = p
+	root, limit := m.cwd, m.a.Settings().MaxFileBytes
+	return func() tea.Msg {
+		files, err := agent.ReadTextFiles(root, refs, limit)
+		return filePrepMsg{prep: p, files: files, err: err}
+	}
+}
+
+// handleFilePrep submits the prepared input, unless it was cancelled, superseded
+// or the draft was edited while the files were read.
+func (m *model) handleFilePrep(msg filePrepMsg) (tea.Model, tea.Cmd) {
+	if msg.prep != m.prep {
+		return *m, nil
+	}
+	m.prep = nil
+	if m.input.Value() != msg.prep.draft || !slices.Equal(m.images, msg.prep.images) {
+		m.add("notice", "The draft changed while files were read; your edits are kept. Press Enter to send it.")
+		m.refresh(true)
+		return *m, nil
+	}
+	if msg.err != nil {
+		return m.stop("error", "Could not attach files: "+msg.err.Error()+"\nYour draft is unchanged.")
+	}
+	m.dismissFileCompletion()
+	return m.submit(agent.Input{Text: msg.prep.text, Images: msg.prep.images, Files: msg.files})
 }

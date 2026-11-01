@@ -72,19 +72,47 @@ func (m *model) requestCancel() {
 	m.refresh(false)
 }
 func (m *model) queueSteering(text string) {
+	m.queueInput(agent.Input{Text: text, Images: m.images})
+}
+
+// queueInput hands a complete input (text, images and file snapshot) to the running turn.
+func (m *model) queueInput(input agent.Input) {
 	if m.cancelling {
 		m.add("notice", "Cancellation in progress; your message remains in the input.")
 		return
 	}
-	input := agent.Input{Text: text, Images: m.images}
-	if m.steering.PushInput(input) {
-		m.queued = append(m.queued, input)
-		m.a.Fire("steer_queued", "RECUR_MESSAGE_FILE", input.Display())
+	if m.enqueue(input) {
 		m.images = nil
 		m.input.Reset()
 	} else {
 		m.add("notice", "Steering queue is full; your message remains in the input.")
 	}
+}
+
+// enqueue adds input to the steering queue and to the displayed queued list.
+func (m *model) enqueue(input agent.Input) bool {
+	if !m.steering.PushInput(input) {
+		return false
+	}
+	m.queued = append(m.queued, input)
+	m.a.Fire("steer_queued", "RECUR_MESSAGE_FILE", input.Display())
+	return true
+}
+
+// submit sends a complete input now, or queues it when a turn is already running.
+func (m model) submit(input agent.Input) (tea.Model, tea.Cmd) {
+	if m.compacting {
+		return m.stop("notice", "Compaction is running; wait before sending.")
+	}
+	if m.busy {
+		m.queueInput(input)
+		m.refresh(true)
+		return m, nil
+	}
+	if s := m.a.Settings(); s.Provider == "" || s.Model == "" {
+		return m.stop("notice", m.setupHint())
+	}
+	return m.startTurn(input)
 }
 func (m model) workingBlock() string {
 	var out strings.Builder
@@ -133,10 +161,9 @@ func (m model) startCompact(prompt string) (tea.Model, tea.Cmd) {
 	}, workingPulse(m.workingSince))
 }
 
-func (m model) startTurn(text string) (tea.Model, tea.Cmd) {
+func (m model) startTurn(submission agent.Input) (tea.Model, tea.Cmd) {
 	m.a.RememberDisplay(m.entries)
-	submission := agent.Input{Text: text, Images: m.images}
-	m.turnImages, m.images = m.images, nil
+	m.turnImages, m.images = submission.Images, nil
 	m.input.Reset()
 	m.hideCompletion = false
 	m.dismissFileCompletion()

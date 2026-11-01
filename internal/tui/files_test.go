@@ -2,10 +2,16 @@ package tui
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -721,11 +727,11 @@ func TestFileCompletionE2EUpdateTypingBlinkEnterEsc(t *testing.T) {
 		t.Fatal("WindowSizeMsg reopened file completion")
 	}
 
-	// Subsequent Enter submits normally: when busy, it queues steering
+	// Subsequent Enter submits normally: when busy, it queues steering after the file is read
 	m.busy = true
 	m.steering = &agent.Steering{}
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = next.(model)
+	m, cmd := pressEnter(m)
+	m = deliver(t, m, cmd)
 
 	if len(m.queued) != 1 || m.queued[0].Text != "@main.go" {
 		t.Fatalf("subsequent Enter did not submit/queue steering: queued = %v", m.queued)
@@ -829,8 +835,8 @@ func TestFileCompletionWithAttachedImageAndSteering(t *testing.T) {
 	// Subsequent Enter while busy queues steering with image
 	m.busy = true
 	m.steering = &agent.Steering{}
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = next.(model)
+	m, cmd := pressEnter(m)
+	m = deliver(t, m, cmd)
 
 	if len(m.queued) != 1 {
 		t.Fatalf("expected 1 queued steering instruction, got %d", len(m.queued))
@@ -981,5 +987,305 @@ func TestQuotePathAndFindFileTokenEscapingRoundtrip(t *testing.T) {
 	}
 	if m.hasFileCompletions() {
 		t.Fatal("file completion should be dismissed after accepting regular file")
+	}
+}
+
+func TestFileReferencesWholeMessage(t *testing.T) {
+	for _, tc := range []struct {
+		name, text string
+		want       []string
+	}{
+		{"single", "read @main.go please", []string{"main.go"}},
+		{"ordered", "@a.go and @b/c.go", []string{"a.go", "b/c.go"}},
+		{"duplicates once", "@a.go then @a.go again", []string{"a.go"}},
+		{"quoted unicode and spaces", `see @"docs/Résumé 2026.md" and @'x y.txt'`, []string{"docs/Résumé 2026.md", "x y.txt"}},
+		{"escaped quote in quoted path", `@"a\"b.txt"`, []string{`a"b.txt`}},
+		{"newline separated", "@a.go\n@b.go", []string{"a.go", "b.go"}},
+		{"punctuation ends token", "(@a.go), @b.go;", []string{"a.go", "b.go"}},
+		{"email ignored", "mail user@example.com", nil},
+		{"url ignored", "see https://example.com/@name/x", nil},
+		{"escaped at ignored", `literal \@a.go`, nil},
+		{"directory syntax ignored", "look in @src/ and @docs/", nil},
+		{"bare at ignored", "a @ b", nil},
+		{"empty quoted ignored", `@""`, nil},
+		{"nested at rejected", "@a@b.go", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := fileReferences(tc.text); !slices.Equal(got, tc.want) {
+				t.Fatalf("fileReferences(%q) = %q, want %q", tc.text, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFileReferencesDoNotTouchFilesystem(t *testing.T) {
+	// The paths do not exist; discovery must only parse text.
+	if got := fileReferences("@missing/nowhere.txt"); !slices.Equal(got, []string{"missing/nowhere.txt"}) {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFindFileTokenCursorBetweenAtAndQuote(t *testing.T) {
+	// The cursor sits between @ and the opening quote; this must not panic and
+	// offers only the empty query, like a bare @.
+	if token, ok := findFileToken(`@"abc"`, 1); ok && token.query != "" {
+		t.Fatalf("query before the quote = %q", token.query)
+	}
+}
+
+// fakeProvider answers every request with an empty turn and records request bodies.
+func fakeProvider(t *testing.T) (string, func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var bodies []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(data))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n")
+	}))
+	t.Cleanup(server.Close)
+	return server.URL, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), bodies...)
+	}
+}
+
+func fileSubmitAgent(t *testing.T, dir, url string) *agent.Agent {
+	t.Helper()
+	t.Setenv("RECUR_HOME", t.TempDir())
+	config := fmt.Sprintf("provider = \"p\"\nmodel = \"m\"\n[providers.p]\nbase_url = %q\napi_key = \"k\"\n", url)
+	if err := os.WriteFile(filepath.Join(os.Getenv("RECUR_HOME"), "config.toml"), []byte(config), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a, err := agent.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { a.Close() })
+	return a
+}
+
+// pressEnter submits the composer and returns the command that prepares files, if any.
+func pressEnter(m model) (model, tea.Cmd) {
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	return next.(model), cmd
+}
+
+// deliver runs a prepared command and feeds its message back through Update.
+func deliver(t *testing.T, m model, cmd tea.Cmd) model {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("expected a file preparation command")
+	}
+	next, _ := m.Update(cmd())
+	return next.(model)
+}
+
+func drainTurn(t *testing.T, events chan agent.Event) {
+	t.Helper()
+	timeout := time.After(10 * time.Second)
+	for {
+		select {
+		case e := <-events:
+			if e.Kind == "done" {
+				return
+			}
+		case <-timeout:
+			t.Fatal("turn did not finish")
+		}
+	}
+}
+
+func TestFileSubmitIdleSendsPreparedSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main // v1"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	url, requests := fakeProvider(t)
+	m := newModel(fileSubmitAgent(t, dir, url), dir)
+	m.input.SetValue("explain @main.go")
+	m.input.CursorEnd()
+	m, cmd := pressEnter(m)
+	if m.prep == nil || m.input.Value() != "explain @main.go" {
+		t.Fatal("enter should prepare files and keep the draft until they are read")
+	}
+	m = deliver(t, m, cmd)
+	if !m.busy || m.input.Value() != "" {
+		t.Fatal("prepared submission did not start a turn")
+	}
+	drainTurn(t, m.events)
+	bodies := requests()
+	if len(bodies) != 1 || !strings.Contains(bodies[0], "package main // v1") || !strings.Contains(bodies[0], "explain @main.go") {
+		t.Fatalf("model request missing prompt or snapshot: %v", bodies)
+	}
+}
+
+func TestFileSubmitWhileBusyQueuesCompleteInput(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m := newModel(&agent.Agent{}, dir)
+	m.busy = true
+	m.steering = &agent.Steering{}
+	m.images = []repl.Image{{URL: "data:image/png;base64,AA==", Path: "pic.png"}}
+	m.input.SetValue("@main.go")
+	m, cmd := pressEnter(m)
+	m = deliver(t, m, cmd)
+	if len(m.queued) != 1 || len(m.queued[0].Files) != 1 || len(m.queued[0].Images) != 1 {
+		t.Fatalf("queued input lost files or images: %+v", m.queued)
+	}
+	if m.input.Value() != "" || m.images != nil {
+		t.Fatal("composer not cleared after queueing")
+	}
+	taken := m.steering.TakeInputs()
+	if len(taken) != 1 || taken[0].Files[0].Content != "package main" {
+		t.Fatalf("steering queue lost the snapshot: %+v", taken)
+	}
+}
+
+func TestFileSubmitCancelledPreparationIgnoresLateResult(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m := newModel(&agent.Agent{}, dir)
+	m.input.SetValue("@main.go")
+	m.input.CursorEnd()
+	m, cmd := pressEnter(m)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(model)
+	if m.prep != nil || m.input.Value() != "@main.go" {
+		t.Fatal("escape did not cancel preparation while keeping the draft")
+	}
+	m = deliver(t, m, cmd)
+	if m.busy || len(m.queued) != 0 || m.input.Value() != "@main.go" {
+		t.Fatal("late result from a cancelled preparation was submitted")
+	}
+}
+
+func TestFileSubmitChangedDraftKeepsEdits(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m := newModel(&agent.Agent{}, dir)
+	m.input.SetValue("@main.go")
+	m.input.CursorEnd()
+	m, cmd := pressEnter(m)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m = next.(model)
+	m = deliver(t, m, cmd)
+	if m.busy || m.input.Value() != "@main.gox" {
+		t.Fatalf("stale result overwrote or submitted the edited draft: %q busy=%v", m.input.Value(), m.busy)
+	}
+	if last := m.entries[len(m.entries)-1]; !strings.Contains(last.Text, "draft changed") {
+		t.Fatalf("stale result not explained: %+v", last)
+	}
+}
+
+func TestFileSubmitReadErrorKeepsDraft(t *testing.T) {
+	m := newModel(&agent.Agent{}, t.TempDir())
+	m.input.SetValue("@missing.go")
+	m.input.CursorEnd()
+	m, cmd := pressEnter(m)
+	m = deliver(t, m, cmd)
+	if m.busy || m.prep != nil || m.input.Value() != "@missing.go" || len(m.queued) != 0 {
+		t.Fatal("read error did not leave the draft intact")
+	}
+	if last := m.entries[len(m.entries)-1]; last.Kind != "error" || !strings.Contains(last.Text, "@missing.go") {
+		t.Fatalf("read error not visible: %+v", last)
+	}
+}
+
+func TestFileSubmitEnterDuringPreparationDoesNotDuplicate(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m := newModel(&agent.Agent{}, dir)
+	m.input.SetValue("@main.go")
+	m.input.CursorEnd()
+	m, first := pressEnter(m)
+	pending := m.prep
+	m, second := pressEnter(m)
+	if first == nil || second != nil || m.prep != pending {
+		t.Fatal("second enter started another submission while preparing")
+	}
+}
+
+func TestFileSubmitRecallThenResubmitReadsNewSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(file, []byte("version one"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	url, requests := fakeProvider(t)
+	m := newModel(fileSubmitAgent(t, dir, url), dir)
+	m.busy = true
+	m.steering = &agent.Steering{}
+	m.input.SetValue("@main.go")
+	m, cmd := pressEnter(m)
+	m = deliver(t, m, cmd)
+	m.busy = false
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = next.(model)
+	if m.input.Value() != "@main.go" || len(m.queued) != 0 {
+		t.Fatalf("recall did not restore the editable prompt: %q", m.input.Value())
+	}
+	if err := os.WriteFile(file, []byte("version two"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m, cmd = pressEnter(m)
+	m = deliver(t, m, cmd)
+	drainTurn(t, m.events)
+	bodies := requests()
+	if len(bodies) != 1 || !strings.Contains(bodies[0], "version two") || strings.Contains(bodies[0], "version one") {
+		t.Fatalf("resubmission did not read a new snapshot: %v", bodies)
+	}
+}
+
+func TestFileSubmitAutomaticPromotionKeepsSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(file, []byte("version one"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	url, requests := fakeProvider(t)
+	m := newModel(fileSubmitAgent(t, dir, url), dir)
+	m.busy = true
+	m.steering = &agent.Steering{}
+	m.input.SetValue("@main.go")
+	m, cmd := pressEnter(m)
+	m = deliver(t, m, cmd)
+	if err := os.WriteFile(file, []byte("version two"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	next, _ := m.Update(agent.Event{Kind: "done"})
+	m = next.(model)
+	if !m.busy || len(m.queued) != 0 {
+		t.Fatal("queued instruction was not promoted to a follow-up turn")
+	}
+	drainTurn(t, m.events)
+	bodies := requests()
+	if len(bodies) != 1 || !strings.Contains(bodies[0], "version one") || strings.Contains(bodies[0], "version two") {
+		t.Fatalf("promotion re-read or lost the snapshot: %v", bodies)
+	}
+}
+
+func TestFileSubmitWithdrawnInputRestoresText(t *testing.T) {
+	m := newModel(&agent.Agent{}, t.TempDir())
+	m.busy = true
+	m.steering = &agent.Steering{}
+	m.queued = []agent.Input{{Text: "@main.go", Files: []agent.FileAttachment{{Path: "main.go", Content: "x"}}}}
+	m.input.SetValue("draft")
+	next, _ := m.Update(agent.Event{Kind: "done", Text: "failed"})
+	m = next.(model)
+	if m.input.Value() != "@main.go\n\ndraft" || len(m.queued) != 0 {
+		t.Fatalf("withdrawn input not restored as editable text: %q", m.input.Value())
 	}
 }

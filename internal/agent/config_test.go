@@ -482,3 +482,46 @@ api_key = "secret_key"
 		t.Fatalf("providers missing after AddProvider: %+v", decoded)
 	}
 }
+
+func TestConfigMaxFileBytesLayers(t *testing.T) {
+	for _, tc := range []struct {
+		name, global, project string
+		want                  int
+		invalid               bool
+	}{
+		{"builtin default", "", "", 65536, false},
+		{"global overrides default", "max_file_bytes = 1024\n", "", 1024, false},
+		{"project overrides global", "max_file_bytes = 1024\n", "max_file_bytes = 2048\n", 2048, false},
+		{"explicit zero overrides inherited", "max_file_bytes = 1024\n", "max_file_bytes = 0\n", 0, false},
+		{"negative rejected", "", "max_file_bytes = -1\n", 0, true},
+		{"negative global rejected", "max_file_bytes = -5\n", "", 0, true},
+		{"unknown key rejected", "", "max_file_byte = 1\n", 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home, cwd := t.TempDir(), t.TempDir()
+			if tc.global != "" {
+				if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(tc.global), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.project != "" {
+				if err := os.WriteFile(filepath.Join(cwd, "recur.toml"), []byte(tc.project), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg, err := loadConfiguration(home, cwd, ConfigFiles{})
+			if tc.invalid {
+				if err == nil {
+					t.Fatalf("expected error, got max_file_bytes=%d", cfg.settings.MaxFileBytes)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.settings.MaxFileBytes != tc.want {
+				t.Fatalf("max_file_bytes = %d, want %d", cfg.settings.MaxFileBytes, tc.want)
+			}
+		})
+	}
+}

@@ -87,6 +87,7 @@ type model struct {
 	fileDismissed            bool
 	fileDismissedValue       string
 	fileDismissedCursor      int
+	prep                     *filePrep // submission waiting for its @file references to be read
 }
 
 func newModel(a *agent.Agent, cwd string) model {
@@ -231,6 +232,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleFileDebounce(v)
 	case fileScanMsg:
 		return m.handleFileScan(v)
+	case filePrepMsg:
+		return m.handleFilePrep(v)
 	case clipboardResult:
 		valBefore := m.input.Value()
 		curBefore := m.composerCursorOffset()
@@ -254,7 +257,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// While busy, the turn itself accepts notifications as steering.
 		if messages := m.idleNotifications(); len(messages) > 0 {
 			draft := m.keepDraft()
-			next, cmd := m.startTurn(messages[0])
+			next, cmd := m.startTurn(agent.Input{Text: messages[0], Images: m.images})
 			m = next.(model)
 			for _, text := range messages[1:] {
 				m.steering.Push(text)
@@ -378,12 +381,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.queued) > 0 && v.Text == "" && !m.cancelling && m.pending == "" {
 				draft := m.keepDraft()
 				queued := append([]agent.Input(nil), m.queued...)
-				m.images = queued[0].Images
-				next, cmd := m.startTurn(queued[0].Text)
+				next, cmd := m.startTurn(queued[0])
 				m = next.(model)
-				for _, text := range queued[1:] {
-					m.images = text.Images
-					m.queueSteering(text.Text)
+				for _, input := range queued[1:] {
+					m.enqueue(input) // the new queue is empty, so it has room
 				}
 				m.restoreDraft(draft, follow)
 				return m, cmd
@@ -457,6 +458,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.executeCommand("/quit")
 			}
 		case "esc":
+			if m.prep != nil {
+				m.prep = nil // a late result is ignored; the draft was never touched
+				m.refresh(true)
+				return m, nil
+			}
 			if m.fileLoading || m.hasFileCompletions() {
 				m.dismissFileCompletion()
 				m.refresh(true)
@@ -529,6 +535,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.pasting {
 				return m.stop("notice", "Clipboard read in progress; wait before submitting.")
 			}
+			if m.prep != nil {
+				return m.stop("notice", "Still reading attached files; wait before sending.")
+			}
 			if m.hasFileCompletions() {
 				cmd := m.acceptFileCompletion()
 				m.refresh(true)
@@ -542,18 +551,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if matches := m.completions(); len(matches) > 0 && len(m.images) == 0 {
 				return m.executeCommand(matches[m.selected%len(matches)].name)
 			}
-			if m.compacting {
-				return m.stop("notice", "Compaction is running; wait before sending.")
+			if refs := fileReferences(text); len(refs) > 0 {
+				cmd := m.beginFilePrep(text, refs)
+				return m, cmd
 			}
-			if m.busy {
-				m.queueSteering(text)
-				m.refresh(true)
-				return m, nil
-			}
-			if s := m.a.Settings(); s.Provider == "" || s.Model == "" {
-				return m.stop("notice", m.setupHint())
-			}
-			return m.startTurn(text)
+			return m.submit(agent.Input{Text: text, Images: m.images})
 
 		}
 		valBefore := m.input.Value()

@@ -39,9 +39,36 @@ autocompletion:
   steering prematurely.
 - Esc closes active or scanning completion menus before cancelling an in-flight
   turn.
-- `@` is strictly a path autocompletion helper, NOT a file attachment mechanism.
-  It does not read or inject file content into prompt text; the model reads files
-  using bash tool calls.
+- Selecting a file inserts only its quoted `@path`. Content is attached when the
+  prompt is submitted; see the next section.
+
+## @ File References
+
+A submitted prompt attaches the content of each `@path` it names:
+- Each distinct path is read once, in first-mention order, relative to the launch
+  project root. Repeated references attach once.
+- Only regular UTF-8 text files attach. Directory references are not expanded.
+  NUL-containing or non-UTF-8 files, special files, and paths or symlinks that
+  resolve outside the project root report an error. Images keep their own flow.
+- Reading happens in the background when you press Enter, not when the path is
+  selected. The draft stays in the composer until the files are read. Esc cancels
+  the read and keeps the draft. If the draft changes during the read, your edits
+  are kept and nothing is sent; press Enter again.
+- A missing or unreadable file reports an error and keeps the draft, so the model
+  never receives a prompt without the content you asked for.
+- Each file is limited to `max_file_bytes` (default 64 KiB; `0` is unlimited).
+  Longer files send their leading bytes, marked as truncated with the included and
+  original sizes. The limit applies per file only; several large files can still
+  exceed the model's context window. See `config.md`.
+- Emails, URLs, escaped `\@` and a bare `@` attach nothing.
+- The composer and transcript show only the prompt. The model receives the prompt
+  and the file contents in one user message. File contents are labelled as data,
+  with their boundaries escaped, but they are not filtered for secrets or
+  instructions.
+- A queued steering instruction keeps the snapshot taken when it was submitted,
+  including when it is promoted to a follow-up turn. Recalling a queued prompt
+  restores editable text, and resubmitting reads the files again.
+- Notifications and headless prompts are not scanned for `@` references.
 
 ## Padded Status Bar
 
