@@ -31,7 +31,6 @@ type configuration struct {
 	system   string
 	hooks    []hooks.Hook
 	local    string
-	ignored  bool
 	sources  []Source
 	primary  string
 }

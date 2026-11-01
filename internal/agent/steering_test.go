@@ -68,7 +68,6 @@ func TestSteeringAtSafeBoundaries(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer a.Close()
-			a.REPL.Prefix = ""
 			configureTestAgent(t, a, Settings{Provider: "p", Model: "m", Providers: map[string]Provider{"p": {BaseURL: server.URL}}})
 			steering := &Steering{}
 			queued := false

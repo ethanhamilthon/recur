@@ -102,7 +102,6 @@ func TestCompactUsesSessionInstructionsAndPrompt(t *testing.T) {
 	})
 	defer closeAll()
 	a.System = "custom system"
-	a.REPL.Prefix = "print(1)"
 	a.History = compactHistory(t, 5)
 	a.settings.CompactKeepTurns = 1
 	if _, err := a.Compact(context.Background(), "focus on the parser"); err != nil {

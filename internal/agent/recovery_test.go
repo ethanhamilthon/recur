@@ -35,7 +35,6 @@ func TestCompletedItemSavedBeforeResponseFinishes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	a.REPL.Prefix = ""
 	configureTestAgent(t, a, Settings{Provider: "p", Model: "m", Providers: map[string]Provider{"p": {BaseURL: server.URL}}})
 	done := make(chan error, 1)
 	go func() {
@@ -93,7 +92,6 @@ func TestCrashDuringSecondToolKeepsFirstResult(t *testing.T) {
 		if err != nil {
 			os.Exit(2)
 		}
-		a.REPL.Prefix = ""
 		configureTestAgent(t, a, Settings{Provider: "p", Model: "m", Providers: map[string]Provider{"p": {BaseURL: os.Getenv("CRASH_SERVER")}}})
 		_ = a.Run(context.Background(), "run tools", func(Event) {})
 		os.Exit(3)

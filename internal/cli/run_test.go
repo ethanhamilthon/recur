@@ -208,9 +208,6 @@ func TestShellCommandsUseEndpoint(t *testing.T) {
 	if err = Run(context.Background(), []string{"notify", "hi"}, strings.NewReader(""), io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "-s") {
 		t.Fatalf("notify outside a shell: %v", err)
 	}
-	if _, err = a.REPL.Ensure(context.Background()); err != nil {
-		t.Fatal(err)
-	}
 	result, err := a.REPL.Execute(context.Background(), `echo "$RECUR_ENDPOINT"`, time.Second)
 	if err != nil || result.Error {
 		t.Fatal(result, err)

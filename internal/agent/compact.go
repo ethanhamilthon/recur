@@ -205,7 +205,7 @@ func (a *Agent) Reload() error {
 		return fmt.Errorf("session selection: %w", err)
 	}
 	a.REPL.Close()
-	a.System, a.LocalConfig, a.LocalIgnored, a.Sources, a.primaryConfig = c.system, c.local, c.ignored, c.sources, c.primary
+	a.System, a.LocalConfig, a.Sources, a.primaryConfig = c.system, c.local, c.sources, c.primary
 	a.hooks.Set(c.hooks)
 	a.applySettings(c.settings)
 	return nil

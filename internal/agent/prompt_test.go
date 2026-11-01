@@ -10,13 +10,9 @@ import (
 	"testing"
 
 	"recur/internal/repl"
-	"recur/prompts"
 )
 
 func TestRuntimeContractOnlyInToolDescription(t *testing.T) {
-	if prompts.System != "You are Recur, a coding agent" {
-		t.Fatalf("unexpected default system: %q", prompts.System)
-	}
 	for _, system := range []string{"", "Custom instructions retained verbatim."} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var body struct {

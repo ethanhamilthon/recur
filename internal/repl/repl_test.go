@@ -288,19 +288,9 @@ func TestNoStuckWaitFromPipes(t *testing.T) {
 	}
 }
 
-func TestEnsureAndCloseCompatibility(t *testing.T) {
+func TestCloseTerminatesActive(t *testing.T) {
 	r := &REPL{
-		Dir:    t.TempDir(),
-		Prefix: "echo should not run",
-	}
-
-	// Ensure is a no-op returning false, nil
-	fresh, err := r.Ensure(context.Background())
-	if fresh || err != nil {
-		t.Fatalf("Ensure: fresh=%v err=%v", fresh, err)
-	}
-	if r.PrefixOutput != "" {
-		t.Fatalf("PrefixOutput should remain empty, got %q", r.PrefixOutput)
+		Dir: t.TempDir(),
 	}
 
 	// Close terminates any active managed processes

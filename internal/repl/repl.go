@@ -27,21 +27,12 @@ type Result struct {
 
 // REPL executes commands in stateless system Bash processes.
 type REPL struct {
-	mu           sync.Mutex
-	active       map[*exec.Cmd]struct{}
-	Dir          string
-	Environment  map[string]string // base [env] configuration
-	Prefix       string            // inert compatibility field
-	PrefixOutput string            // inert compatibility field
+	mu          sync.Mutex
+	active      map[*exec.Cmd]struct{}
+	Dir         string
+	Environment map[string]string // base [env] configuration
 	// Env returns variables exported before every call, such as session metadata.
 	Env func() map[string]string
-	// Observe is kept for compatibility while other branches migrate.
-	Observe func(event string, kv ...string)
-}
-
-// Ensure is a no-op kept for compatibility; system Bash calls never require initialization.
-func (r *REPL) Ensure(ctx context.Context) (bool, error) {
-	return false, nil
 }
 
 // Close terminates any active managed processes.

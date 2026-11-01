@@ -75,7 +75,6 @@ type Agent struct {
 	HistoryPath       string
 	System            string
 	LocalConfig       string // project directory supplying config files, or ""
-	LocalIgnored      bool   // project .recur files exist but enable_local_recur is off
 	Sources           []Source
 	primaryConfig     string // primary configuration file path
 	client            openai.Client
@@ -109,7 +108,6 @@ func NewWith(dir string, files ConfigFiles, target ...string) (*Agent, error) {
 		home:          config,
 		System:        cfg.system,
 		LocalConfig:   cfg.local,
-		LocalIgnored:  cfg.ignored,
 		Sources:       cfg.sources,
 		primaryConfig: cfg.primary,
 		hooks: &hooks.Runner{

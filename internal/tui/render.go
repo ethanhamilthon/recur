@@ -183,9 +183,6 @@ func (m *model) timeline() string {
 		row := fmt.Sprintf("%-7s %s", strings.TrimSuffix(s.Name, filepath.Ext(s.Name)), where)
 		out.WriteString(lipgloss.NewStyle().Foreground(muted).Render(ansi.Truncate(row, max(1, m.width), "…")) + "\n")
 	}
-	if m.a.LocalIgnored {
-		out.WriteString(lipgloss.NewStyle().Foreground(warnColor).Render("Project .recur ignored: enable_local_recur = false") + "\n")
-	}
 	out.WriteString("\n")
 	if len(m.cache) > len(m.entries) {
 		m.cache = m.cache[:len(m.entries)]

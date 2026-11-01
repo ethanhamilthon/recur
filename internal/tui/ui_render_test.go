@@ -117,13 +117,6 @@ func TestConfigSourcesHeader(t *testing.T) {
 			t.Fatalf("header missing %q in:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "ignored") {
-		t.Fatal("ignored warning shown without ignored project config")
-	}
-	a.LocalIgnored = true
-	if !strings.Contains(ansi.Strip(m.timeline()), "Project .recur ignored: enable_local_recur = false") {
-		t.Fatal("ignored project config not reported")
-	}
 }
 
 func TestUnavailableContextClearsOldEstimate(t *testing.T) {

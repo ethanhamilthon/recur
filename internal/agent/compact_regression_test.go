@@ -29,7 +29,6 @@ func TestAutomaticCompactionJournalSurvivesRunAndResume(t *testing.T) {
 	})
 	defer closeAll()
 	a.History = compactHistory(t, 5)
-	a.REPL.Prefix = ""
 	a.settings.CompactKeepTurns = 2
 	if err := a.Run(context.Background(), "new question", func(Event) {}); err != nil {
 		t.Fatal(err)

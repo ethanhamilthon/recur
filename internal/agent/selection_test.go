@@ -107,7 +107,6 @@ func TestSessionGlobalAndContextMatchesRecords(t *testing.T) {
 
 	n := int64(36679)
 	a.records = []Record{{Kind: "assistant", Meta: &Metadata{RequestID: "r-1", ContextInput: &n}}}
-	_, _ = a.REPL.Ensure(context.Background())
 	result, err := a.REPL.Execute(context.Background(), `echo "$RECUR_CTX_SIZE $RECUR_SESSION_ID"; sh -c 'echo "$RECUR_ENDPOINT"'`, time.Second)
 	id := strings.TrimSuffix(filepath.Base(a.HistoryPath), ".jsonl")
 	if err != nil || result.Error || !strings.Contains(result.Output, "36679 "+id) || !strings.Contains(result.Output, filepath.Join(a.socketDir, "socket")) {

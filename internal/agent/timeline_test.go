@@ -73,7 +73,6 @@ func TestFullTurnLiveAndHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	a.REPL.Prefix = ""
 	configureTestAgent(t, a, Settings{Provider: "test", Model: "m", Providers: map[string]Provider{"test": {BaseURL: server.URL}}})
 	var live []Record
 	if err = a.Run(context.Background(), "go", func(e Event) { live = ApplyEvent(live, e) }); err != nil {
@@ -149,7 +148,6 @@ func TestItemContentIsLiveAndSurvivesFailedStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	a.REPL.Prefix = ""
 	configureTestAgent(t, a, Settings{Provider: "test", Model: "m", Providers: map[string]Provider{"test": {BaseURL: server.URL}}})
 	var live []Record
 	err = a.Run(context.Background(), "go", func(e Event) { live = ApplyEvent(live, e) })
@@ -180,7 +178,6 @@ func TestUnavailableUsageStaysUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	a.REPL.Prefix = ""
 	configureTestAgent(t, a, Settings{Provider: "p", Model: "m", Providers: map[string]Provider{"p": {BaseURL: server.URL}}})
 	if err = a.Run(context.Background(), "go", func(Event) {}); err != nil {
 		t.Fatal(err)

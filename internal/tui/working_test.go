@@ -124,7 +124,6 @@ func TestLateSteeringContinuesWithoutLosingDraft(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	a.REPL.Prefix = ""
 	m := newModel(a, "/project")
 	m.busy, m.workingSince = true, time.Now()
 	m.queued = []agent.Input{{Text: "late first"}, {Text: "late second"}}

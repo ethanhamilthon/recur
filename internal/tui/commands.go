@@ -182,7 +182,7 @@ func (m model) runCommand(name string) (tea.Model, tea.Cmd) {
 			return m.stop("error", err.Error())
 		}
 		m.cache = nil
-		m.add("notice", "Settings reloaded; shell state was reset.")
+		m.add("notice", "Settings reloaded.")
 	case "/rename":
 		if m.busy {
 			return m.stop("notice", "Wait for the active turn before renaming.")
