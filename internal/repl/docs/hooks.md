@@ -45,6 +45,8 @@ Hook handler fields:
   `events`.
 - `send_output`: boolean flag (default `false`). When `true`, command output is
   captured and queued for delivery at the start of the next turn.
+- `headless_support`: boolean flag (default `true`). Setting `headless_support = false`
+  keeps the hook from running in headless runs (`recur -prompt` or `--mode jsonl`).
 
 Hooks merge by name: an entry in `./recur.toml` overrides or disables an entry
 with the same name in `$RECUR_HOME/config.toml`. Array fields like `events`
@@ -61,9 +63,9 @@ Migrating legacy hooks:
 events = ["turn_end"]
 ```
 
-In headless runs (`recur -prompt '...'` or `recur --mode jsonl`), implicit hooks
-are disabled. Hooks only run if an explicit configuration file is provided via
-`--config PATH`. Combine with `--no-extend` to avoid inheriting global hooks.
+Headless runs (`recur -prompt '...'` or `recur --mode jsonl`) run the same hooks as
+the TUI, including hooks from `$RECUR_HOME/config.toml` and `./recur.toml`, except
+hooks with `headless_support = false`. `RECUR_MODE` is set to `headless` or `tui`.
 
 ## Delivery and Execution
 
