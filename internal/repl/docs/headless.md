@@ -1,43 +1,63 @@
 # Headless transports and notifications
 
-recur -prompt 'request' runs a single turn. Without --resume ID, headless mode
-creates a new project session. --resume accepts a full existing session ID from
-this project; an unknown ID is an error, not a new session.
+## Running Headless
 
-Hooks (recur docs hooks) are off in headless runs unless --hooks FILE is given;
-then only that file is read (no home or project hooks), RECUR_MODE is headless
-and the interface-only events (idle, steer_queued, image_attached with source
-paste) never occur.
+`recur -prompt 'request'` runs a single turn without starting the interactive
+TUI. Without `--resume ID`, headless mode creates a new project session. Passing
+`--resume ID` reopens an existing project session; an unknown ID produces an
+error.
 
-Without --mode, --prompt prints only the completed assistant answers to stdout;
-errors go to stderr. recur --mode jsonl reads one
-{"prompt":"text"} object per line. JSON strings can contain escaped newlines.
-JSONL stdout contains session, display events, and done records. Events have
-type, text, id, meta, and provisional fields. done includes ok and session
-metadata. Use --prompt with --mode jsonl for one JSONL-output turn. Input EOF
-ends the process; keep stdin open for an idle long-lived client. A failed turn,
-invalid input or cancellation ends processing with nonzero exit status and full
-diagnostics on stderr. Stdout has no terminal escape sequences added by the TUI.
+Output modes:
+- Default: prints only completed assistant answer text to stdout; errors and
+  diagnostics go to stderr.
+- `--mode jsonl`: reads `{"prompt":"text"}` objects from stdin (one per line)
+  and writes streaming JSONL events to stdout. Emitted objects include `session`,
+  display events (`type`, `text`, `id`, `meta`, `provisional`), and a terminal
+  `done` record containing session metadata. Closing stdin (EOF) exits cleanly.
+  Combine `--prompt` with `--mode jsonl` for a single JSONL-formatted turn.
 
-recur notify 'message' sends to the running session. Inside a recur shell (and
-any program it starts) the session comes from RECUR_ENDPOINT; elsewhere pass
--s ID for an active session of the current project. Without message arguments
-it reads stdin. Use -- before message arguments starting with
-a dash. The text is XML-escaped and wrapped in a notify block, then queued for
-the next safe model request boundary. No extra user-authored message or tool
-output is invented. An idle TUI starts a continuation within its one-second poll;
-an idle headless client with open stdin starts one immediately. Active turns
-accept notifications after all response tool outputs. Inactive sessions return
-an error rather than storing a notification for later startup.
+In headless mode, stdout contains raw program output without terminal escape
+sequences.
 
-Notify accepts at most 128 KiB of message text and has a bounded 64-entry queue.
-Its acknowledgement means the running owner enqueued the message, not that the
-model accepted it or that it was durably saved. Pending notifications are
-in-memory and can be lost on exit/crash or session switching; do not assume
-exactly-once delivery after an ambiguous connection failure. There is no
-automatic retry. Accepted notifications are persisted with normal history.
+## Hook Isolation
 
-Only one client owns a session's writer lock. Opening a session that another
-recur process owns fails with "session is in use"; reopen it after the owner
-exits. OS locks are released even when a process crashes. Separate sessions can
-be used concurrently.
+Hooks (see `recur docs hooks`) are disabled by default in headless runs. Implicit
+project or global configuration files do not activate hooks.
+
+Hooks run in headless mode ONLY when an explicit configuration file is supplied
+via `--config PATH`. Combine `--config PATH` with `--no-extend` to ensure no
+global hooks are inherited.
+
+In headless mode:
+- `RECUR_MODE` is set to `headless`.
+- Interface-only lifecycle events (`idle`, `steer_queued`, and `image_attached`
+  with source `paste`) never fire.
+- Background status bar subprocesses and `@` file path indexing never run.
+
+## External Notifications (recur notify)
+
+`recur notify 'message'` sends text to the active session. Within a Recur shell
+or hook process, the session endpoint is detected automatically from
+`RECUR_ENDPOINT`; outside a session, pass `-s SESSION_ID`. Without message
+arguments, it reads from stdin. Use `--` before message arguments that start with
+a dash.
+
+Delivery behavior:
+- If the agent is idle, `recur notify` starts a new turn immediately.
+- If the agent is currently working, `recur notify` queues the message as
+  steering, delivered at the next safe boundary after all response tool outputs
+  are committed.
+- Unlike hook `send_output = true` (which queues output passively for the next
+  turn without starting one), `recur notify` actively triggers a continuation
+  or steering.
+
+The message is XML-escaped and wrapped in a `<notify>` block. Notifications
+accept up to 128 KiB of text with a bounded queue of 64 entries. Inactive
+sessions reject notifications with an error rather than queuing them on disk.
+Delivered notifications are saved into normal session history.
+
+## Session Ownership and Locks
+
+Each session is guarded by a process lock. Opening an active session owned by
+another process fails with `"session is in use"`. File locks are released
+automatically by the operating system upon process exit or crash.

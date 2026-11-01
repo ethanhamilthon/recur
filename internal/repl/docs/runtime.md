@@ -2,7 +2,7 @@
 
 The bash tool runs commands in system Bash (`/bin/bash --noprofile --norc`).
 Each call starts a fresh process in the project directory; variables, functions,
-aliases and working directory changes do not persist between calls.
+aliases and working directory changes do not persist between calls or user turns.
 Programs that run as separate processes, including scripts executed through
 their shebang, use whatever interpreter they name.
 
@@ -36,9 +36,11 @@ not redirect their output may be unblocked when output pipes close. Tracked
 process groups are terminated on cancellation.
 
 Every call exports session metadata: RECUR_SESSION_ID, RECUR_MODEL,
-RECUR_PROVIDER, RECUR_EFFORT, RECUR_CTX_SIZE and RECUR_ENDPOINT (the session
-socket used by recur notify and recur view).
+RECUR_PROVIDER, RECUR_EFFORT, RECUR_CTX_SIZE (latest request input tokens, empty
+if unknown) and RECUR_ENDPOINT (the session socket used by recur notify and
+recur view).
 
 Hooks (recur docs hooks) receive session variables and RECUR_CWD.
 
-The shell is not an OS security sandbox.
+There is no root prefix, VM, REPL, inject mechanism, or prefix events. The shell
+is not an OS security sandbox.

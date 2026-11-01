@@ -12,7 +12,8 @@ has priority. Recall is synchronized with acceptance: an accepted instruction
 cannot be recalled or delivered twice. Unaccepted instructions and drafts are
 preserved for recovery after cancellation or a late continuation.
 
-Cancellation stops the active turn and kills the foreground command; shell state
-and top-level background jobs survive. recur view queues captured images for the
-same safe request boundary; recur docs images describes limits and persistence.
-recur notify delivery is described in recur docs headless.
+Cancellation stops the active turn and terminates the active command's process
+group; unaccepted instructions and drafts are preserved for recovery. recur view
+queues captured images for the same safe request boundary; recur docs images
+describes limits and persistence. recur notify delivery is described in recur
+docs headless.

@@ -22,19 +22,19 @@ reported key codes and alternate base-layout codes are recognized. Plain М/м
 remains text, not a paste shortcut. Key release/repeat events do not duplicate
 attachments. A legacy terminal cannot communicate modifiers it does not send.
 
-attachment_dir in settings.toml selects the captured-image directory. Empty
-uses the platform temporary directory/recur-images (often /var/folders/... on
-macOS). Relative configured paths resolve against the project cwd. New
-directories use 0700 and files 0600. Images use the shared recur view validator: PNG or
-JPEG, at most 32 MiB and 20 megapixels after clipboard conversion. Only previews
-(up to 2048 pixels on the longest side and 1 MiB) are sent to the provider and
-embedded in history. Original PNG files stay unchanged on disk, and their paths
-are included in model context for cropping details. At most eight
+attachment_dir in recur.toml (or config.toml) selects the captured-image
+directory. Empty uses the platform temporary directory/recur-images (often
+/var/folders/... on macOS). Relative configured paths resolve against the project
+cwd. New directories use 0700 and files 0600. Images use the shared recur view
+validator: PNG or JPEG, at most 32 MiB and 20 megapixels after clipboard conversion.
+Only previews (up to 2048 pixels on the longest side and 1 MiB) are sent to the
+provider and embedded in history. Original PNG files stay unchanged on disk, and
+their paths are included in model context for cropping details. At most eight
 clipboard images can be pending across the active input, queued instructions,
 and current turn. The terminal never renders the files as graphics.
 
 Attachments follow their instruction through steering, recall, late continuation
-and cancellation recovery. Failed prefix initialization restores even image-only
+and cancellation recovery. Turn errors or cancellation restore even image-only
 input. Accepted messages are not resubmitted on cancellation. Pending images
 must be submitted or removed before switching sessions. Late clipboard results
 from a prior session or closed picker are discarded. Idle external notifications

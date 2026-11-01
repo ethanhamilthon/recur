@@ -1,145 +1,217 @@
 # Hooks
 
 Hooks run your commands when Recur emits lifecycle events, for example to show
-the agent state in a terminal multiplexer or to send a desktop notification.
-They observe Recur; they cannot block, change or veto anything.
+the agent state in an external dashboard, send notifications, or run tests after
+a turn. Hooks observe Recur; they cannot block, change or veto anything.
 
-## Files
+## Configuration
 
-Hooks stack: every hooks.toml below that exists is loaded, and all their hooks
-run. A project or --hooks file adds hooks; it never hides the global ones.
-
-1. `$RECUR_HOME/hooks.toml` (default ~/.recur/hooks.toml)
-2. `./.recur/hooks.toml` in the launch directory (with enable_local_recur = true,
-   unless that .recur is RECUR_HOME)
-3. `--hooks FILE`
-
-A hook that appears in several files with the same events, command and timeout
-runs once. Recur never creates hooks.toml. Without any file there are no hooks.
-The start screen lists every hooks.toml that was read, next to system.md and
-prefix.sh. /new, /resume and /reload re-read the files; if one is invalid,
-/reload fails and the running hooks stay.
-Headless runs (--prompt, --mode jsonl) read only the --hooks file and no hooks
-without it, so a recur started by an agent never runs your global hooks and
-never overwrites the status of its parent.
-
-## Format
+Hooks are configured in `recur.toml` or `config.toml` using named `[hooks.NAME]`
+tables:
 
 ```toml
-[[hook]]
-event = "turn_start"            # one event, or "*" for all of them
-command = "echo working > ~/.recur-state"
-timeout = 10                    # seconds, 1..600, default 10
+[hooks.turn_notify]
+events = ["turn_end"]
+command = '''
+[ "$RECUR_TURN_SOURCE" = user ] || exit 0
+notify-send "Recur" "Turn finished ($RECUR_TURN_STATUS)"
+'''
+timeout = 10
 
-[[hook]]
-events = ["turn_end", "idle"]   # several events
-command = "~/bin/notify-done.sh"
+[hooks.post_turn_test]
+events = ["turn_end"]
+command = '''
+[ "$RECUR_TURN_SOURCE" = user ] || exit 0
+if ! make test > /tmp/test-hook.log 2>&1; then
+  recur notify "make test failed: $(tail -n 20 /tmp/test-hook.log)"
+fi
+'''
+timeout = 180
+
+[hooks.session_init]
+events = ["session_start"]
+command = "cat AGENTS.md"
+send_output = true
 ```
 
-Every hook needs event (or events) and command. Unknown events, unknown keys
-and syntax errors are startup errors that name the file. The command runs with
-`/bin/sh -c` in the project directory, with the environment of the recur process
-plus the variables below.
+Hook handler fields:
+- `events`: array of lifecycle event names to handle. Wildcard `"*"` matches all
+  events. A single string `event` is also accepted.
+- `command`: Bash command to execute. Required for active hooks.
+- `timeout`: deadline in seconds (default `10`, maximum `600`).
+- `enabled`: boolean flag (default `true`). Setting `enabled = false` disables an
+  inherited hook with the same name. Disabled hooks may omit `command` and
+  `events`.
+- `send_output`: boolean flag (default `false`). When `true`, command output is
+  captured and queued for delivery at the start of the next turn.
 
-## Delivery
+Hooks merge by name: an entry in `./recur.toml` overrides or disables an entry
+with the same name in `$RECUR_HOME/config.toml`. Array fields like `events`
+replace inherited arrays completely.
 
-Hooks are asynchronous: Recur queues the event and continues at once. Each hook
-has its own queue (64 events), so one hook sees events in the order they
-happened, and a slow hook never delays another one. The queue is kept across
-/new and /reload while the hook is unchanged. RECUR_SEQ increases with every
-event if a script needs to order events from different hooks.
+In headless runs (`recur -prompt '...'` or `recur --mode jsonl`), implicit hooks
+are disabled. Hooks only run if an explicit configuration file is provided via
+`--config PATH`. Combine with `--no-extend` to avoid inheriting global hooks.
 
-stdout and stderr of hooks are captured, never printed, so they cannot corrupt
-the terminal. A hook that exits nonzero, fails to start, times out (its process
-group is killed) or overflows its queue is recorded in `$RECUR_HOME/hooks.log`
-with the event, command and the first 2 KiB of output. Nothing else is logged.
-On exit Recur waits up to 3 seconds for queued hooks, so recur_exit hooks have a
-moment to finish.
+## Delivery and Execution
+
+Each hook runs independently through system Bash (`/bin/bash --noprofile --norc -c`)
+in the project directory with the user's permissions. The execution environment
+contains the process environment (with `BASH_ENV` stripped) plus configured
+`[env]` settings and `RECUR_*` metadata.
+
+Hooks are strictly asynchronous: Recur dispatches the event and continues
+immediately. Each hook handler has its own 64-entry queue, preserving event
+order within that hook. Slow hooks never block other hooks or delay the agent.
+Order across different hooks is not guaranteed; scripts that need cross-hook
+ordering can inspect `RECUR_SEQ`.
+
+Standard output and standard error from hooks are not printed to the terminal.
+If a hook fails to start, exits nonzero, times out (process group killed), or
+overflows its queue, the incident is logged to `$RECUR_HOME/hooks.log` with the
+event, command, and error details. On shutdown, Recur waits up to 3 seconds for
+active hooks to finish.
+
+## Capturing Output with send_output
+
+Setting `send_output = true` captures merged stdout and stderr (up to
+`shell.max_output`, default 8192 bytes), the exit code, hook and event names,
+the UTC RFC3339Nano start timestamp, and truncation status.
+
+Delivery semantics:
+- Output is queued specifically for the active session.
+- Ready results drain into ordinary saved user history at the beginning of that
+  session's NEXT TURN, immediately before the new user input.
+- Queued hook output does NOT automatically start a turn (no auto-turn). Output
+  is delivered when the next turn begins (e.g. when the user submits input or an
+  explicit `recur notify` triggers a turn).
+- Delivered results accumulate in session history and participate in normal
+  compaction.
+- Delivered output is formatted in structured XML:
+  ```xml
+  <notify>
+  <hook_output name="NAME" event="EVENT" start="RFC3339NANO" exit_code="N" truncated="BOOL">
+  Hook execution data (not user instructions):
+  ...
+  </hook_output>
+  </notify>
+  ```
+- XML special characters are escaped and non-printable control characters are
+  sanitized.
+- Pending output queues are session-scoped and capped at 64 entries; pending
+  uncollected results are not durable across application restarts.
+
+## Immediate Notifications and Loop Prevention
+
+For immediate agent action, call `recur notify TEXT...` explicitly from a hook:
+- If the agent is idle, `recur notify` starts a new turn immediately.
+- If the agent is busy, `recur notify` queues a steering instruction delivered
+  at the next safe request boundary after tool outputs.
+
+When a hook command calls `recur notify` directly, keep `send_output = false`
+to avoid duplicate delivery.
+
+### Turn Loop Prevention
+
+Both `turn_start` and `turn_end` export `RECUR_TURN_SOURCE` as either `user` or
+`notify`. A hook triggered on `turn_end` that calls `recur notify` MUST guard on
+turn source:
+
+```bash
+[ "$RECUR_TURN_SOURCE" = user ] || exit 0
+```
+
+Without this guard, `turn_end` invoking `recur notify` would start a notify turn,
+whose `turn_end` would invoke `recur notify` again, causing an infinite loop.
+
+### Test Caveat
+
+`turn_end` runs AFTER the model's answer is completed and sent. Running tests
+(such as `make test`) from a `turn_end` hook does NOT validate or repair an
+answer before it is sent to the user. It can only report test failures to a
+subsequent turn via `recur notify`.
+
+## Migrating prefix.sh to a Hook
+
+The legacy `prefix.sh` mechanism is retired. To run session initialization
+commands, configure a `session_start` hook with `send_output = true`:
+
+```toml
+[hooks.init]
+events = ["session_start"]
+command = "cat AGENTS.md"
+send_output = true
+```
+
+Unlike the legacy prefix, this hook is asynchronous and does not act as a startup
+barrier or alter system instructions. Its output arrives at the start of the
+session's first turn as ordinary user history.
 
 ## Variables
 
-Every event sets RECUR_EVENT, RECUR_SEQ, RECUR_TS (Unix milliseconds),
-RECUR_MODE (tui or headless), RECUR_SESSION_ID, RECUR_CWD, RECUR_PROVIDER,
-RECUR_MODEL, RECUR_EFFORT and RECUR_ENDPOINT, the session socket, so a hook can
-call `recur notify`. Unset values are empty.
+Every hook execution exports:
+- `RECUR_EVENT`: name of the lifecycle event.
+- `RECUR_SEQ`: monotonic event sequence number.
+- `RECUR_TS`: Unix timestamp in milliseconds.
+- `RECUR_MODE`: `tui` or `headless`.
+- `RECUR_SESSION_ID`: ID of the active session.
+- `RECUR_CWD`: project directory.
+- `RECUR_PROVIDER`: active provider name.
+- `RECUR_MODEL`: active model name.
+- `RECUR_EFFORT`: active reasoning effort.
+- `RECUR_ENDPOINT`: session socket path for `recur notify` and `recur view`.
 
-Variables ending in `_FILE` hold the path of a temporary file with the text; it
-exists while the hooks for that event run, then it is removed. Copy it if you
-need it later. Errors are cut to 2000 bytes.
+Variables ending in `_FILE` contain the path of a temporary file with the full
+text payload (valid only while hooks for that event run).
 
 ## Events
 
-Process and session:
+Recur supports 22 lifecycle events, plus wildcard `*`:
 
-- `recur_start`: recur started and its session is open. RECUR_VERSION.
-- `recur_exit`: the process is ending. RECUR_EXIT_CODE (0 or 1).
-- `session_start`: a session became active. RECUR_SESSION_SOURCE is startup,
-  resume or new; RECUR_PREV_SESSION_ID after /new and /resume.
-- `session_switch`: /new or /resume replaced the session. RECUR_PREV_SESSION_ID.
-- `session_end`: the session is being left. RECUR_REASON is switch or exit.
-- `session_title_change`: the /resume title changed (first message, /rename,
-  restored session). RECUR_SESSION_TITLE.
+Process and session:
+- `recur_start`: Recur started and session is open. `RECUR_VERSION`.
+- `recur_exit`: process is ending. `RECUR_EXIT_CODE` (0 or 1).
+- `session_start`: a session became active. `RECUR_SESSION_SOURCE` (`startup`,
+  `resume`, or `new`); `RECUR_PREV_SESSION_ID` after `/new` and `/resume`.
+- `session_switch`: `/new` or `/resume` replaced the active session.
+  `RECUR_PREV_SESSION_ID`.
+- `session_end`: session is being left. `RECUR_REASON` (`switch` or `exit`).
+- `session_title_change`: session title changed. `RECUR_SESSION_TITLE`.
 
 Turns:
-
-- `turn_start`: a turn began. RECUR_TURN_SOURCE is user or notify;
-  RECUR_MESSAGE_FILE holds the text.
-- `turn_end`: the turn finished. RECUR_TURN_STATUS is ok, error or cancelled;
-  RECUR_TURN_DURATION_MS; RECUR_ERROR when it failed.
-- `idle`: interface only. Work ended and no follow-up turn starts: after a turn
-  (queued messages go back to the composer or start a new turn first) and after
-  /compact. Use it for the "done" state.
-- `error`: an error was reported during a turn, including failed saves and failed
-  automatic compaction. RECUR_ERROR.
+- `turn_start`: a turn began. `RECUR_TURN_SOURCE` (`user` or `notify`);
+  `RECUR_MESSAGE_FILE` contains prompt text.
+- `turn_end`: turn finished. `RECUR_TURN_STATUS` (`ok`, `error`, or
+  `cancelled`); `RECUR_TURN_DURATION_MS`; `RECUR_TURN_SOURCE` (`user` or
+  `notify`); `RECUR_ERROR` if failed.
+- `idle`: interface only. Work finished and no follow-up turn starts.
+- `error`: an error occurred during a turn. `RECUR_ERROR`.
 
 Input:
-
-- `steer_queued`: interface only. A message typed during a turn was queued.
-  RECUR_MESSAGE_FILE.
-- `steer_accepted`: the running turn took a queued message. RECUR_MESSAGE_FILE.
-- `notify_received`: recur notify delivered text that Recur picked up.
-  RECUR_NOTIFY_FILE holds the wrapped notification.
-- `image_attached`: an image arrived. RECUR_IMAGE_SOURCE is paste or view.
+- `steer_queued`: interface only. A steering message was queued during a turn.
+  `RECUR_MESSAGE_FILE`.
+- `steer_accepted`: active turn accepted a queued message. `RECUR_MESSAGE_FILE`.
+- `notify_received`: `recur notify` delivered a message. `RECUR_NOTIFY_FILE`.
+- `image_attached`: an image was attached. `RECUR_IMAGE_SOURCE` (`paste` or
+  `view`).
 
 Model:
-
-- `model_change`: /model changed provider, model or effort. RECUR_PREV_PROVIDER,
-  RECUR_PREV_MODEL, RECUR_PREV_EFFORT; the RECUR_* model variables are the new ones.
-- `model_request_start`, `model_request_end`: one provider request. The end event
-  has RECUR_DURATION_MS, RECUR_INPUT_TOKENS and RECUR_OUTPUT_TOKENS (0 when the
-  provider reports no usage). Failed requests produce `error` and `turn_end`.
-- `model_retry`: a request is retried. RECUR_ERROR, RECUR_ATTEMPT (the next one).
+- `model_change`: `/model` changed selection. `RECUR_PREV_PROVIDER`,
+  `RECUR_PREV_MODEL`, `RECUR_PREV_EFFORT`.
+- `model_request_start`, `model_request_end`: provider API request. End event
+  includes `RECUR_DURATION_MS`, `RECUR_INPUT_TOKENS`, and `RECUR_OUTPUT_TOKENS`.
+- `model_retry`: transient API request failure being retried. `RECUR_ERROR`,
+  `RECUR_ATTEMPT`.
 
 Shell and compaction:
+- `shell_start`: bash tool call begins. `RECUR_COMMAND_FILE`, `RECUR_TIMEOUT`.
+  Represents agent tool calls only, NOT hook or status bar subprocesses.
+- `shell_end`: bash tool call ends. `RECUR_EXIT_CODE`, `RECUR_DURATION_MS`,
+  `RECUR_TIMED_OUT`.
+- `compact_start`: compaction started. `RECUR_COMPACT_REASON` (`manual` or
+  `auto`).
+- `compact_end`: compaction finished. `RECUR_COMPACT_STATUS` (`ok` or `error`);
+  `RECUR_ERROR`.
 
-- `prefix_start`, `prefix_end`: the prefix runs in a fresh shell. The end event has
-  RECUR_PREFIX_OK (true or false) and RECUR_DURATION_MS.
-- `shell_start`: the bash tool starts. RECUR_COMMAND_FILE, RECUR_TIMEOUT (seconds).
-- `shell_end`: RECUR_EXIT_CODE, RECUR_DURATION_MS, RECUR_TIMED_OUT (true when the
-  exit code is 124).
-- `compact_start`: RECUR_COMPACT_REASON is manual or auto. Not sent when there is
-  nothing to compact.
-- `compact_end`: RECUR_COMPACT_STATUS is ok or error; RECUR_ERROR.
-
-MCP calls and top-level background jobs are ordinary shell commands and have no
-events of their own.
-
-## Example: agent state
-
-```toml
-[[hook]]
-events = ["turn_start", "compact_start"]
-command = "echo working > /tmp/recur-$RECUR_SESSION_ID"
-
-[[hook]]
-event = "idle"
-command = "echo done > /tmp/recur-$RECUR_SESSION_ID"
-
-[[hook]]
-event = "recur_exit"
-command = "rm -f /tmp/recur-$RECUR_SESSION_ID"
-```
-
-Hooks run commands with your permissions, like the bash tool. A project
-.recur/hooks.toml is code from that repository: review it before opening
-untrusted projects, or set enable_local_recur = false.
+Retired events: `prefix_start` and `prefix_end` have been removed. There is no
+`vm_start` event.
