@@ -35,9 +35,8 @@ send_output = true
 ```
 
 Hook handler fields:
-- `events`: array of lifecycle event names to handle. Wildcard `"*"` matches all
-  events. Hook declarations require the `events = [...]` array syntax; single-string
-  `event = "..."` is retired and rejected in strict TOML parsing.
+- `events`: array of lifecycle event names to handle, for example
+  `events = ["turn_end"]`. Wildcard `"*"` matches all events.
 - `command`: Bash command to execute. Required for active hooks.
 - `timeout`: deadline in seconds (default `10`, maximum `600`).
 - `enabled`: boolean flag (default `true`). Setting `enabled = false` disables an
@@ -49,17 +48,6 @@ Hook handler fields:
 Hooks merge by name: an entry in `./recur.toml` overrides or disables an entry
 with the same name in `$RECUR_HOME/config.toml`. Array fields like `events`
 replace inherited arrays completely.
-
-Migrating legacy hooks:
-```toml
-# Legacy (invalid in 0.6.0):
-# [hooks.alert]
-# event = "turn_end"
-
-# 0.6.0 syntax:
-[hooks.alert]
-events = ["turn_end"]
-```
 
 In headless runs (`recur -prompt '...'` or `recur --mode jsonl`), implicit hooks
 are disabled. Hooks only run if an explicit configuration file is provided via
@@ -151,10 +139,10 @@ whose `turn_end` would invoke `recur notify` again, causing an infinite loop.
 answer before it is sent to the user. It can only report test failures to a
 subsequent turn via `recur notify`.
 
-## Migrating prefix.sh to a Hook
+## Session Initialization with send_output
 
-The legacy `prefix.sh` mechanism is retired. To run session initialization
-commands, configure a `session_start` hook with `send_output = true`:
+To run commands when a session begins, configure a `session_start` hook with
+`send_output = true`:
 
 ```toml
 [hooks.init]
@@ -163,9 +151,11 @@ command = "cat AGENTS.md"
 send_output = true
 ```
 
-Unlike the legacy prefix, this hook is asynchronous and does not act as a startup
-barrier or alter system instructions. Its output arrives at the start of the
-session's first turn as ordinary user history.
+This hook is asynchronous: it does not act as a startup barrier or alter system
+instructions. Its output is queued and delivered as ordinary user history at the
+start of the next turn after the output is ready. Because execution is
+asynchronous, the first turn may start before the output is ready; the output then
+arrives in a later turn.
 
 ## Variables
 
@@ -232,6 +222,3 @@ Shell and compaction:
   `auto`).
 - `compact_end`: compaction finished. `RECUR_COMPACT_STATUS` (`ok` or `error`);
   `RECUR_ERROR`.
-
-Retired events: `prefix_start` and `prefix_end` have been removed. There is no
-`vm_start` event.

@@ -42,5 +42,4 @@ recur view).
 
 Hooks (recur docs hooks) receive session variables and RECUR_CWD.
 
-There is no root prefix, VM, REPL, inject mechanism, or prefix events. The shell
-is not an OS security sandbox.
+The shell is not an OS security sandbox.

@@ -1,7 +1,7 @@
 # Recur documentation
 
 Run recur docs TOPIC with one of these topics:
-- config: unified recur.toml, precedence, options, status bar, and migration.
+- config: unified recur.toml, precedence, options, status bar.
 - runtime: stateless system Bash, timeouts, output limits, and background work.
 - images: recur view and queued image delivery.
 - clipboard: image paste, textual attachment labels, shortcuts, and retention.
