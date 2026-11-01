@@ -12,12 +12,12 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
-	"github.com/pelletier/go-toml/v2"
 )
 
 type Provider struct {
-	BaseURL string `toml:"base_url"`
-	APIKey  string `toml:"api_key"`
+	BaseURL   string `toml:"base_url"`
+	APIKey    string `toml:"api_key"`
+	APIKeyEnv string `toml:"api_key_env"`
 }
 
 type Settings struct {
@@ -28,57 +28,17 @@ type Settings struct {
 	MaxCodeLines     int                 `toml:"max_code_lines"`
 	MaxResultLines   int                 `toml:"max_result_lines"`
 	MaxThinkingLines int                 `toml:"max_thinking_lines"`
+	StatusLeft       []string            `toml:"status_left"`
+	StatusRight      []string            `toml:"status_right"`
+	Environment      map[string]string   `toml:"env"`
+	ShellTimeout     int                 `toml:"shell_timeout"`
+	ShellMaxTimeout  int                 `toml:"shell_max_timeout"`
+	ShellMaxOutput   int                 `toml:"shell_max_output"`
 	Provider         string              `toml:"provider"`
 	Model            string              `toml:"model"`
 	ReasoningSummary string              `toml:"reasoning_summary"`
 	Effort           string              `toml:"effort"`
-	EnableLocalRecur bool                `toml:"enable_local_recur"`
 	Providers        map[string]Provider `toml:"providers"`
-}
-
-const defaultSettings = `# Empty uses the platform temporary directory/recur-images. Relative paths use project cwd.
-attachment_dir = ""
-# No provider or model is configured by default. In recur, use /login to add a
-# provider, then /model to choose a model.
-provider = ""
-model = ""
-# Leave empty to use the provider's default reasoning effort.
-effort = ""
-# Set to off for providers/models that do not support reasoning summaries.
-reasoning_summary = "auto"
-# Compact older turns into a summary when the history exceeds this estimated size.
-# The estimate is 4 bytes per token plus 1200 per image; 0 disables compaction.
-max_context_tokens = 400000
-# Turns kept verbatim when compacting.
-compact_keep_turns = 4
-# Model/tool round trips allowed in one turn; 0 means no limit.
-max_agent_steps = 0
-# Visible body rows per timeline block; 0 hides the whole block.
-max_code_lines = 999
-max_result_lines = 4
-max_thinking_lines = 4
-# Read system.md and prefix.sh from .recur in the launch directory when present
-# there (unless it is RECUR_HOME). Settings and sessions always stay in RECUR_HOME.
-enable_local_recur = true
-`
-
-func loadSettings(dir string) (Settings, error) {
-	var s Settings
-	if err := toml.Unmarshal([]byte(defaultSettings), &s); err != nil {
-		return s, err
-	}
-	path := filepath.Join(dir, "settings.toml")
-	text, err := loadOrCreateFile(path, defaultSettings)
-	if err != nil {
-		return s, err
-	}
-	if err = toml.Unmarshal([]byte(text), &s); err != nil {
-		return s, fmt.Errorf("%s: %w", path, err)
-	}
-	if err := validateSettings(s); err != nil {
-		return s, fmt.Errorf("%s: %w", path, err)
-	}
-	return s, nil
 }
 
 // Efforts are the reasoning efforts offered by /model; empty uses the provider default.
@@ -91,17 +51,44 @@ func validateSettings(s Settings) error {
 	if s.MaxContextTokens < 0 || s.CompactKeepTurns < 0 || s.MaxAgentSteps < 0 {
 		return fmt.Errorf("max_context_tokens, compact_keep_turns and max_agent_steps must be non-negative")
 	}
-	// An empty provider and model mean nothing has been selected yet; that is
-	// valid and recur asks the user to /login and choose a /model.
+	if s.ShellTimeout <= 0 || s.ShellMaxTimeout <= 0 {
+		return fmt.Errorf("shell timeout and max_timeout must be positive")
+	}
+	if s.ShellTimeout > s.ShellMaxTimeout {
+		return fmt.Errorf("shell timeout (%d) cannot exceed max_timeout (%d)", s.ShellTimeout, s.ShellMaxTimeout)
+	}
+	if s.ShellMaxOutput < 0 {
+		return fmt.Errorf("shell max_output must be non-negative")
+	}
 	if s.Provider != "" {
-		if _, ok := s.Providers[s.Provider]; !ok {
+		p, ok := s.Providers[s.Provider]
+		if !ok {
 			return fmt.Errorf("selected provider %q is not configured", s.Provider)
+		}
+		if p.APIKey != "" && p.APIKeyEnv != "" {
+			return fmt.Errorf("provider %q has conflicting api_key and api_key_env", s.Provider)
+		}
+		if p.APIKeyEnv != "" {
+			val := resolveEnv(p.APIKeyEnv, s.Environment)
+			if strings.TrimSpace(val) == "" {
+				return fmt.Errorf("provider %q: environment variable %q is not set or empty", s.Provider, p.APIKeyEnv)
+			}
 		}
 	}
 	for name, p := range s.Providers {
-		u, err := url.Parse(p.BaseURL)
-		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-			return fmt.Errorf("provider %q needs an HTTP(S) base_url", name)
+		if p.APIKey != "" && p.APIKeyEnv != "" {
+			return fmt.Errorf("provider %q has conflicting api_key and api_key_env", name)
+		}
+		if p.BaseURL != "" {
+			u, err := url.Parse(p.BaseURL)
+			if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+				return fmt.Errorf("provider %q needs an HTTP(S) base_url", name)
+			}
+		}
+	}
+	for k := range s.Environment {
+		if strings.HasPrefix(k, "RECUR_") {
+			return fmt.Errorf("env key %q is reserved", k)
 		}
 	}
 	if s.ReasoningSummary != "" && s.ReasoningSummary != "auto" && s.ReasoningSummary != "off" {
@@ -111,6 +98,15 @@ func validateSettings(s Settings) error {
 		return fmt.Errorf("unsupported effort %q", s.Effort)
 	}
 	return nil
+}
+
+func resolveEnv(key string, env map[string]string) string {
+	if env != nil {
+		if v, ok := env[key]; ok {
+			return v
+		}
+	}
+	return os.Getenv(key)
 }
 
 func configDir(cwd string) (string, error) {
@@ -131,12 +127,23 @@ func configDir(cwd string) (string, error) {
 func (a *Agent) Settings() Settings {
 	s := a.settings
 	s.Providers = maps.Clone(a.settings.Providers)
+	s.Environment = maps.Clone(a.settings.Environment)
+	s.StatusLeft = slices.Clone(a.settings.StatusLeft)
+	s.StatusRight = slices.Clone(a.settings.StatusRight)
 	return s
 }
 
 func (a *Agent) applySettings(s Settings) {
 	a.settings = s
-	a.client = newClient(s.Providers[s.Provider])
+	p := s.Providers[s.Provider]
+	if p.APIKey == "" && p.APIKeyEnv != "" {
+		p.APIKey = resolveEnv(p.APIKeyEnv, s.Environment)
+	}
+	a.client = newClient(p)
+	if a.hooks != nil {
+		a.hooks.Environment = s.Environment
+		a.hooks.MaxOutput = s.ShellMaxOutput
+	}
 }
 
 func newClient(p Provider) openai.Client {
@@ -148,24 +155,4 @@ func newClient(p Provider) openai.Client {
 		option.WithMaxRetries(0),
 		option.WithRequestTimeout(10*time.Minute),
 	)
-}
-
-// editSettings applies change to settings.toml and returns the validated result
-// with its encoding; the caller decides when to write it.
-func (a *Agent) editSettings(change func(*Settings) error) (Settings, []byte, error) {
-	s, err := loadSettings(a.home)
-	if err != nil {
-		return s, nil, err
-	}
-	if err = change(&s); err != nil {
-		return s, nil, err
-	}
-	if err = validateSettings(s); err != nil {
-		return s, nil, err
-	}
-	data, err := toml.Marshal(s)
-	return s, data, err
-}
-func (a *Agent) writeSettings(data []byte) error {
-	return writePrivate(filepath.Join(a.home, "settings.toml"), data)
 }

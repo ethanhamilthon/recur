@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-// hooksSetup writes provider settings and a home hooks.toml recording events.
+// hooksSetup writes provider settings and a home config.toml recording events.
 func hooksSetup(t *testing.T, status int) (record string) {
 	t.Helper()
 	home := t.TempDir()
@@ -27,16 +27,16 @@ func hooksSetup(t *testing.T, status int) (record string) {
 	}))
 	t.Cleanup(server.Close)
 	config := fmt.Sprintf("provider='test'\nmodel='m'\n[providers.test]\nbase_url=%q\n", server.URL)
-	if err := os.WriteFile(filepath.Join(home, "settings.toml"), []byte(config), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}
 	return filepath.Join(t.TempDir(), "events")
 }
 
-func hooksFile(t *testing.T, record string) string {
+func hooksConfig(t *testing.T, record, serverURL string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "hooks.toml")
-	text := "[[hook]]\nevent = \"*\"\ncommand = 'echo \"$RECUR_EVENT|$RECUR_MODE|$RECUR_EXIT_CODE\" >> " + record + "'\n"
+	path := filepath.Join(t.TempDir(), "config.toml")
+	text := fmt.Sprintf("provider='test'\nmodel='m'\n[providers.test]\nbase_url=%q\n[hooks.all]\nevents = [\"*\"]\ncommand = 'echo \"$RECUR_EVENT|$RECUR_MODE|$RECUR_EXIT_CODE\" >> %s'\n", serverURL, record)
 	if err := os.WriteFile(path, []byte(text), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -44,13 +44,21 @@ func hooksFile(t *testing.T, record string) string {
 }
 
 func TestHeadlessRunsHooksOnlyWithExplicitFlag(t *testing.T) {
-	record := hooksSetup(t, 200)
-	file := hooksFile(t, record)
-	home := os.Getenv("RECUR_HOME")
-	data, _ := os.ReadFile(file)
-	if err := os.WriteFile(filepath.Join(home, "hooks.toml"), data, 0600); err != nil {
+	home := t.TempDir()
+	t.Setenv("RECUR_HOME", home)
+	record := filepath.Join(t.TempDir(), "events")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}\n\n")
+	}))
+	defer server.Close()
+
+	homeCfg := fmt.Sprintf("provider='test'\nmodel='m'\n[providers.test]\nbase_url=%q\n[hooks.implicit]\nevents = [\"*\"]\ncommand = 'echo \"$RECUR_EVENT|$RECUR_MODE|$RECUR_EXIT_CODE\" >> %s'\n", server.URL, record)
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(homeCfg), 0600); err != nil {
 		t.Fatal(err)
 	}
+
 	var out, diagnostics bytes.Buffer
 	if err := Run(context.Background(), []string{"--prompt", "hi"}, strings.NewReader(""), &out, &diagnostics); err != nil {
 		t.Fatal(err)
@@ -58,21 +66,31 @@ func TestHeadlessRunsHooksOnlyWithExplicitFlag(t *testing.T) {
 	if got, _ := os.ReadFile(record); len(got) != 0 {
 		t.Fatalf("headless run used implicit hooks: %q", got)
 	}
-	if err := Run(context.Background(), []string{"--prompt", "hi", "--hooks", file}, strings.NewReader(""), &out, &diagnostics); err != nil {
+
+	explicitFile := hooksConfig(t, record, server.URL)
+	if err := Run(context.Background(), []string{"--prompt", "hi", "--config", explicitFile}, strings.NewReader(""), &out, &diagnostics); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(record)
-	want := "recur_start|headless|\nsession_start|headless|\nturn_start|headless|\nprefix_start|headless|\nprefix_end|headless|\n" +
-		"session_title_change|headless|\nmodel_request_start|headless|\nmodel_request_end|headless|\nturn_end|headless|\nsession_end|headless|\nrecur_exit|headless|0\n"
+	want := "recur_start|headless|\nsession_start|headless|\nturn_start|headless|\nsession_title_change|headless|\nmodel_request_start|headless|\nmodel_request_end|headless|\nturn_end|headless|\nsession_end|headless|\nrecur_exit|headless|0\n"
 	if string(got) != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
 
 func TestRecurExitReportsFailure(t *testing.T) {
-	record := hooksSetup(t, 400)
+	home := t.TempDir()
+	t.Setenv("RECUR_HOME", home)
+	record := filepath.Join(t.TempDir(), "events")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(400)
+	}))
+	defer server.Close()
+
+	file := hooksConfig(t, record, server.URL)
 	var out, diagnostics bytes.Buffer
-	err := Run(context.Background(), []string{"--prompt", "hi", "--hooks", hooksFile(t, record)}, strings.NewReader(""), &out, &diagnostics)
+	err := Run(context.Background(), []string{"--prompt", "hi", "--config", file}, strings.NewReader(""), &out, &diagnostics)
 	if err == nil {
 		t.Fatal("expected the provider error")
 	}
@@ -87,11 +105,11 @@ func TestInvalidHooksFlagFailsStartup(t *testing.T) {
 	var out, diagnostics bytes.Buffer
 	for _, path := range []string{filepath.Join(t.TempDir(), "missing.toml"), func() string {
 		p := filepath.Join(t.TempDir(), "bad.toml")
-		_ = os.WriteFile(p, []byte("[[hook]]\nevent = \"typo\"\ncommand = \"true\"\n"), 0600)
+		_ = os.WriteFile(p, []byte("[hooks.bad]\nevents = [\"typo\"]\ncommand = \"true\"\n"), 0600)
 		return p
 	}()} {
-		if err := Run(context.Background(), []string{"--prompt", "hi", "--hooks", path}, strings.NewReader(""), &out, &diagnostics); err == nil {
-			t.Fatalf("--hooks %s must fail", path)
+		if err := Run(context.Background(), []string{"--prompt", "hi", "--config", path}, strings.NewReader(""), &out, &diagnostics); err == nil {
+			t.Fatalf("--config %s must fail", path)
 		}
 	}
 }

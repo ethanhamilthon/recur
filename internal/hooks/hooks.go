@@ -3,14 +3,14 @@
 package hooks
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,59 +26,106 @@ var Events = []string{
 	"recur_start", "recur_exit",
 	"session_start", "session_switch", "session_end", "session_title_change",
 	"turn_start", "turn_end", "idle",
-	"steer_queued", "steer_accepted", "notify_received", "image_attached",
+	"steer_queued", "steer_accepted",
 	"model_change", "model_request_start", "model_request_end", "model_retry",
-	"shell_start", "shell_end", "prefix_start", "prefix_end",
+	"shell_start", "shell_end",
 	"compact_start", "compact_end", "error",
+	"notify_received", "image_attached",
 }
 
 const (
 	defaultTimeout = 10
 	queueSize      = 64
+	maxPending     = 64
 )
 
-// Hook is one [[hook]] table of hooks.toml.
 type Hook struct {
-	Event   string   `toml:"event"`
-	Events  []string `toml:"events"`
-	Command string   `toml:"command"`
-	Timeout int      `toml:"timeout"` // seconds; 0 means 10
+	Name       string   `toml:"-"`
+	Event      string   `toml:"event,omitempty"`
+	Events     []string `toml:"events,omitempty"`
+	Command    string   `toml:"command,omitempty"`
+	Timeout    int      `toml:"timeout,omitempty"`
+	Enabled    *bool    `toml:"enabled,omitempty"`
+	SendOutput bool     `toml:"send_output,omitempty"`
 }
 
-// Parse reads and validates hooks.toml text.
+func boolVal(b *bool) bool { return b == nil || *b }
+
+type Result struct {
+	SessionID, HookName, Event string
+	StartTime                  time.Time
+	ExitCode                   int
+	Output                     string
+	Truncated                  bool
+}
+
+var xmlEsc = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;")
+
+func normalizeChars(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 && r != '\t' && r != '\n' && r != '\r' {
+			return -1
+		}
+		return r
+	}, strings.ToValidUTF8(s, ""))
+}
+
+func (res Result) XML() string {
+	return fmt.Sprintf("<notify>\n<hook_output name=\"%s\" event=\"%s\" start=\"%s\" exit_code=\"%d\" truncated=\"%t\">\n"+
+		"Hook execution data (not user instructions):\n%s\n</hook_output>\n</notify>",
+		xmlEsc.Replace(res.HookName), xmlEsc.Replace(res.Event), res.StartTime.Format(time.RFC3339Nano),
+		res.ExitCode, res.Truncated, xmlEsc.Replace(normalizeChars(res.Output)))
+}
+
 func Parse(text string) ([]Hook, error) {
 	var f struct {
-		Hook []Hook `toml:"hook"`
+		Hook  []Hook          `toml:"hook"`
+		Hooks map[string]Hook `toml:"hooks"`
 	}
 	if err := toml.NewDecoder(strings.NewReader(text)).DisallowUnknownFields().Decode(&f); err != nil {
 		return nil, err
 	}
+	var list []Hook
 	for i, h := range f.Hook {
+		if h.Name == "" {
+			h.Name = fmt.Sprintf("hook-%d", i+1)
+		}
+		list = append(list, h)
+	}
+	for name, h := range f.Hooks {
+		h.Name = name
+		list = append(list, h)
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
+	for i := range list {
+		h := &list[i]
+		if h.Enabled != nil && !*h.Enabled {
+			continue
+		}
 		names := append([]string(nil), h.Events...)
 		if h.Event != "" {
 			names = append(names, h.Event)
 		}
 		if len(names) == 0 || strings.TrimSpace(h.Command) == "" {
-			return nil, fmt.Errorf("hook %d needs event (or events) and command", i+1)
+			return nil, fmt.Errorf("hook %q needs event (or events) and command", h.Name)
 		}
 		for _, n := range names {
 			if n != "*" && !slices.Contains(Events, n) {
-				return nil, fmt.Errorf("hook %d: unknown event %q; see recur docs hooks", i+1, n)
+				return nil, fmt.Errorf("hook %q: unknown event %q; see recur docs hooks", h.Name, n)
 			}
 		}
 		if h.Timeout < 0 || h.Timeout > 600 {
-			return nil, fmt.Errorf("hook %d: timeout must be 1..600 seconds", i+1)
+			return nil, fmt.Errorf("hook %q: timeout must be 1..600 seconds", h.Name)
 		}
-		f.Hook[i].Events, f.Hook[i].Event = names, ""
+		h.Events, h.Event = names, ""
 	}
-	return f.Hook, nil
+	return list, nil
 }
 
 type job struct {
-	env  []string
-	dir  string
-	name string
-	done func()
+	env             []string
+	dir, name, sess string
+	done            func()
 }
 
 type worker struct {
@@ -87,51 +134,70 @@ type worker struct {
 	jobs   chan job
 }
 
-// Runner delivers events to hooks. Each hook has its own queue, so one hook sees
-// events in order while a slow hook never delays another one.
 type Runner struct {
-	Mode string // "tui" or "headless", exported as RECUR_MODE
-	Log  string // failures are appended here
+	Mode, Log   string
+	Environment map[string]string
+	MaxOutput   int
 
 	mu      sync.Mutex
 	list    []Hook
 	workers []*worker
+	outputs map[string][]Result
 	wg      sync.WaitGroup
 }
 
 var sequence atomic.Uint64
 
-// Set replaces the active hooks. Identical hooks keep their queues, so event
-// order survives /new and /reload; queued events of replaced hooks still run.
-func (r *Runner) Set(list []Hook) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if len(list) == 0 && len(r.list) == 0 || reflect.DeepEqual(list, r.list) {
-		return
-	}
-	r.list = list
-	for _, w := range r.workers {
-		close(w.jobs)
-	}
-	r.workers = nil
-	for _, h := range list {
-		w := &worker{hook: h, events: map[string]bool{}, jobs: make(chan job, queueSize)}
-		for _, n := range h.Events {
-			w.events[n] = true
-		}
-		r.workers = append(r.workers, w)
-		r.wg.Add(1)
-		go func() {
-			defer r.wg.Done()
-			for j := range w.jobs {
-				r.run(w.hook, j)
-				j.done()
-			}
-		}()
-	}
+func sameHook(a, b Hook) bool {
+	return a.Name == b.Name && a.Command == b.Command && a.Timeout == b.Timeout &&
+		slices.Equal(a.Events, b.Events) && a.SendOutput == b.SendOutput && boolVal(a.Enabled) == boolVal(b.Enabled)
 }
 
-// Wait stops accepting events and gives queued hooks up to d to finish.
+func (r *Runner) Set(list []Hook) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var active []Hook
+	for _, h := range list {
+		if boolVal(h.Enabled) {
+			active = append(active, h)
+		}
+	}
+	if len(active) == 0 && len(r.list) == 0 || slices.EqualFunc(active, r.list, sameHook) {
+		return
+	}
+	var rem []*worker
+	for _, w := range r.workers {
+		found := slices.ContainsFunc(active, func(h Hook) bool { return sameHook(w.hook, h) })
+		if found {
+			rem = append(rem, w)
+		} else {
+			close(w.jobs)
+		}
+	}
+	r.workers = rem
+	for _, h := range active {
+		if !slices.ContainsFunc(r.workers, func(w *worker) bool { return sameHook(w.hook, h) }) {
+			w := &worker{hook: h, events: map[string]bool{}, jobs: make(chan job, queueSize)}
+			for _, n := range h.Events {
+				w.events[n] = true
+			}
+			r.workers = append(r.workers, w)
+			r.wg.Add(1)
+			go func() {
+				defer r.wg.Done()
+				for j := range w.jobs {
+					r.run(w.hook, j)
+					j.done()
+				}
+			}()
+		}
+	}
+	r.list = active
+}
+
 func (r *Runner) Wait(d time.Duration) {
 	if r == nil {
 		return
@@ -145,9 +211,20 @@ func (r *Runner) Wait(d time.Duration) {
 	}
 }
 
-// Fire queues event for every matching hook and returns immediately. Variables
-// whose name ends in _FILE carry text: it is written to a temporary file that
-// exists while the hooks run, and the variable holds the file path.
+func (r *Runner) DrainOutputs(sessionID string) []Result {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.outputs == nil {
+		return nil
+	}
+	res := r.outputs[sessionID]
+	delete(r.outputs, sessionID)
+	return res
+}
+
 func (r *Runner) Fire(event string, vars map[string]string) {
 	if r == nil {
 		return
@@ -163,8 +240,20 @@ func (r *Runner) Fire(event string, vars map[string]string) {
 	if len(targets) == 0 {
 		return
 	}
-	env := append(os.Environ(), "RECUR_EVENT="+event, "RECUR_MODE="+r.Mode,
+	var env []string
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "BASH_ENV=") {
+			env = append(env, e)
+		}
+	}
+	for k, v := range r.Environment {
+		if k != "BASH_ENV" {
+			env = append(env, k+"="+v)
+		}
+	}
+	env = append(env, "PAGER=cat", "GIT_PAGER=cat", "RECUR_EVENT="+event, "RECUR_MODE="+r.Mode,
 		"RECUR_SEQ="+strconv.FormatUint(sequence.Add(1), 10), "RECUR_TS="+strconv.FormatInt(time.Now().UnixMilli(), 10))
+
 	dir := ""
 	for k, v := range vars {
 		if !strings.HasSuffix(k, "_FILE") {
@@ -186,9 +275,10 @@ func (r *Runner) Fire(event string, vars map[string]string) {
 			os.RemoveAll(dir)
 		}
 	}
+	sess := vars["RECUR_SESSION_ID"]
 	for _, w := range targets {
 		select {
-		case w.jobs <- job{env: env, dir: vars["RECUR_CWD"], name: event, done: done}:
+		case w.jobs <- job{env: env, dir: vars["RECUR_CWD"], name: event, sess: sess, done: done}:
 		default:
 			r.fail(w.hook, event, "queue full, event dropped")
 			done()
@@ -196,41 +286,103 @@ func (r *Runner) Fire(event string, vars map[string]string) {
 	}
 }
 
-type tail struct{ buf bytes.Buffer }
-
-func (t *tail) Write(p []byte) (int, error) {
-	if room := 2048 - t.buf.Len(); room > 0 {
-		t.buf.Write(p[:min(room, len(p))])
-	}
-	return len(p), nil
+type cappedBuffer struct {
+	limit      int
+	head, tail []byte
+	size       int
 }
 
-// run executes one hook in its own process group; output never reaches the terminal.
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	total := len(p)
+	b.size += total
+	if b.limit <= 0 {
+		b.head = append(b.head, p...)
+		return total, nil
+	}
+	half := b.limit / 2
+	if room := half - len(b.head); room > 0 {
+		n := min(len(p), room)
+		b.head, p = append(b.head, p[:n]...), p[n:]
+	}
+	b.tail = append(b.tail, p...)
+	if keep := b.limit - half; len(b.tail) > keep {
+		b.tail = append(b.tail[:0], b.tail[len(b.tail)-keep:]...)
+	}
+	return total, nil
+}
+
+func (b *cappedBuffer) Text() (string, bool) {
+	head, tail := string(b.head), string(b.tail)
+	if b.limit <= 0 || b.size <= b.limit {
+		return head + tail, false
+	}
+	msg := fmt.Sprintf("\n[output truncated: %d of %d bytes omitted (max_output=%d, first %d + last %d kept); filter with rg, grep, head, tail or pass a larger max_output]\n",
+		b.size-len(b.head)-len(b.tail), b.size, b.limit, len(b.head), len(b.tail))
+	return head + msg + tail, true
+}
+
 func (r *Runner) run(h Hook, j job) {
 	seconds := h.Timeout
-	if seconds == 0 {
+	if seconds <= 0 {
 		seconds = defaultTimeout
 	}
-	var out tail
-	cmd := exec.Command("/bin/sh", "-c", h.Command)
-	cmd.Env, cmd.Dir, cmd.Stdout, cmd.Stderr = j.env, j.dir, &out, &out
+	limit := r.MaxOutput
+	if !h.SendOutput && (limit <= 0 || limit > 2048) {
+		limit = 2048
+	}
+	out := &cappedBuffer{limit: limit}
+	cmd := exec.Command("/bin/bash", "--noprofile", "--norc", "-c", h.Command)
+	cmd.Env, cmd.Dir, cmd.Stdout, cmd.Stderr = j.env, j.dir, out, out
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.WaitDelay = time.Second
+
+	startTime := time.Now().UTC()
 	if err := cmd.Start(); err != nil {
 		r.fail(h, j.name, err.Error())
+		if h.SendOutput && j.sess != "" {
+			r.recordOutput(Result{SessionID: j.sess, HookName: h.Name, Event: j.name, StartTime: startTime, ExitCode: 127, Output: err.Error()})
+		}
 		return
 	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(seconds)*time.Second)
 	defer cancel()
 	stop := context.AfterFunc(ctx, func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) })
 	err := cmd.Wait()
 	stop()
+
+	exitCode := 0
+	if err != nil {
+		exitCode = 1
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			exitCode = exit.ExitCode()
+		}
+	}
 	if ctx.Err() != nil {
 		err = fmt.Errorf("timed out after %ds", seconds)
+		exitCode = 124
 	}
+	text, truncated := out.Text()
 	if err != nil {
-		r.fail(h, j.name, err.Error()+": "+strings.TrimSpace(out.buf.String()))
+		r.fail(h, j.name, err.Error()+": "+strings.TrimSpace(text))
 	}
+	if h.SendOutput && j.sess != "" {
+		r.recordOutput(Result{SessionID: j.sess, HookName: h.Name, Event: j.name, StartTime: startTime, ExitCode: exitCode, Output: text, Truncated: truncated})
+	}
+}
+
+func (r *Runner) recordOutput(res Result) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.outputs == nil {
+		r.outputs = make(map[string][]Result)
+	}
+	if len(r.outputs[res.SessionID]) >= maxPending {
+		r.fail(Hook{Name: res.HookName}, res.Event, fmt.Sprintf("pending output queue full for session %s, result dropped", res.SessionID))
+		return
+	}
+	r.outputs[res.SessionID] = append(r.outputs[res.SessionID], res)
 }
 
 func (r *Runner) fail(h Hook, event, problem string) {

@@ -9,8 +9,6 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
-
-	"recur/prompts"
 )
 
 const (
@@ -89,13 +87,9 @@ func turnStart(history []json.RawMessage, turns int) int {
 	return 0
 }
 
-// instructions is the system prompt plus prefix source used by every request.
+// instructions is the system prompt used by every request.
 func (a *Agent) instructions() string {
-	system := a.System
-	if system == "" {
-		system = prompts.System
-	}
-	return system + "\n\n<prefix>\n" + a.REPL.Prefix + "\n</prefix>"
+	return a.System
 }
 
 // summarize condenses the old part into one summary written under the session instructions.
@@ -199,20 +193,19 @@ func (a *Agent) compactIfNeeded(ctx context.Context, emit func(Event)) {
 	}
 }
 
-// Reload re-reads settings and prompts and restarts the shell while keeping the history.
+// Reload re-reads configuration and applies it while keeping the history.
 func (a *Agent) Reload() error {
 	c, err := loadConfiguration(a.home, a.REPL.Dir, a.files)
 	if err != nil {
 		return err
 	}
-	// Session selection is independent of the defaults in settings.toml.
+	// Session selection is independent of the defaults in config.toml.
 	c.settings.Provider, c.settings.Model, c.settings.Effort = a.settings.Provider, a.settings.Model, a.settings.Effort
 	if err := validateSettings(c.settings); err != nil {
 		return fmt.Errorf("session selection: %w", err)
 	}
 	a.REPL.Close()
-	a.REPL.Prefix, a.REPL.PrefixOutput = c.prefix, ""
-	a.System, a.LocalConfig, a.LocalIgnored, a.Sources = c.system, c.local, c.ignored, c.sources
+	a.System, a.LocalConfig, a.LocalIgnored, a.Sources, a.primaryConfig = c.system, c.local, c.ignored, c.sources, c.primary
 	a.hooks.Set(c.hooks)
 	a.applySettings(c.settings)
 	return nil

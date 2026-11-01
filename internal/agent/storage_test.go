@@ -23,16 +23,11 @@ func TestGlobalHomeDefaultsAndMissingFiles(t *testing.T) {
 	if a.home != filepath.Join(home, ".recur") {
 		t.Fatal(a.home)
 	}
-	for _, name := range []string{"settings.toml", "prefix.sh", "system.md"} {
-		info, err := os.Stat(filepath.Join(a.home, name))
-		if err != nil || info.Mode().Perm() != 0600 {
-			t.Fatalf("private default %s: %v", name, err)
-		}
+	if a.System != "You are Recur, a coding agent" {
+		t.Fatalf("unexpected default system: %q", a.System)
 	}
-	if err := os.WriteFile(filepath.Join(a.home, "system.md"), []byte("Keep this prompt"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(filepath.Join(a.home, "prefix.sh")); err != nil {
+	cfgPath := filepath.Join(a.home, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte("system = 'Keep this prompt'\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	b, err := New(a.REPL.Dir)
@@ -40,8 +35,12 @@ func TestGlobalHomeDefaultsAndMissingFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer b.Close()
-	if b.System != "Keep this prompt" || b.REPL.Prefix == "" {
-		t.Fatal("missing file not filled or editable prompt replaced")
+	if b.System != "Keep this prompt" {
+		t.Fatalf("expected custom prompt, got %q", b.System)
+	}
+	info, err := os.Stat(cfgPath)
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("private config permission: %v", err)
 	}
 }
 

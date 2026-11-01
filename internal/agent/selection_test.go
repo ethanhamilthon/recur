@@ -17,15 +17,34 @@ import (
 
 func configureTestAgent(t *testing.T, a *Agent, s Settings) {
 	t.Helper()
+	if s.ShellTimeout <= 0 {
+		s.ShellTimeout = 120
+	}
+	if s.ShellMaxTimeout <= 0 {
+		s.ShellMaxTimeout = 600
+	}
+	if s.ShellMaxOutput < 0 {
+		s.ShellMaxOutput = 8192
+	}
 	a.applySettings(s)
 	if a.home == "" {
 		return
 	}
-	data, err := toml.Marshal(s)
+	cf := rawConfig{
+		Provider:  &s.Provider,
+		Model:     &s.Model,
+		Effort:    &s.Effort,
+		Providers: map[string]rawProvider{},
+	}
+	for k, p := range s.Providers {
+		b, k1, k2 := p.BaseURL, p.APIKey, p.APIKeyEnv
+		cf.Providers[k] = rawProvider{BaseURL: &b, APIKey: &k1, APIKeyEnv: &k2}
+	}
+	data, err := toml.Marshal(cf)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = os.WriteFile(filepath.Join(a.home, "settings.toml"), data, 0600); err != nil {
+	if err = os.WriteFile(filepath.Join(a.home, "config.toml"), data, 0600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -85,15 +104,10 @@ func TestSessionGlobalAndContextMatchesRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	a.REPL.Prefix = `echo "$RECUR_MODEL"`
-	if _, err = a.REPL.Ensure(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(a.REPL.PrefixOutput, a.Settings().Model) {
-		t.Fatal("session unavailable in prefix")
-	}
+
 	n := int64(36679)
 	a.records = []Record{{Kind: "assistant", Meta: &Metadata{RequestID: "r-1", ContextInput: &n}}}
+	_, _ = a.REPL.Ensure(context.Background())
 	result, err := a.REPL.Execute(context.Background(), `echo "$RECUR_CTX_SIZE $RECUR_SESSION_ID"; sh -c 'echo "$RECUR_ENDPOINT"'`, time.Second)
 	id := strings.TrimSuffix(filepath.Base(a.HistoryPath), ".jsonl")
 	if err != nil || result.Error || !strings.Contains(result.Output, "36679 "+id) || !strings.Contains(result.Output, filepath.Join(a.socketDir, "socket")) {
@@ -103,10 +117,6 @@ func TestSessionGlobalAndContextMatchesRecords(t *testing.T) {
 	result, err = a.REPL.Execute(context.Background(), `echo "[$RECUR_CTX_SIZE]"`, time.Second)
 	if err != nil || result.Error || result.Output != "[]\n" {
 		t.Fatalf("unknown context must be empty: %+v %v", result, err)
-	}
-	a.REPL.Close()
-	if _, err = a.REPL.Ensure(context.Background()); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -189,14 +199,20 @@ func TestReloadPreservesSessionSelectionAndReloadsSettings(t *testing.T) {
 	}
 	s.Provider, s.Model, s.Effort = "first", "session-model", "high"
 	configureTestAgent(t, a, s)
-	s.Provider, s.Model, s.Effort = "second", "global-model", "low"
-	s.Providers["first"] = Provider{BaseURL: "https://updated.example", APIKey: "new"}
-	s.MaxCodeLines = 17
-	data, err := toml.Marshal(s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(filepath.Join(a.home, "settings.toml"), data, 0600); err != nil {
+
+	// Update on-disk config with different global defaults
+	text := `provider = "second"
+model = "global-model"
+effort = "low"
+[ui]
+max_code_lines = 17
+[providers.first]
+base_url = "https://updated.example"
+api_key = "new"
+[providers.second]
+base_url = "https://second.example"
+`
+	if err = os.WriteFile(filepath.Join(a.home, "config.toml"), []byte(text), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err = a.Reload(); err != nil {
@@ -209,12 +225,14 @@ func TestReloadPreservesSessionSelectionAndReloadsSettings(t *testing.T) {
 	if got.Providers["first"].BaseURL != "https://updated.example" || got.MaxCodeLines != 17 {
 		t.Fatalf("other settings not reloaded: %+v", got)
 	}
-	delete(s.Providers, "first")
-	data, err = toml.Marshal(s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(filepath.Join(a.home, "settings.toml"), data, 0600); err != nil {
+
+	// Delete provider that is currently selected in session -> reload must fail
+	textBad := `provider = "second"
+model = "global-model"
+[providers.second]
+base_url = "https://second.example"
+`
+	if err = os.WriteFile(filepath.Join(a.home, "config.toml"), []byte(textBad), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err = a.Reload(); err == nil {

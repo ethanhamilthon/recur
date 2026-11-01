@@ -19,9 +19,7 @@ func TestSettingsAndHome(t *testing.T) {
 	if !strings.HasPrefix(a.HistoryPath, filepath.Join(home, "sessions")+string(os.PathSeparator)) {
 		t.Fatal(a.HistoryPath)
 	}
-	if _, err := os.Stat(filepath.Join(cwd, ".recur")); !os.IsNotExist(err) {
-		t.Fatal("must not use cwd config when RECUR_HOME is set")
-	}
+
 	text := `provider = "other"
 model = "custom-model"
 effort = "high"
@@ -32,13 +30,15 @@ api_key = "first"
 base_url = "https://example.com/v1/"
 api_key = "second"
 `
-	if err := os.WriteFile(filepath.Join(home, "settings.toml"), []byte(text), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(text), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.NewSession(); err != nil {
 		t.Fatal(err)
 	}
-	if a.Settings().Model != "custom-model" || a.Settings().Effort != "high" || a.Settings().Providers["other"].BaseURL != "https://example.com/v1/" || a.Settings().Providers["other"].APIKey != "second" {
+	if a.Settings().Model != "custom-model" || a.Settings().Effort != "high" ||
+		a.Settings().Providers["other"].BaseURL != "https://example.com/v1/" ||
+		a.Settings().Providers["other"].APIKey != "second" {
 		t.Fatal("settings not applied")
 	}
 	next, err := New(cwd)
@@ -58,13 +58,16 @@ func TestInvalidSettings(t *testing.T) {
 		`provider = "missing"` + "\n" + `model = "m"`,
 		"provider = 'p'\nmodel = 'm'\neffort = 'oops'\n[providers.p]\nbase_url = 'https://example.com'",
 		"provider = 'p'\nmodel = 'm'\n[providers.p]\nbase_url = 'file:///tmp'",
+		"provider = 'p'\nmodel = 'm'\n[providers.p]\nbase_url = 'https://example.com'\napi_key = 'k'\napi_key_env = 'E'",
+		"[shell]\ntimeout = 0",
+		"[shell]\ntimeout = 200\nmax_timeout = 100",
 	} {
 		t.Run(text, func(t *testing.T) {
 			dir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(dir, "settings.toml"), []byte(text), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(text), 0600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := loadSettings(dir); err == nil {
+			if _, err := loadConfiguration(dir, dir, ConfigFiles{}); err == nil {
 				t.Fatal("expected settings error")
 			}
 		})
@@ -98,19 +101,19 @@ func TestTimelineLineSettings(t *testing.T) {
 		invalid                bool
 	}{
 		{"old config", "", 999, 4, 4, false},
-		{"hidden", "max_code_lines = 0\nmax_result_lines = 0\nmax_thinking_lines = 0\n", 0, 0, 0, false},
-		{"custom", "max_code_lines = 12\nmax_result_lines = 8\nmax_thinking_lines = 2\n", 12, 8, 2, false},
-		{"negative code", "max_code_lines = -1\n", 0, 0, 0, true},
-		{"negative result", "max_result_lines = -1\n", 0, 0, 0, true},
-		{"negative thinking", "max_thinking_lines = -1\n", 0, 0, 0, true},
+		{"hidden", "[ui]\nmax_code_lines = 0\nmax_result_lines = 0\nmax_thinking_lines = 0\n", 0, 0, 0, false},
+		{"custom", "[ui]\nmax_code_lines = 12\nmax_result_lines = 8\nmax_thinking_lines = 2\n", 12, 8, 2, false},
+		{"negative code", "[ui]\nmax_code_lines = -1\n", 0, 0, 0, true},
+		{"negative result", "[ui]\nmax_result_lines = -1\n", 0, 0, 0, true},
+		{"negative thinking", "[ui]\nmax_thinking_lines = -1\n", 0, 0, 0, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			text := "provider = 'p'\nmodel = 'm'\n" + tc.extra + "[providers.p]\nbase_url = 'https://example.com'\n"
-			if err := os.WriteFile(filepath.Join(dir, "settings.toml"), []byte(text), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(text), 0600); err != nil {
 				t.Fatal(err)
 			}
-			s, err := loadSettings(dir)
+			cfg, err := loadConfiguration(dir, dir, ConfigFiles{})
 			if tc.invalid {
 				if err == nil {
 					t.Fatal("negative limit accepted")
@@ -120,6 +123,7 @@ func TestTimelineLineSettings(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			s := cfg.settings
 			if s.MaxCodeLines != tc.code || s.MaxResultLines != tc.result || s.MaxThinkingLines != tc.thinking {
 				t.Fatalf("limits: %+v", s)
 			}
@@ -128,7 +132,7 @@ func TestTimelineLineSettings(t *testing.T) {
 }
 
 func TestCompactionSettingsValidation(t *testing.T) {
-	base := Settings{Provider: "p", Providers: map[string]Provider{"p": {BaseURL: "https://example.com"}}}
+	base := Settings{Provider: "p", Providers: map[string]Provider{"p": {BaseURL: "https://example.com"}}, ShellTimeout: 120, ShellMaxTimeout: 600}
 	base.MaxContextTokens = -1
 	if err := validateSettings(base); err == nil {
 		t.Fatal("negative token budget accepted")
@@ -140,37 +144,5 @@ func TestCompactionSettingsValidation(t *testing.T) {
 	base.CompactKeepTurns = 0
 	if err := validateSettings(base); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestLegacyColorsTableIgnored(t *testing.T) {
-	dir := t.TempDir()
-	text := "provider = 'p'\nmodel = 'm'\nmax_code_lines = 12\n[providers.p]\nbase_url = 'https://example.com'\n[colors]\naccent = \"#ff0000\"\nbogus = \"red\"\n"
-	if err := os.WriteFile(filepath.Join(dir, "settings.toml"), []byte(text), 0600); err != nil {
-		t.Fatal(err)
-	}
-	s, err := loadSettings(dir)
-	if err != nil {
-		t.Fatalf("legacy [colors] table rejected: %v", err)
-	}
-	if s.Provider != "p" || s.Model != "m" || s.MaxCodeLines != 12 {
-		t.Fatalf("settings not loaded: %+v", s)
-	}
-}
-
-func TestDefaultSettingsHaveNoColorTable(t *testing.T) {
-	if strings.Contains(strings.ToLower(defaultSettings), "color") {
-		t.Fatal("default settings must not mention colors")
-	}
-	dir := t.TempDir()
-	if _, err := loadSettings(dir); err != nil {
-		t.Fatal(err)
-	}
-	created, err := os.ReadFile(filepath.Join(dir, "settings.toml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(strings.ToLower(string(created)), "color") {
-		t.Fatalf("created settings mention colors:\n%s", created)
 	}
 }

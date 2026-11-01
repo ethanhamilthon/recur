@@ -41,9 +41,8 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 	mode := flags.String("mode", "", "headless transport: jsonl")
 	sessionID := flags.String("s", "", "target session for notify/view (default: $RECUR_ENDPOINT)")
 	resume := flags.String("resume", "", "resume a project session ID")
-	system := flags.String("system", "", "system prompt file (overrides .recur/system.md)")
-	prefix := flags.String("prefix", "", "prefix script file (overrides .recur/prefix.sh)")
-	hooksFile := flags.String("hooks", "", "extra hooks file, added to home and .recur hooks.toml (headless runs use only this file)")
+	configPath := flags.String("config", "", "configuration file (overrides recur.toml and $RECUR_HOME/config.toml)")
+	noExtend := flags.Bool("no-extend", false, "skip inheriting from global configuration")
 	if err := flags.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return nil
@@ -75,12 +74,9 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 		return agent.Notify(cwd, *sessionID, text)
 	}
 	headless := *mode != "" || *prompt != ""
-	files := agent.ConfigFiles{System: *system, Prefix: *prefix, Hooks: *hooksFile, Headless: headless}
-	for _, f := range []*string{&files.System, &files.Prefix, &files.Hooks} {
-		if *f == "" {
-			continue
-		}
-		if *f, err = filepath.Abs(*f); err != nil {
+	files := agent.ConfigFiles{Config: *configPath, NoExtend: *noExtend, Headless: headless}
+	if files.Config != "" {
+		if files.Config, err = filepath.Abs(files.Config); err != nil {
 			return err
 		}
 	}

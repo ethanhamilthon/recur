@@ -30,7 +30,7 @@ func TestHeadlessTransportsAndExplicitResume(t *testing.T) {
 			}))
 			defer server.Close()
 			config := fmt.Sprintf("provider='test'\nmodel='m'\n[providers.test]\nbase_url=%q\n", server.URL)
-			if err := os.WriteFile(filepath.Join(home, "settings.toml"), []byte(config), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600); err != nil {
 				t.Fatal(err)
 			}
 			input := "{\"prompt\":\"first\"}\n{\"prompt\":\"second\"}\n"
@@ -106,7 +106,7 @@ func TestIdleHeadlessNotificationStartsTurn(t *testing.T) {
 	}))
 	defer server.Close()
 	config := fmt.Sprintf("provider='test'\nmodel='m'\n[providers.test]\nbase_url=%q\n", server.URL)
-	if err := os.WriteFile(filepath.Join(home, "settings.toml"), []byte(config), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}
 	in, input := io.Pipe()

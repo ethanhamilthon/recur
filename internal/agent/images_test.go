@@ -47,7 +47,7 @@ func TestViewDeliveredAfterAllToolOutputsAndPersists(t *testing.T) {
 			fmt.Fprintf(w, "data: %s\n\n", raw(map[string]any{"type": "response.completed", "response": map[string]any{"output": items}}))
 			return
 		}
-		if len(body.Input) != 7 {
+		if len(body.Input) != 6 {
 			t.Errorf("unexpected item count: %d", len(body.Input))
 			return
 		}
@@ -56,7 +56,7 @@ func TestViewDeliveredAfterAllToolOutputsAndPersists(t *testing.T) {
 				Type, Output string
 				CallID       string `json:"call_id"`
 			}
-			if err := json.Unmarshal(body.Input[4+i], &item); err != nil {
+			if err := json.Unmarshal(body.Input[3+i], &item); err != nil {
 				t.Error(err)
 			}
 			if item.Type != "function_call_output" || item.CallID != id || strings.Contains(item.Output, "data:image") {
@@ -70,7 +70,7 @@ func TestViewDeliveredAfterAllToolOutputsAndPersists(t *testing.T) {
 				URL        string `json:"image_url"`
 			}
 		}
-		if err := json.Unmarshal(body.Input[6], &msg); err != nil {
+		if err := json.Unmarshal(body.Input[5], &msg); err != nil {
 			t.Error(err)
 		}
 		if len(msg.Content) > 0 && !strings.Contains(msg.Content[0].Text, path) {
@@ -79,7 +79,7 @@ func TestViewDeliveredAfterAllToolOutputsAndPersists(t *testing.T) {
 		if msg.Role != "user" || len(msg.Content) != 2 || msg.Content[0].Type != "input_text" || !strings.Contains(msg.Content[0].Text, "<notify>") || msg.Content[1].Type != "input_image" || !strings.HasPrefix(msg.Content[1].URL, "data:image/png;base64,") {
 			t.Errorf("missing queued image: %+v", msg)
 		}
-		captured = string(body.Input[6])
+		captured = string(body.Input[5])
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n")
 	}))
 	defer server.Close()
@@ -118,10 +118,10 @@ func TestViewDeliveredAfterAllToolOutputsAndPersists(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restored.Close()
-	if len(restored.History) != 7 || string(restored.History[6]) != captured {
+	if len(restored.History) != 6 || string(restored.History[5]) != captured {
 		t.Fatal("image content not preserved in saved history")
 	}
-	records := RecordsForItem(restored.History[6])
+	records := RecordsForItem(restored.History[5])
 	if len(records) != 1 || records[0].Kind != "notice" {
 		t.Fatalf("restored image notice: %v", records)
 	}

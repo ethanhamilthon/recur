@@ -61,7 +61,7 @@ func TestFullTurnLiveAndHistory(t *testing.T) {
 			}
 			fmt.Fprintf(w, "data: %s\n\n", raw(map[string]any{"type": "response.completed", "response": map[string]any{"output": output, "usage": map[string]any{"input_tokens": 1000, "output_tokens": 100, "input_tokens_details": map[string]int{"cached_tokens": 200}}}}))
 		} else {
-			if len(payload.Input) != 8 {
+			if len(payload.Input) != 7 {
 				t.Errorf("missing history/tool outputs: %d", len(payload.Input))
 			}
 			fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"# Final\\nAll done\"}]}],\"usage\":{\"input_tokens\":1100,\"output_tokens\":20,\"input_tokens_details\":{\"cached_tokens\":400}}}}\n\n")
@@ -89,14 +89,14 @@ func TestFullTurnLiveAndHistory(t *testing.T) {
 	for _, r := range live {
 		kinds = append(kinds, r.Kind)
 	}
-	want := []string{"user", "notice", "reasoning", "assistant", "code", "code", "output", "error", "assistant"}
+	want := []string{"user", "reasoning", "assistant", "code", "code", "output", "error", "assistant"}
 	if !reflect.DeepEqual(kinds, want) {
 		t.Fatalf("kinds: %v", kinds)
 	}
-	if live[2].Text != "complete summary" || live[3].Text != "Before tools" || !strings.Contains(live[7].Text, dir) || !strings.Contains(live[7].Text, "problem") {
+	if live[1].Text != "complete summary" || live[2].Text != "Before tools" || !strings.Contains(live[6].Text, dir) || !strings.Contains(live[6].Text, "problem") {
 		t.Fatalf("incomplete content: %+v", live)
 	}
-	for _, i := range []int{4, 5} {
+	for _, i := range []int{3, 4} {
 		if live[i].Meta.Usage.Input != 1000 {
 			t.Errorf("tool usage must be per-request: %+v", live[i])
 		}
@@ -153,7 +153,7 @@ func TestItemContentIsLiveAndSurvivesFailedStream(t *testing.T) {
 	configureTestAgent(t, a, Settings{Provider: "test", Model: "m", Providers: map[string]Provider{"test": {BaseURL: server.URL}}})
 	var live []Record
 	err = a.Run(context.Background(), "go", func(e Event) { live = ApplyEvent(live, e) })
-	if err == nil || len(live) != 4 || live[2].Text != "intermediate complete" {
+	if err == nil || len(live) != 3 || live[1].Text != "intermediate complete" {
 		t.Fatalf("live=%+v err=%v", live, err)
 	}
 	a.Close() // release ownership so the session can be reopened
@@ -163,7 +163,7 @@ func TestItemContentIsLiveAndSurvivesFailedStream(t *testing.T) {
 	}
 	defer restored.Close()
 	records := restored.Records()
-	if len(records) != 4 || records[2].Text != "intermediate complete" {
+	if len(records) != 3 || records[1].Text != "intermediate complete" {
 		t.Fatalf("lost partial response: %+v", records)
 	}
 }

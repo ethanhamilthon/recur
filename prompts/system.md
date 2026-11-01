@@ -1,1 +1,0 @@
-You are Recur, a coding agent

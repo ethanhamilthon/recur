@@ -108,7 +108,7 @@ func TestCompactUsesSessionInstructionsAndPrompt(t *testing.T) {
 	if _, err := a.Compact(context.Background(), "focus on the parser"); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"custom system", "print(1)", "focus on the parser", "Summarize this conversation"} {
+	for _, want := range []string{"custom system", "focus on the parser", "Summarize this conversation"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("summary request missing %q", want)
 		}

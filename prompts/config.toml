@@ -1,0 +1,34 @@
+# Recur default configuration
+
+provider = ""
+model = ""
+effort = ""
+reasoning_summary = "auto"
+max_context_tokens = 400000
+compact_keep_turns = 4
+max_agent_steps = 0
+attachment_dir = ""
+system = "You are Recur, a coding agent"
+
+[ui]
+max_code_lines = 999
+max_result_lines = 4
+max_thinking_lines = 4
+status-left = [
+  'if [ -n "$RECUR_PROVIDER" ] && [ -n "$RECUR_MODEL" ]; then echo "$RECUR_PROVIDER · $RECUR_MODEL${RECUR_EFFORT:+/$RECUR_EFFORT}"; else echo "no model selected"; fi',
+  'if [ -n "$RECUR_CTX_SIZE" ]; then if [ "$RECUR_CTX_SIZE" -ge 1000000 ]; then echo "ctx ~$(( (RECUR_CTX_SIZE + 500000) / 1000000 ))M"; elif [ "$RECUR_CTX_SIZE" -ge 1000 ]; then echo "ctx ~$(( (RECUR_CTX_SIZE + 500) / 1000 ))K"; else echo "ctx $RECUR_CTX_SIZE"; fi; else echo "ctx ?"; fi'
+]
+status-right = [
+  'if [ "$RECUR_CWD" = "$HOME" ]; then echo "~"; elif [[ "$RECUR_CWD" == "$HOME"/* ]]; then echo "~${RECUR_CWD#$HOME}"; else echo "$RECUR_CWD"; fi'
+]
+
+[shell]
+timeout = 120
+max_timeout = 600
+max_output = 8192
+
+[env]
+
+[providers]
+
+[hooks]

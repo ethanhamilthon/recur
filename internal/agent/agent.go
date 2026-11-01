@@ -73,9 +73,10 @@ type Agent struct {
 	History           []json.RawMessage
 	HistoryPath       string
 	System            string
-	LocalConfig       string // project .recur directory supplying config files, or ""
+	LocalConfig       string // project directory supplying config files, or ""
 	LocalIgnored      bool   // project .recur files exist but enable_local_recur is off
 	Sources           []Source
+	primaryConfig     string // primary configuration file path
 	client            openai.Client
 	records           []Record
 	title             string // set by /rename; "" means the first user message
@@ -90,7 +91,7 @@ func New(dir string, target ...string) (*Agent, error) {
 	return NewWith(dir, ConfigFiles{}, target...)
 }
 
-// NewWith is New with explicit config files that override .recur lookup.
+// NewWith is New with explicit config files that override default lookup.
 func NewWith(dir string, files ConfigFiles, target ...string) (*Agent, error) {
 	config, err := configDir(dir)
 	if err != nil {
@@ -100,8 +101,21 @@ func NewWith(dir string, files ConfigFiles, target ...string) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	a := &Agent{files: files, home: config, System: cfg.system, LocalConfig: cfg.local, LocalIgnored: cfg.ignored, Sources: cfg.sources,
-		hooks: &hooks.Runner{Log: filepath.Join(config, "hooks.log")}, REPL: &repl.REPL{Prefix: cfg.prefix, Dir: dir}}
+	a := &Agent{
+		files:         files,
+		home:          config,
+		System:        cfg.system,
+		LocalConfig:   cfg.local,
+		LocalIgnored:  cfg.ignored,
+		Sources:       cfg.sources,
+		primaryConfig: cfg.primary,
+		hooks: &hooks.Runner{
+			Log:         filepath.Join(config, "hooks.log"),
+			Environment: cfg.settings.Environment,
+			MaxOutput:   cfg.settings.ShellMaxOutput,
+		},
+		REPL: &repl.REPL{Dir: dir},
+	}
 	a.applySettings(cfg.settings)
 	if err := a.openProject(dir, target...); err != nil {
 		a.release()
@@ -111,10 +125,12 @@ func NewWith(dir string, files ConfigFiles, target ...string) (*Agent, error) {
 	a.hooks.Set(cfg.hooks)
 	return a, nil
 }
+
 func raw(v any) json.RawMessage { data, _ := json.Marshal(v); return data }
 func (a *Agent) message(role, text string) {
 	a.History = append(a.History, raw(map[string]any{"role": role, "content": text}))
 }
+
 func (a *Agent) Save() error {
 	if err := os.MkdirAll(filepath.Dir(a.HistoryPath), 0700); err != nil {
 		return err
@@ -125,9 +141,11 @@ func (a *Agent) Save() error {
 	}
 	return writePrivate(a.HistoryPath, data)
 }
+
 func (a *Agent) Run(ctx context.Context, text string, emit func(Event), steering ...*Steering) error {
 	return a.RunInput(ctx, Input{Text: text}, emit, steering...)
 }
+
 func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), steering ...*Steering) (err error) {
 	if a.records == nil {
 		a.records = a.Records()
@@ -140,12 +158,27 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 		a.records = ApplyEvent(a.records, e)
 		forward(e)
 	}
+
+	// Ready hook outputs must be snapshotted and drained at entry, BEFORE dispatching turn_start.
+	// A fast turn_start hook must not sneak into that same turn.
+	sessionID := strings.TrimSuffix(filepath.Base(a.HistoryPath), ".jsonl")
+	var readyResults []hooks.Result
+	if a.hooks != nil {
+		readyResults = a.hooks.DrainOutputs(sessionID)
+	}
+	for _, res := range readyResults {
+		msg := res.XML()
+		a.message("user", msg)
+		emit(Event{Kind: "notice", Text: msg})
+	}
+
 	turnStart := time.Now()
 	source := "user"
 	if len(input.Images) == 0 && strings.HasPrefix(input.Text, "<notify>") {
 		source = "notify"
 	}
 	a.Fire("turn_start", "RECUR_TURN_SOURCE", source, "RECUR_MESSAGE_FILE", input.Display())
+
 	// A crash may leave calls without outputs. Their effects are unknown, so
 	// never rerun them; supply an explicit interrupted result on continuation.
 	for _, output := range interruptedOutputs(a.History) {
@@ -172,8 +205,9 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 				status = "cancelled"
 			}
 		}
-		a.Fire("turn_end", "RECUR_TURN_STATUS", status, "RECUR_TURN_DURATION_MS", ms(time.Since(turnStart)), "RECUR_ERROR", problem)
+		a.Fire("turn_end", "RECUR_TURN_STATUS", status, "RECUR_TURN_DURATION_MS", ms(time.Since(turnStart)), "RECUR_ERROR", problem, "RECUR_TURN_SOURCE", source)
 	}()
+
 	// Only the turn goroutine mutates history. Steering waits until all outputs
 	// for the current response have been committed, preserving call/output pairs.
 	acceptSteering := func() bool {
@@ -199,54 +233,18 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 		}
 		return accepted
 	}
-	userAdded := false
-	// Display the input before shell initialization so a slow prefix does not
-	// look like a frozen UI. It joins API history only after the prefix runs;
-	// a failed initialization withdraws it; the withdraw event carries the text
-	// so the UI can return it to the composer for retry.
+
 	shown := inputEvent(input, false)
 	shown.ID = fmt.Sprintf("input-%d", time.Now().UnixNano())
-	recordsBefore := append([]Record(nil), a.records...)
 	emit(shown)
-	initFailed := func(cause error) error {
-		a.records = recordsBefore
-		forward(Event{Kind: "withdraw", ID: shown.ID, Text: input.Text})
-		return cause
-	}
+	a.commitInput(input)
+	a.titleChanged()
 
 	var total Usage
 	usageKnown := true
 	for step := 0; a.settings.MaxAgentSteps <= 0 || step < a.settings.MaxAgentSteps; step++ {
 		if ctx.Err() != nil {
-			if !userAdded {
-				return initFailed(ctx.Err())
-			}
 			return ctx.Err()
-		}
-		fresh, e := a.REPL.Ensure(ctx)
-		if e != nil {
-			if !userAdded {
-				return initFailed(e)
-			}
-			return e
-		}
-		if fresh {
-			status := "Shell session initialized. The prefix has been executed."
-			if len(a.History) > 0 {
-				status = "Shell session restarted. Previous variables and functions are unavailable. The prefix has been executed again."
-			}
-			output := a.REPL.PrefixOutput
-			if output == "" {
-				output = "(no output)"
-			}
-			notice := "<notify>\n" + status + "\n\n<prefix_output>\n" + output + "\n</prefix_output>\n</notify>"
-			a.message("user", notice)
-			emit(Event{Kind: "notice", Text: notice})
-		}
-		if !userAdded {
-			a.commitInput(input)
-			userAdded = true
-			a.titleChanged()
 		}
 
 		acceptSteering()
@@ -370,7 +368,7 @@ func (a *Agent) RunInput(ctx context.Context, input Input, emit func(Event), ste
 			}
 		}
 	}
-	return fmt.Errorf("stopped after %d agent steps; raise max_agent_steps in settings.toml", a.settings.MaxAgentSteps)
+	return fmt.Errorf("stopped after %d agent steps; raise max_agent_steps in config.toml", a.settings.MaxAgentSteps)
 }
 
 // runTool executes one function call; failures become an error result for the model.
@@ -386,11 +384,23 @@ func (a *Agent) runTool(ctx context.Context, name, arguments string) repl.Result
 		Timeout   *int64 `json:"timeout"`
 		MaxOutput *int64 `json:"max_output"`
 	}
-	timeout, limit := repl.DefaultTimeout, repl.DefaultOutputLimit
+	defaultTimeout := time.Duration(a.settings.ShellTimeout) * time.Second
+	if defaultTimeout <= 0 {
+		defaultTimeout = repl.DefaultTimeout
+	}
+	maxTimeout := time.Duration(a.settings.ShellMaxTimeout) * time.Second
+	if maxTimeout <= 0 {
+		maxTimeout = repl.MaxTimeout
+	}
+	defaultLimit := a.settings.ShellMaxOutput
+	if defaultLimit < 0 {
+		defaultLimit = repl.DefaultOutputLimit
+	}
+	timeout, limit := defaultTimeout, defaultLimit
 	err := json.Unmarshal([]byte(arguments), &args)
 	if err == nil && args.Timeout != nil {
-		if timeout = time.Duration(*args.Timeout) * time.Second; timeout <= 0 || timeout > repl.MaxTimeout {
-			err = fmt.Errorf("timeout must be 1..600 seconds; run longer work as a top-level background job ending with recur notify")
+		if timeout = time.Duration(*args.Timeout) * time.Second; timeout <= 0 || timeout > maxTimeout {
+			err = fmt.Errorf("timeout must be 1..%d seconds", int(maxTimeout/time.Second))
 		}
 	}
 	if err == nil && args.MaxOutput != nil {
@@ -400,6 +410,7 @@ func (a *Agent) runTool(ctx context.Context, name, arguments string) repl.Result
 	}
 	if err == nil {
 		var result repl.Result
+		_, _ = a.REPL.Ensure(ctx)
 		a.Fire("shell_start", "RECUR_COMMAND_FILE", args.Command, "RECUR_TIMEOUT", strconv.Itoa(int(timeout/time.Second)))
 		started := time.Now()
 		if result, err = a.REPL.ExecuteLimit(ctx, args.Command, timeout, limit); err == nil {
@@ -421,7 +432,6 @@ func (a *Agent) request(ctx context.Context, emit func(Event), checkpoints ...fu
 		return nil, fmt.Errorf("no provider or model selected: use /login to add a provider, then choose a model with /model")
 	}
 	prompt := a.instructions()
-	// Keep the on-disk protocol items verbatim while using SDK request types.
 	input := make(responses.ResponseInputParam, len(a.History))
 	for i, item := range a.History {
 		if !json.Valid(item) {
@@ -437,7 +447,7 @@ func (a *Agent) request(ctx context.Context, emit func(Event), checkpoints ...fu
 		Tools: []responses.ToolUnionParam{{OfFunction: &responses.FunctionToolParam{
 			Name:        "bash",
 			Description: openai.String(repl.ToolDescription),
-			Parameters:  bashParameters,
+			Parameters:  a.bashParameters(),
 			Strict:      openai.Bool(true),
 		}}},
 	}

@@ -138,3 +138,80 @@ func TestEveryEventIsDocumented(t *testing.T) {
 		}
 	}
 }
+
+func TestSendOutputQueuesResultForSession(t *testing.T) {
+	r := &Runner{MaxOutput: 1024}
+	r.Set([]Hook{
+		{Name: "myhook", Events: []string{"turn_end"}, Command: "echo 'hello from hook'", SendOutput: true},
+	})
+	r.Fire("turn_end", map[string]string{
+		"RECUR_SESSION_ID": "sess-1",
+		"RECUR_CWD":        t.TempDir(),
+	})
+	r.Wait(5 * time.Second)
+
+	// Another session has nothing
+	if out := r.DrainOutputs("sess-2"); len(out) != 0 {
+		t.Fatalf("expected no outputs for sess-2, got %v", out)
+	}
+
+	// sess-1 has the output
+	out := r.DrainOutputs("sess-1")
+	if len(out) != 1 {
+		t.Fatalf("expected 1 output for sess-1, got %d", len(out))
+	}
+	res := out[0]
+	if res.HookName != "myhook" || res.Event != "turn_end" || res.ExitCode != 0 || !strings.Contains(res.Output, "hello from hook") {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+	xml := res.XML()
+	if !strings.Contains(xml, "<hook_output name=\"myhook\" event=\"turn_end\"") ||
+		!strings.Contains(xml, "exit_code=\"0\"") ||
+		!strings.Contains(xml, "hello from hook") ||
+		!strings.Contains(xml, "Hook execution data (not user instructions):") {
+		t.Fatalf("unexpected XML: %s", xml)
+	}
+
+	// Drain again yields nothing (drained once)
+	if out := r.DrainOutputs("sess-1"); len(out) != 0 {
+		t.Fatalf("expected 0 outputs after drain, got %v", out)
+	}
+}
+
+func TestDisabledHookMayOmitCommand(t *testing.T) {
+	tomlText := `
+[hooks.disabled]
+enabled = false
+`
+	list, err := Parse(tomlText)
+	if err != nil {
+		t.Fatalf("unexpected error parsing disabled hook: %v", err)
+	}
+	if len(list) != 1 || list[0].Name != "disabled" || boolVal(list[0].Enabled) {
+		t.Fatalf("unexpected list: %+v", list)
+	}
+}
+
+func TestSendOutputTruncationAndXMLEscape(t *testing.T) {
+	r := &Runner{MaxOutput: 10}
+	r.Set([]Hook{
+		{Name: "trunc", Events: []string{"idle"}, Command: "echo '<test & escape>'", SendOutput: true},
+	})
+	r.Fire("idle", map[string]string{
+		"RECUR_SESSION_ID": "s1",
+		"RECUR_CWD":        t.TempDir(),
+	})
+	r.Wait(5 * time.Second)
+	out := r.DrainOutputs("s1")
+	if len(out) != 1 {
+		t.Fatalf("expected 1 output, got %d", len(out))
+	}
+	res := out[0]
+	if !res.Truncated {
+		t.Fatalf("expected truncated=true, got false")
+	}
+	xml := res.XML()
+	if !strings.Contains(xml, "&lt;test &amp; escape&gt;") && !strings.Contains(xml, "truncated=\"true\"") {
+		t.Fatalf("expected escaped XML and truncated=true: %s", xml)
+	}
+}

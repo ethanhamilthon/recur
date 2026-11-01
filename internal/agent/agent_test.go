@@ -15,7 +15,7 @@ import (
 	"recur/internal/repl"
 )
 
-func TestTurnsPrefixAndReset(t *testing.T) {
+func TestTurnsExecutionAndHistory(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -26,27 +26,11 @@ func TestTurnsPrefixAndReset(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			t.Error(err)
 		}
-		if !strings.Contains(p.Instructions, "echo prefix-context") || strings.Contains(p.Instructions, "<prefix_output>") {
-			t.Errorf("missing source or output leaked into system: %s", p.Instructions)
-		}
-		notices := 0
-		for _, item := range p.Input {
-			if strings.Contains(string(item), "Shell session restarted") {
-				notices++
-			}
-		}
-		want := 0
-		if requests == 3 {
-			want = 1
-		}
-		if notices != want {
-			t.Errorf("request %d: got %d notices want %d", requests, notices, want)
-		}
 		if requests == 1 {
 			var last struct{ Role, Content string }
 			_ = json.Unmarshal(p.Input[len(p.Input)-1], &last)
-			if len(p.Input) != 2 || !strings.Contains(string(p.Input[0]), "prefix-context") || last.Role != "user" || last.Content != "hello" {
-				t.Error("first request must contain separate prefix output, then the user message")
+			if last.Role != "user" || last.Content != "hello" {
+				t.Errorf("first request must contain user message, got %v", last)
 			}
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -54,36 +38,16 @@ func TestTurnsPrefixAndReset(t *testing.T) {
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n")
 	}))
 	defer server.Close()
-	a := &Agent{REPL: &repl.REPL{Prefix: "echo prefix-context"}, HistoryPath: filepath.Join(t.TempDir(), "history.json")}
+	a := &Agent{REPL: &repl.REPL{}, HistoryPath: filepath.Join(t.TempDir(), "history.json")}
 	configureTestAgent(t, a, Settings{Provider: "test", Model: "test-model", Providers: map[string]Provider{"test": {BaseURL: server.URL}}})
 	defer a.Close()
-	var notices []string
-	emit := func(e Event) {
-		if e.Kind == "notice" {
-			notices = append(notices, e.Text)
-			var last struct{ Role, Content string }
-			if err := json.Unmarshal(a.History[len(a.History)-1], &last); err != nil {
-				t.Fatal(err)
-			}
-			if last.Role != "user" || last.Content != e.Text || !strings.HasPrefix(e.Text, "<notify>") {
-				t.Errorf("notice must match the notify block sent to the model: %q", e.Text)
-			}
-		}
-	}
 	for i := 0; i < 2; i++ {
-		if err := a.Run(context.Background(), "hello", emit); err != nil {
+		if err := a.Run(context.Background(), "hello", func(Event) {}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if len(notices) != 1 {
-		t.Fatalf("got %d notices before reset, want 1", len(notices))
-	}
-	a.REPL.Close()
-	if err := a.Run(context.Background(), "again", emit); err != nil {
-		t.Fatal(err)
-	}
-	if len(notices) != 2 {
-		t.Errorf("got %d notices after reset, want 2", len(notices))
+	if requests != 2 {
+		t.Fatalf("expected 2 requests, got %d", requests)
 	}
 }
 
@@ -216,8 +180,6 @@ func TestSDKRequestCancellation(t *testing.T) {
 	}
 }
 
-// Regression: clipd terminates a valid response with an extra blank SSE frame.
-// Empty/comment-only keepalives are also legal before or between data events.
 func TestSDKIgnoresEmptySSEFrames(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
