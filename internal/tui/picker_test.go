@@ -11,9 +11,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"recur/internal/agent"
+	"recur/internal/control"
 )
 
-func pickerModel(t *testing.T) model {
+func pickerModel(t *testing.T) (model, *agent.Agent) {
 	t.Helper()
 	t.Setenv("RECUR_HOME", t.TempDir())
 	a, err := agent.New(t.TempDir())
@@ -21,24 +22,24 @@ func pickerModel(t *testing.T) model {
 		t.Fatal(err)
 	}
 	t.Cleanup(a.Close)
-	return newModel(a, a.REPL.Dir)
+	return newModel(a, a.REPL.Dir), a
 }
 func enterPicker(m model) model {
 	next, _, _ := m.pickerKey(tea.KeyMsg{Type: tea.KeyEnter})
-	return next.(model)
+	return settle(next.(model))
 }
 
 func TestModelPickerFetchAndEffortKeys(t *testing.T) {
-	m := pickerModel(t)
+	m, a := pickerModel(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"data":[{"id":"first"},{"id":"second"}]}`)
 	}))
 	defer server.Close()
-	if err := m.a.AddProvider("test", agent.Provider{BaseURL: server.URL}); err != nil {
+	if err := a.AddProvider("test", agent.Provider{BaseURL: server.URL}); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.a.Select("test", "original", "low"); err != nil {
+	if err := a.Select("test", "original", "low"); err != nil {
 		t.Fatal(err)
 	}
 	cmd := m.openPicker("model")
@@ -54,13 +55,13 @@ func TestModelPickerFetchAndEffortKeys(t *testing.T) {
 	}
 	next, _, _ = m.pickerKey(tea.KeyMsg{Type: tea.KeyDown})
 	m = enterPicker(next.(model))
-	if m.menuKind != "" || m.a.Settings().Model != "second" || m.a.Settings().Effort != "medium" {
+	if m.menuKind != "" || a.Settings().Model != "second" || a.Settings().Effort != "medium" {
 		t.Fatal("model selection not applied")
 	}
 }
 
 func TestProviderWizardMasksKeyAndDoesNotSaveDraftToHistory(t *testing.T) {
-	m := pickerModel(t)
+	m, a := pickerModel(t)
 	m.openPicker("login")
 	if last := m.menu[len(m.menu)-1]; last.name != "Add" || last.icon != "+" {
 		t.Fatal("missing final Add row")
@@ -75,28 +76,30 @@ func TestProviderWizardMasksKeyAndDoesNotSaveDraftToHistory(t *testing.T) {
 		}
 		m = enterPicker(m)
 	}
-	p, ok := m.a.Settings().Providers["custom"]
+	p, ok := a.Settings().Providers["custom"]
 	if !ok || p.APIKey != "secret-key" {
 		t.Fatalf("provider not saved: %+v", p)
 	}
-	if len(m.a.History) != 0 || strings.Contains(fmt.Sprint(m.entries), "secret-key") {
+	if len(a.History) != 0 || strings.Contains(fmt.Sprint(m.entries), "secret-key") {
 		t.Fatal("credentials leaked into history")
 	}
 }
 
 func TestCancelledPickerIgnoresLateModelsAndPreservesSession(t *testing.T) {
-	m := pickerModel(t)
-	previous := m.a.Settings().Model
+	m, a := pickerModel(t)
+	m, a, release := heldModel(t, "")
+	m = startBusy(t, m)
+	defer release()
+	previous := a.Settings().Model
 	m.menuKind = "model"
 	m.menuGeneration = 2
 	next, _, _ := m.pickerKey(tea.KeyMsg{Type: tea.KeyEsc})
 	m = next.(model)
-	next, _ = m.Update(modelChoices{generation: 2, models: []agent.ModelChoice{{Provider: "x", Model: "late"}}})
+	next, _ = m.Update(modelChoices{generation: 2, models: []control.ModelInfo{{Provider: "x", Model: "late"}}})
 	m = next.(model)
-	if m.menuKind != "" || len(m.menu) != 0 || m.a.Settings().Model != previous {
+	if m.menuKind != "" || len(m.menu) != 0 || a.Settings().Model != previous {
 		t.Fatal("late response revived cancelled picker")
 	}
-	m.busy = true
 	next, cmd := m.runCommand("/model")
 	m = next.(model)
 	if cmd != nil || m.menuKind != "" {
@@ -105,7 +108,7 @@ func TestCancelledPickerIgnoresLateModelsAndPreservesSession(t *testing.T) {
 }
 
 func TestModelPickerListsAllProvidersAndSelectsItsProvider(t *testing.T) {
-	m := pickerModel(t)
+	m, a := pickerModel(t)
 	serve := func(models string) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -116,11 +119,11 @@ func TestModelPickerListsAllProvidersAndSelectsItsProvider(t *testing.T) {
 	defer one.Close()
 	defer two.Close()
 	for name, server := range map[string]*httptest.Server{"one": one, "two": two} {
-		if err := m.a.AddProvider(name, agent.Provider{BaseURL: server.URL}); err != nil {
+		if err := a.AddProvider(name, agent.Provider{BaseURL: server.URL}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := m.a.Select("one", "alpha", "low"); err != nil {
+	if err := a.Select("one", "alpha", "low"); err != nil {
 		t.Fatal(err)
 	}
 	cmd := m.openPicker("model")
@@ -140,7 +143,7 @@ func TestModelPickerListsAllProvidersAndSelectsItsProvider(t *testing.T) {
 		}
 	}
 	m = enterPicker(m)
-	if s := m.a.Settings(); s.Provider != "two" || s.Model != "beta" {
+	if s := a.Settings(); s.Provider != "two" || s.Model != "beta" {
 		t.Fatalf("provider not switched with model: %+v", s)
 	}
 }
@@ -230,7 +233,7 @@ func TestCredentialDestinationInLoginAndModelNotices(t *testing.T) {
 		t.Fatalf("provider created notice missing destination: %v", m.entries)
 	}
 	// Verify secret key is not leaked
-	if strings.Contains(entriesStr, "secret-proj-key") || strings.Contains(fmt.Sprint(m.a.History), "secret-proj-key") {
+	if strings.Contains(entriesStr, "secret-proj-key") || strings.Contains(fmt.Sprint(a.History), "secret-proj-key") {
 		t.Fatal("secret key leaked into entries or history")
 	}
 

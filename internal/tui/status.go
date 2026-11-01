@@ -271,8 +271,8 @@ func renderBottomBar(width int, left, right string) string {
 
 func (m model) fallbackStatus() (string, string) {
 	var provider, model, effort string
-	if m.a != nil {
-		s := m.a.Settings()
+	if m.ctl != nil {
+		s := m.ctl.Settings()
 		provider, model, effort = s.Provider, s.Model, s.Effort
 	}
 	mdl := model
@@ -313,9 +313,9 @@ func (m *model) triggerStatusRefresh(eventVars map[string]string) tea.Cmd {
 
 	var settings agent.Settings
 	var historyPath string
-	if m.a != nil {
-		settings = m.a.Settings()
-		historyPath = m.a.HistoryPath
+	if m.ctl != nil {
+		settings = m.ctl.Settings()
+		historyPath = m.ctl.HistoryPath()
 	}
 
 	leftCmds := DefaultStatusLeft
@@ -344,9 +344,10 @@ func (m *model) triggerStatusRefresh(eventVars map[string]string) tea.Cmd {
 	} else if _, ok := meta["RECUR_CTX_SIZE"]; !ok {
 		meta["RECUR_CTX_SIZE"] = ""
 	}
-	if m.cancelling {
+	opState := m.ctl.Status()
+	if opState.Cancelling {
 		meta["RECUR_STATE"] = "cancelling"
-	} else if m.busy {
+	} else if opState.Busy {
 		meta["RECUR_STATE"] = "busy"
 	} else {
 		meta["RECUR_STATE"] = "idle"

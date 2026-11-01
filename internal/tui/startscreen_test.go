@@ -8,7 +8,7 @@ import (
 )
 
 func TestStartScreenShowsVersionAndSetupHint(t *testing.T) {
-	m := pickerModel(t)
+	m, _ := pickerModel(t)
 	Version = "1.2.3"
 	m.refresh(true)
 	view := m.timeline()
@@ -20,13 +20,13 @@ func TestStartScreenShowsVersionAndSetupHint(t *testing.T) {
 	m.input.SetValue("hello")
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
-	if cmd != nil || m.busy {
+	if cmd != nil || m.ctl.Status().Busy {
 		t.Fatal("turn started without provider and model")
 	}
 }
 
 func TestStartScreenShowsUpdateHint(t *testing.T) {
-	m := pickerModel(t)
+	m, _ := pickerModel(t)
 	Version = "0.2.2"
 	m.latest = "v0.2.3"
 	m.refresh(true)

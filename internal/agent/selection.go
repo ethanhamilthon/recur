@@ -18,9 +18,13 @@ func (a *Agent) selection() *Selection {
 	return &Selection{a.settings.Provider, a.settings.Model, a.settings.Effort}
 }
 
-func (a *Agent) SessionInfo() map[string]any {
+func (a *Agent) SessionInfo() map[string]any { return a.SessionInfoFor(a.Records()) }
+
+// SessionInfoFor describes the session using a display snapshot, so callers that
+// must not read a.records while a turn runs can pass their own copy.
+func (a *Agent) SessionInfoFor(records []Record) map[string]any {
 	var size any
-	for _, r := range a.Records() {
+	for _, r := range records {
 		if r.Meta != nil && r.Meta.RequestID != "" {
 			size = nil
 			if r.Meta.ContextInput != nil {

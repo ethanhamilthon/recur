@@ -17,3 +17,10 @@ group; unaccepted instructions and drafts are preserved for recovery. recur view
 queues captured images for the same safe request boundary; recur docs images
 describes limits and persistence. recur notify delivery is described in recur
 docs headless.
+
+The JSON transport uses the same rules. `input` while a turn runs is queued as
+steering; `steer` is the explicit form and is rejected when no turn runs. `recall`
+returns the newest unaccepted instruction and fails once it has been accepted.
+`stop` cancels the active turn; its terminal `done` lists unaccepted instructions
+in `unsent`, so a client can resubmit them. Acceptance is reported by the
+`user` event with `steering: true`. See recur docs headless for the table.

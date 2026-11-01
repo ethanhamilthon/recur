@@ -61,8 +61,7 @@ Migrating legacy hooks:
 events = ["turn_end"]
 ```
 
-In headless runs (`recur -prompt '...'` or `recur --mode jsonl`), implicit hooks
-are disabled. Hooks only run if an explicit configuration file is provided via
+In headless runs (`recur --mode jsonl`), implicit hooks are disabled. Hooks only run if an explicit configuration file is provided via
 `--config PATH`. Combine with `--no-extend` to avoid inheriting global hooks.
 
 ## Delivery and Execution
@@ -204,8 +203,8 @@ Input:
   `RECUR_MESSAGE_FILE`.
 - `steer_accepted`: active turn accepted a queued message. `RECUR_MESSAGE_FILE`.
 - `notify_received`: `recur notify` delivered a message. `RECUR_NOTIFY_FILE`.
-- `image_attached`: an image was attached. `RECUR_IMAGE_SOURCE` (`paste` or
-  `view`).
+- `image_attached`: an image was attached. `RECUR_IMAGE_SOURCE` (`paste`,
+  `view`, or `input` for an image sent in a headless request).
 
 Model:
 - `model_change`: `/model` changed selection. `RECUR_PREV_PROVIDER`,

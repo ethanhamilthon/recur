@@ -234,8 +234,8 @@ See `recur docs hooks` for full hook details and lifecycle events.
 
 ## Headless Mode Hooks
 
-In headless runs (`recur -prompt '...'` or `recur --mode jsonl`), implicit hooks
-defined in `./recur.toml` or `$RECUR_HOME/config.toml` are disabled. Hooks only run
+In headless runs (`recur --mode jsonl`), implicit hooks defined in
+`./recur.toml` or `$RECUR_HOME/config.toml` are disabled. Hooks only run
 when an explicit configuration file is provided via `--config PATH`. To prevent
 inheriting global hooks in headless mode, combine with `--no-extend`.
 

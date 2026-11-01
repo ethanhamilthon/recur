@@ -1,23 +1,23 @@
 package tui
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
 	"path/filepath"
-	"recur/internal/agent"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"recur/internal/agent"
 )
 
 func TestEnterExecutesSelectedCommandWithoutExtraConfirmation(t *testing.T) {
 	for _, text := range []string{"/", "/he", "/help"} {
-		m := newModel(&agent.Agent{}, "/project")
+		m, _ := testModel(t, nil)
 		m.input.SetValue(text)
 		if text == "/" {
 			m.selected = 1
 		}
-		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-		m = next.(model)
-		if cmd != nil || m.busy || len(m.entries) != 1 || !strings.Contains(m.entries[0].Text, "keyboard") && !strings.Contains(m.entries[0].Text, "Enter:") {
+		m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
+		if m.ctl.Status().Busy || len(m.entries) != 1 || !strings.Contains(m.entries[0].Text, "Enter:") {
 			t.Fatalf("%q: command not executed immediately: %+v", text, m.entries)
 		}
 		if m.input.Value() != "" {
@@ -28,26 +28,26 @@ func TestEnterExecutesSelectedCommandWithoutExtraConfirmation(t *testing.T) {
 
 func TestSlashTextIsOrdinarySteeringWithoutCommandCompletion(t *testing.T) {
 	for _, text := range []string{"/tmp/example.go", "/unknown", "/help me with this", "/new\nexplain this", "/resume missing-id"} {
-		m := newModel(&agent.Agent{}, "/project")
-		m.busy, m.steering = true, &agent.Steering{}
+		m, release := busyModel(t)
+		before := len(m.entries)
 		m.input.SetValue(text)
-		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-		m = next.(model)
-		accepted := m.steering.TakeInputs()
-		if len(accepted) != 1 || accepted[0].Text != text || len(m.entries) != 0 {
-			t.Fatalf("%q: got accepted=%v, entries=%v", text, accepted, m.entries)
+		m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
+		queued := m.ctl.Status().Queued
+		if len(queued) != 1 || queued[0].Text != text || len(m.entries) != before {
+			t.Fatalf("%q: got queued=%v, entries=%v", text, queued, m.entries)
 		}
+		release()
+		awaitIdle(t, m)
 	}
 }
 
 func TestDismissedCompletionAllowsLiteralCommandText(t *testing.T) {
-	m := newModel(&agent.Agent{}, "/project")
-	m.busy, m.steering = true, &agent.Steering{}
+	m, release := busyModel(t)
+	defer release()
 	m.input.SetValue("/help")
 	m.hideCompletion = true
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = next.(model)
-	if got := m.steering.TakeInputs(); len(got) != 1 || got[0].Text != "/help" {
+	m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if got := m.ctl.Status().Queued; len(got) != 1 || got[0].Text != "/help" {
 		t.Fatalf("dismissed completion still executed command: %v", got)
 	}
 }
@@ -68,25 +68,24 @@ func TestNavigationCommandsAndUnsentSessionNotSaved(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := newModel(writer, cwd)
+	defer m.ctl.Close()
 	for _, r := range "/help" {
 		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 		m = next.(model)
 	}
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = next.(model)
+	m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if len(m.entries) == 0 || !strings.Contains(m.entries[len(m.entries)-1].Text, "/new") {
 		t.Fatalf("help failed: %+v", m.entries)
 	}
 	m.input.SetValue("/new")
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = next.(model)
+	m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
 	m.input.SetValue("/quit")
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
 	if cmd == nil {
 		t.Fatal("/quit did not exit")
 	}
-	if sessions, _ := m.a.Sessions(); len(sessions) != 1 {
+	if sessions, _ := writer.Sessions(); len(sessions) != 1 {
 		t.Fatalf("unsent /new session was saved on /quit: %v", sessions)
 	}
 }
@@ -104,13 +103,13 @@ func TestRenameSessionPersistsTitle(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := newModel(a, cwd)
+	defer m.ctl.Close()
 	run := func(text string) {
 		m.input.SetValue(text)
-		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-		m = next.(model)
+		m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
 	}
 	title := func() string {
-		sessions, err := m.a.Sessions()
+		sessions, err := a.Sessions()
 		if err != nil || len(sessions) != 1 {
 			t.Fatalf("sessions: %v %v", sessions, err)
 		}
@@ -124,14 +123,14 @@ func TestRenameSessionPersistsTitle(t *testing.T) {
 	if got := title(); got != "My project" {
 		t.Fatalf("title after rename = %q", got)
 	}
-	id := strings.TrimSuffix(filepath.Base(m.a.HistoryPath), ".jsonl")
-	if err := m.a.NewSession(); err != nil {
+	id := strings.TrimSuffix(filepath.Base(a.HistoryPath), ".jsonl")
+	if err := a.NewSession(); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.a.Resume(id); err != nil {
+	if err := a.Resume(id); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.a.Save(); err != nil {
+	if err := a.Save(); err != nil {
 		t.Fatal(err)
 	}
 	if got := title(); got != "My project" {

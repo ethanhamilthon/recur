@@ -89,5 +89,6 @@ and `status_right` command arrays under `[ui]`:
   `max_result_lines`, and `max_thinking_lines`; setting a limit to zero hides
   that block's body while preserving headers.
 - `recur docs clipboard` covers image paste shortcuts (`Ctrl+V`).
-- `recur docs headless` covers `--prompt` and `--mode jsonl` non-interactive
-  transports.
+- `recur docs headless` covers the `--mode jsonl` non-interactive transport. The
+  terminal interface and that transport run the same operations: input,
+  steering, recall, stop, session changes, commands, and provider setup.

@@ -4,87 +4,55 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
-	"fmt"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"recur/internal/agent"
 	"strings"
 	"testing"
 	"time"
+
+	"recur/internal/agent"
 )
 
-func TestHeadlessTransportsAndExplicitResume(t *testing.T) {
-	for _, mode := range []string{"jsonl"} {
-		t.Run(mode, func(t *testing.T) {
-			home := t.TempDir()
-			t.Setenv("RECUR_HOME", home)
-			count := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				count++
-				w.Header().Set("Content-Type", "text/event-stream")
-				fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}\n\n")
-			}))
-			defer server.Close()
-			config := fmt.Sprintf("provider='test'\nmodel='m'\n[providers.test]\nbase_url=%q\n", server.URL)
-			if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600); err != nil {
-				t.Fatal(err)
-			}
-			input := "{\"prompt\":\"first\"}\n{\"prompt\":\"second\"}\n"
-			var out, diagnostics bytes.Buffer
-			if err := Run(context.Background(), []string{"--mode", mode}, strings.NewReader(input), &out, &diagnostics); err != nil {
-				t.Fatal(err)
-			}
-			if count != 2 || !strings.Contains(out.String(), "answer") || strings.Contains(out.String(), "\x1b") {
-				t.Fatalf("bad output: %s", out.String())
-			}
-			files, err := filepath.Glob(filepath.Join(home, "sessions", "*", "*.jsonl"))
-			if err != nil || len(files) != 1 {
-				t.Fatalf("sessions: %v %v", files, err)
-			}
-			id := strings.TrimSuffix(filepath.Base(files[0]), ".jsonl")
-			if mode == "jsonl" {
-				decoder := json.NewDecoder(bytes.NewReader(out.Bytes()))
-				done := 0
-				for decoder.More() {
-					var event map[string]any
-					if err = decoder.Decode(&event); err != nil {
-						t.Fatal(err)
-					}
-					if event["type"] == "done" {
-						done++
-					}
-				}
-				if done != 2 {
-					t.Fatalf("done events=%d", done)
-				}
-			}
-			out.Reset()
-			if err = Run(context.Background(), []string{"--prompt", "continued", "--resume", id}, strings.NewReader(""), &out, &diagnostics); err != nil {
-				t.Fatal(err)
-			}
-			if out.String() != "answer\n" {
-				t.Fatalf("--prompt must print only the answer: %q", out.String())
-			}
-			files, _ = filepath.Glob(filepath.Join(home, "sessions", "*", "*.jsonl"))
-			if len(files) != 1 {
-				t.Fatal("resume created extra session")
-			}
-			if err = Run(context.Background(), []string{"--prompt", "fresh"}, strings.NewReader(""), &out, &diagnostics); err != nil {
-				t.Fatal(err)
-			}
-			files, _ = filepath.Glob(filepath.Join(home, "sessions", "*", "*.jsonl"))
-			if len(files) != 2 {
-				t.Fatal("headless default did not create new session")
-			}
-		})
+func TestHeadlessSessionsResumeAndFreshStart(t *testing.T) {
+	p := newProvider(t, nil)
+	home := p.configure(t, "")
+	c := startJSON(t)
+	c.send(`{"id":"r1","type":"input","text":"first"}`)
+	first := str(c.await("first", resultFor("r1")), "turn")
+	c.await("first done", doneFor(first))
+	c.send(`{"id":"r2","type":"input","text":"second"}`)
+	second := str(c.await("second", resultFor("r2")), "turn")
+	c.await("second done", doneFor(second))
+	if err := c.finish(); err != nil {
+		t.Fatal(err)
+	}
+	files, err := filepath.Glob(filepath.Join(home, "sessions", "*", "*.jsonl"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("sessions: %v %v", files, err)
+	}
+	id := strings.TrimSuffix(filepath.Base(files[0]), ".jsonl")
+
+	resumed := startJSON(t, "--resume", id)
+	state := resumed.await("ready", typeIs("ready"))
+	if got := state["state"].(map[string]any)["session"].(map[string]any)["id"]; got != id {
+		t.Fatalf("resume opened %v, want %s", got, id)
+	}
+	if err := resumed.finish(); err != nil {
+		t.Fatal(err)
+	}
+	fresh := startJSON(t)
+	fresh.await("ready", typeIs("ready"))
+	if err := fresh.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if files, _ = filepath.Glob(filepath.Join(home, "sessions", "*", "*.jsonl")); len(files) != 1 {
+		t.Fatalf("launch without input created a session: %v", files)
 	}
 }
-func TestHeadlessRejectsInvalidInputAndModes(t *testing.T) {
-	for _, args := range [][]string{{"--mode", "bad"}, {"unexpected"}} {
+
+func TestHeadlessRejectsRemovedPromptFlagAndModes(t *testing.T) {
+	for _, args := range [][]string{{"--mode", "bad"}, {"unexpected"}, {"--prompt", "hi"}} {
 		var out bytes.Buffer
 		if err := Run(context.Background(), args, strings.NewReader(""), &out, &out); err == nil {
 			t.Fatalf("accepted %v", args)
@@ -92,63 +60,11 @@ func TestHeadlessRejectsInvalidInputAndModes(t *testing.T) {
 	}
 	t.Setenv("RECUR_HOME", t.TempDir())
 	var out, diagnostics bytes.Buffer
-	if err := Run(context.Background(), []string{"--mode", "jsonl"}, strings.NewReader("bad-json\n"), &out, &diagnostics); err == nil {
-		t.Fatal("invalid JSONL accepted")
+	if err := Run(context.Background(), []string{"--mode", "jsonl"}, strings.NewReader("bad-json\n"), &out, &diagnostics); err != nil {
+		t.Fatalf("a bad record must not end the session: %v", err)
 	}
-}
-
-func TestIdleHeadlessNotificationStartsTurn(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("RECUR_HOME", home)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n")
-	}))
-	defer server.Close()
-	config := fmt.Sprintf("provider='test'\nmodel='m'\n[providers.test]\nbase_url=%q\n", server.URL)
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600); err != nil {
-		t.Fatal(err)
-	}
-	in, input := io.Pipe()
-	output, out := io.Pipe()
-	defer in.Close()
-	defer output.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { defer out.Close(); done <- Run(ctx, []string{"--mode", "jsonl"}, in, out, io.Discard) }()
-	decoder := json.NewDecoder(output)
-	var event struct {
-		Type    string
-		Session map[string]any
-	}
-	if err := decoder.Decode(&event); err != nil {
-		t.Fatal(err)
-	}
-	id := event.Session["id"].(string)
-	var diagnostic bytes.Buffer
-	if err := Run(ctx, []string{"notify", "-s", id, "hello </notify>"}, strings.NewReader(""), io.Discard, &diagnostic); err != nil {
-		t.Fatal(err)
-	}
-	sawNotice := false
-	for {
-		var next struct{ Type, Text string }
-		if err := decoder.Decode(&next); err != nil {
-			t.Fatal(err)
-		}
-		if next.Type == "notice" && strings.Contains(next.Text, "hello &lt;/notify&gt;") {
-			sawNotice = true
-		}
-		if next.Type == "done" {
-			break
-		}
-	}
-	if !sawNotice {
-		t.Fatal("idle notification not delivered as a notice")
-	}
-	input.Close()
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	if !strings.Contains(out.String(), `"invalid_json"`) {
+		t.Fatalf("protocol error missing: %s", out.String())
 	}
 }
 
@@ -171,6 +87,37 @@ func TestHeadlessCancellationWhileWaitingForInput(t *testing.T) {
 	}
 }
 
+func TestHeadlessInterruptStopsActiveWorkAndSavesSession(t *testing.T) {
+	hold := make(chan struct{})
+	p := newProvider(t, hold)
+	home := p.configure(t, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	inReader, inWriter := io.Pipe()
+	outReader, outWriter := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		defer outWriter.Close()
+		done <- Run(ctx, []string{"--mode", "jsonl"}, inReader, outWriter, io.Discard)
+	}()
+	c := &client{t: t, in: inWriter, done: make(chan error, 1), fresh: make(chan struct{}, 1)}
+	go c.collect(outReader)
+	c.send(`{"id":"r1","type":"input","text":"interrupt me"}`)
+	turn := str(c.await("started", resultFor("r1")), "turn")
+	<-p.started
+	cancel()
+	if err := <-done; err != context.Canceled {
+		t.Fatalf("interrupted run returned %v", err)
+	}
+	if d := c.await("cancelled", doneFor(turn)); d["status"] != "cancelled" {
+		t.Fatalf("done = %v", d)
+	}
+	if files, _ := filepath.Glob(filepath.Join(home, "sessions", "*", "*.jsonl")); len(files) != 1 {
+		t.Fatalf("interrupted session not saved: %v", files)
+	}
+	close(hold)
+	inWriter.Close()
+}
+
 func TestHeadlessRejectsOwnedSession(t *testing.T) {
 	t.Setenv("RECUR_HOME", t.TempDir())
 	cwd, err := os.Getwd()
@@ -186,7 +133,7 @@ func TestHeadlessRejectsOwnedSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := writer.SessionInfo()["id"].(string)
-	err = Run(context.Background(), []string{"--prompt", "x", "--resume", id}, strings.NewReader(""), io.Discard, io.Discard)
+	err = Run(context.Background(), []string{"--mode", "jsonl", "--resume", id}, strings.NewReader(""), io.Discard, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "in use") {
 		t.Fatalf("second client opened an owned session: %v", err)
 	}
@@ -224,8 +171,7 @@ func TestShellCommandsUseEndpoint(t *testing.T) {
 	if err = os.WriteFile(path, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	err = Run(context.Background(), []string{"view", path, path, path, path}, strings.NewReader(""), io.Discard, io.Discard)
-	if err != nil {
+	if err = Run(context.Background(), []string{"view", path, path, path, path}, strings.NewReader(""), io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if err = Run(context.Background(), []string{"view", path}, strings.NewReader(""), io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "four images") {

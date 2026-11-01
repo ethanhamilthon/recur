@@ -177,7 +177,6 @@ func TestComposerTypingReplacesSelection(t *testing.T) {
 
 func TestComposerCtrlCCopiesInsteadOfQuit(t *testing.T) {
 	m := selectBrave(t)
-	m.busy = true // Ctrl+C would otherwise request cancellation
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	m = next.(model)
 	if cmd == nil {
@@ -189,7 +188,7 @@ func TestComposerCtrlCCopiesInsteadOfQuit(t *testing.T) {
 	if m.selectedComposerText() != "brave" {
 		t.Fatal("copy cleared the selection")
 	}
-	if m.cancelling {
+	if m.ctl.Status().Cancelling {
 		t.Fatal("copy requested cancellation")
 	}
 }

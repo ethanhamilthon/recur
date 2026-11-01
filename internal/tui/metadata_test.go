@@ -38,7 +38,8 @@ func TestBottomBarShortensWorkingDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := model{a: a, cwd: filepath.Join(home, "work", "demo"), width: 120}
+	m := newModel(a, filepath.Join(home, "work", "demo"))
+	m.width = 120
 	if bar := m.bottomBar(); !strings.Contains(bar, "~/work/demo") {
 		t.Fatalf("status bar does not show a shortened path: %q", bar)
 	}

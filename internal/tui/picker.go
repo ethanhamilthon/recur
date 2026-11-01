@@ -1,38 +1,21 @@
 package tui
 
 import (
-	"context"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"recur/internal/agent"
+	"recur/internal/control"
 )
 
+// modelChoices carries the result of listing models for the /model picker.
 type modelChoices struct {
 	generation int
-	models     []agent.ModelChoice
-	errs       map[string]error
-}
-
-func isProjectConfig(dest, cwd string, a *agent.Agent) bool {
-	if dest == "" {
-		return false
-	}
-	if a != nil && a.LocalConfig != "" {
-		return true
-	}
-	if filepath.Base(dest) == "recur.toml" {
-		return true
-	}
-	if cwd != "" && (filepath.Clean(dest) == filepath.Clean(filepath.Join(cwd, "recur.toml")) ||
-		filepath.Clean(dest) == filepath.Clean(filepath.Join(cwd, ".recur", "config.toml"))) {
-		return true
-	}
-	return false
+	models     []control.ModelInfo
+	errs       map[string]string
+	err        error
 }
 
 func (m *model) openPicker(kind string) tea.Cmd {
@@ -43,38 +26,34 @@ func (m *model) openPicker(kind string) tea.Cmd {
 	m.input.Reset()
 	m.menuGeneration++
 	if kind == "login" {
-		for name := range m.a.Settings().Providers {
+		settings := m.ctl.Settings()
+		for name := range settings.Providers {
 			m.menu = append(m.menu, command{name: name, description: "Provider"})
 		}
 		sort.Slice(m.menu, func(i, j int) bool { return m.menu[i].name < m.menu[j].name })
 		m.menu = append(m.menu, command{name: "Add", icon: "+", description: "Create provider"})
-		dest := m.a.PrimaryConfig()
-		if dest != "" {
+		if dest := m.ctl.PrimaryConfig(); dest != "" {
 			m.add("notice", fmt.Sprintf("Credentials destination: %s", dest))
 		}
 		return nil
 	}
 	m.effort = 0
 	for i, e := range agent.Efforts {
-		if e == m.a.Settings().Effort {
+		if e == m.ctl.Settings().Effort {
 			m.effort = i
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	m.menuCancel = cancel
-	generation, settings := m.menuGeneration, m.a.Settings()
+	generation, ctl := m.menuGeneration, m.ctl
 	return func() tea.Msg {
-		defer cancel()
-		models, errs := agent.AllModels(ctx, settings.Providers, settings.Environment)
-		return modelChoices{generation, models, errs}
+		resp, err := ctl.Submit(control.Request{Type: "models"})
+		if err != nil {
+			return modelChoices{generation: generation, err: err}
+		}
+		list := resp.Data.(control.ModelList)
+		return modelChoices{generation: generation, models: list.Models, errs: list.Errors}
 	}
 }
 
-// fail reports a picker error inside the pickerKey contract.
-func (m *model) fail(err error) (tea.Model, tea.Cmd, bool) {
-	next, cmd := m.stop("error", err.Error())
-	return next, cmd, true
-}
 func (m *model) closePicker() {
 	m.pasteGeneration++
 	m.pasting = false
@@ -87,6 +66,7 @@ func (m *model) closePicker() {
 	m.input.Placeholder = "Ask anything, or type / for commands"
 	m.input.Reset()
 }
+
 func (m model) pickerKey(key tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	if m.menuKind == "" {
 		return m, nil, false
@@ -117,41 +97,7 @@ func (m model) pickerKey(key tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			return m, nil, true
 		}
 		if m.menuKind == "setup" {
-			value := strings.TrimSpace(m.input.Value())
-			if value == "" && len(m.setup) != 2 { // the API key is optional
-				return m, nil, true
-			}
-			m.setup = append(m.setup, value)
-			m.input.Reset()
-			m.selected = 0
-			m.menu = nil
-			prompts := []string{"Provider name", "HTTP(S) base URL", "API key (optional)"}
-			if len(m.setup) < 3 {
-				m.input.Placeholder = prompts[len(m.setup)]
-				if len(m.setup) == 2 {
-					dest := m.a.PrimaryConfig()
-					if isProjectConfig(dest, m.cwd, m.a) {
-						m.add("notice", fmt.Sprintf("Warning: API key will be saved to project configuration (%s); avoid committing secrets to version control.", dest))
-					}
-				}
-				break
-			}
-			dest := m.a.PrimaryConfig()
-			apiKey := m.setup[2]
-			if apiKey != "" && isProjectConfig(dest, m.cwd, m.a) {
-				m.add("notice", fmt.Sprintf("Warning: API key saved in project configuration (%s); avoid committing secrets.", dest))
-			}
-			err := m.a.AddProvider(m.setup[0], agent.Provider{BaseURL: m.setup[1], APIKey: apiKey})
-			m.closePicker()
-			if err != nil {
-				return m.fail(err)
-			}
-			if dest != "" {
-				m.add("notice", fmt.Sprintf("Provider created in %s. Choose a model with /model.", dest))
-			} else {
-				m.add("notice", "Provider created. Choose a model with /model.")
-			}
-			break
+			return m.finishSetup()
 		}
 		matches := m.completions()
 		if len(matches) == 0 {
@@ -164,33 +110,63 @@ func (m model) pickerKey(key tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			m.selected = 0
 			m.input.Reset()
 			m.input.Placeholder = "Provider name"
-			dest := m.a.PrimaryConfig()
-			if dest != "" {
+			if dest := m.ctl.PrimaryConfig(); dest != "" {
 				m.add("notice", fmt.Sprintf("Credentials will be saved to %s", dest))
 			}
 			break
 		}
-		settings := m.a.Settings()
+		var req control.Request
 		if kind == "model" {
-			settings.Provider = matches[m.selected%len(matches)].description
-			settings.Model, settings.Effort = choice, agent.Efforts[m.effort]
+			provider := matches[m.selected%len(matches)].description
+			req = control.Request{Type: "select_model", Args: map[string]string{"provider": provider, "model": choice, "effort": agent.Efforts[m.effort]}}
 		} else {
-			settings.Provider = choice
+			req = control.Request{Type: "select_provider", Args: map[string]string{"name": choice}}
 		}
-		err := m.a.Select(settings.Provider, settings.Model, settings.Effort)
+		_, err := m.ctl.Submit(req)
 		m.closePicker()
 		if err != nil {
-			return m.fail(err)
-		}
-		dest := m.a.PrimaryConfig()
-		if dest != "" {
-			m.add("notice", fmt.Sprintf("Selected %s · %s/%s (saved to %s)", settings.Provider, settings.Model, settings.Effort, dest))
-		} else {
-			m.add("notice", fmt.Sprintf("Selected %s · %s/%s", settings.Provider, settings.Model, settings.Effort))
+			next, cmd := m.reject(err)
+			return next, cmd, true
 		}
 	default:
 		return m, nil, false
 	}
 	m.refresh(true)
+	return m, nil, true
+}
+
+// finishSetup collects the provider setup prompts and adds the provider. The
+// API key is optional, so an empty third step is valid.
+func (m model) finishSetup() (tea.Model, tea.Cmd, bool) {
+	value := strings.TrimSpace(m.input.Value())
+	if value == "" && len(m.setup) != 2 {
+		return m, nil, true
+	}
+	m.setup = append(m.setup, value)
+	m.input.Reset()
+	m.selected = 0
+	m.menu = nil
+	prompts := []string{"Provider name", "HTTP(S) base URL", "API key (optional)"}
+	if len(m.setup) < 3 {
+		m.input.Placeholder = prompts[len(m.setup)]
+		if len(m.setup) == 2 {
+			if dest := m.ctl.PrimaryConfig(); m.ctl.ProjectConfig(dest) {
+				m.add("notice", fmt.Sprintf("Warning: API key will be saved to project configuration (%s); avoid committing secrets to version control.", dest))
+			}
+		}
+		m.refresh(true)
+		return m, nil, true
+	}
+	dest := m.ctl.PrimaryConfig()
+	if m.setup[2] != "" && m.ctl.ProjectConfig(dest) {
+		m.add("notice", fmt.Sprintf("Warning: API key saved in project configuration (%s); avoid committing secrets.", dest))
+	}
+	_, err := m.ctl.Submit(control.Request{Type: "add_provider", Args: map[string]string{"name": m.setup[0], "base_url": m.setup[1], "api_key": m.setup[2]}})
+	m.closePicker()
+	m.refresh(true)
+	if err != nil {
+		next, cmd := m.reject(err)
+		return next, cmd, true
+	}
 	return m, nil, true
 }

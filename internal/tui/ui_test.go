@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -73,14 +74,15 @@ func TestComposerIsInScrollableTimeline(t *testing.T) {
 	if m.viewport.YOffset <= before {
 		t.Fatal("PgDn did not scroll")
 	}
-	next, _ = m.Update(agent.Event{Kind: "delta", Text: "streaming"})
+	next, _ = m.Update(agentEvent(agent.Event{Kind: "delta", Text: "streaming"}))
 	m = next.(model)
 	if m.viewport.YOffset != before+m.viewport.Height {
 		t.Fatal("streaming should not steal scroll position")
 	}
 }
 func TestCommandCompletionAndHelp(t *testing.T) {
-	m := newModel(&agent.Agent{}, "/project")
+	m, a, release := heldModel(t, "")
+	defer release()
 	m.input.SetValue("/")
 	if len(m.completions()) != len(commands) {
 		t.Fatal("missing commands")
@@ -97,15 +99,14 @@ func TestCommandCompletionAndHelp(t *testing.T) {
 	if !strings.Contains(m.entries[len(m.entries)-1].Text, "/new") {
 		t.Fatal("help must list commands")
 	}
-	if len(m.a.History) != 0 {
+	if len(a.History) != 0 {
 		t.Fatal("commands must not be sent to model")
 	}
+	m = startBusy(t, m)
 	m.input.SetValue("/nope")
-	m.busy = true
-	m.steering = &agent.Steering{}
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
-	if len(m.queued) != 1 || m.queued[0].Text != "/nope" {
+	if queued := m.ctl.Status().Queued; len(queued) != 1 || queued[0].Text != "/nope" {
 		t.Fatal("slash-prefixed text must be submitted as an ordinary instruction")
 	}
 }
@@ -119,7 +120,7 @@ func TestNewCommand(t *testing.T) {
 	a.History = []json.RawMessage{json.RawMessage(`{"role":"user","content":"old"}`)}
 	m := newModel(a, "/project")
 	next, _ := m.runCommand("/new")
-	m = next.(model)
+	m = settle(next.(model))
 	if len(a.History) != 0 || len(m.entries) != 0 {
 		t.Fatal("new should clear timeline and history")
 	}
@@ -223,40 +224,31 @@ func TestInputHeightMatchesWrappedRows(t *testing.T) {
 func TestCommandsWaitForTurnCompletion(t *testing.T) {
 	for _, name := range []string{"/new", "/quit"} {
 		t.Run(name, func(t *testing.T) {
-			t.Setenv("RECUR_HOME", t.TempDir())
-			a, err := agent.New(t.TempDir())
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer a.Close()
+			m, a, release := heldModel(t, "")
 			a.History = []json.RawMessage{json.RawMessage(`{"role":"user","content":"keep"}`)}
-			m := newModel(a, "/project")
-			m.busy = true
-			n := int64(123)
-			m.contextInput = &n
-			cancelled := false
-			m.cancel = func() { cancelled = true }
-			next, cmd := m.runCommand(name)
-			m = next.(model)
-			if !cancelled || cmd != nil || !m.busy || m.pending != name || len(a.History) != 1 {
-				t.Fatal("command did not wait for turn completion")
+			m = startBusy(t, m)
+			m.input.SetValue(name)
+			m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
+			if !m.ctl.Status().Cancelling {
+				t.Fatal("command did not cancel the active turn")
 			}
-			next, cmd = m.Update(agent.Event{Kind: "done"})
-			m = next.(model)
-			if m.busy || m.pending != "" {
-				t.Fatal("pending command not consumed")
+			select {
+			case <-m.ctl.Closed():
+				t.Fatal("closed before the turn ended")
+			default:
 			}
+			release()
+			m = awaitIdle(t, m)
 			if name == "/new" {
-				if len(a.History) != 0 || len(m.entries) != 0 || m.contextInput != nil {
-					t.Fatal("new did not reset session")
+				if len(a.History) != 0 || len(m.entries) != 0 {
+					t.Fatalf("new did not reset session: history=%d entries=%+v", len(a.History), m.entries)
 				}
-			} else {
-				if cmd == nil {
-					t.Fatal("quit command not issued")
-				}
-				if _, ok := cmd().(tea.QuitMsg); !ok {
-					t.Fatal("expected quit")
-				}
+				return
+			}
+			select {
+			case <-m.ctl.Closed():
+			case <-time.After(5 * time.Second):
+				t.Fatal("quit command did not close the session")
 			}
 		})
 	}

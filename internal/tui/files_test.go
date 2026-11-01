@@ -288,7 +288,7 @@ func TestFileCompletionEnterDoesNotSubmit(t *testing.T) {
 	if got := m.input.Value(); got != "@main.go" {
 		t.Fatalf("first enter value = %q, want %q", got, "@main.go")
 	}
-	if m.busy {
+	if m.ctl.Status().Busy {
 		t.Fatal("first Enter submitted turn while accepting file")
 	}
 	if m.hasFileCompletions() {
@@ -315,15 +315,14 @@ func TestFileCompletionEnterWithImageAcceptsFileFirst(t *testing.T) {
 	if len(m.images) != 1 {
 		t.Fatal("image was discarded on file completion acceptance")
 	}
-	if m.busy {
+	if m.ctl.Status().Busy {
 		t.Fatal("enter submitted turn immediately with image")
 	}
 }
 
 func TestFileCompletionEnterWhenBusyAcceptsFileFirst(t *testing.T) {
-	m := newModel(&agent.Agent{}, t.TempDir())
-	m.busy = true
-	m.steering = &agent.Steering{}
+	m, _, _ := heldModel(t, "")
+	m = startBusy(t, m)
 	m.fileCompletions = []string{"README.md"}
 	m.fileTokenStart = 0
 	m.fileTokenEnd = 5
@@ -336,14 +335,14 @@ func TestFileCompletionEnterWhenBusyAcceptsFileFirst(t *testing.T) {
 	if got := m.input.Value(); got != "@README.md" {
 		t.Fatalf("busy enter value = %q, want %q", got, "@README.md")
 	}
-	if len(m.queued) != 0 {
+	if len(m.ctl.Status().Queued) != 0 {
 		t.Fatal("enter queued steering immediately instead of accepting file")
 	}
 }
 
 func TestEscClosesActiveCompletionBeforeTurnCancellation(t *testing.T) {
-	m := newModel(&agent.Agent{}, t.TempDir())
-	m.busy = true
+	m, _, _ := heldModel(t, "")
+	m = startBusy(t, m)
 	m.fileCompletions = []string{"file1.go", "file2.go"}
 
 	// First Esc closes completions
@@ -353,21 +352,21 @@ func TestEscClosesActiveCompletionBeforeTurnCancellation(t *testing.T) {
 	if m.hasFileCompletions() {
 		t.Fatal("first Esc did not close completions")
 	}
-	if m.cancelling {
+	if m.ctl.Status().Cancelling {
 		t.Fatal("first Esc cancelled turn instead of closing completions")
 	}
 
-	// Second Esc cancels the busy turn
+	// Second Esc cancels the busy turn; the turn ends with a cancellation notice.
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	m = next.(model)
-	if !m.cancelling {
-		t.Fatal("second Esc did not request cancellation")
+	m = awaitIdle(t, next.(model))
+	if !hasEntry(m, "notice", "Turn cancelled.") {
+		t.Fatal("second Esc did not cancel the turn")
 	}
 }
 
 func TestEscClosesLoadingCompletionBeforeTurnCancellation(t *testing.T) {
-	m := newModel(&agent.Agent{}, t.TempDir())
-	m.busy = true
+	m, _, _ := heldModel(t, "")
+	m = startBusy(t, m)
 	m.fileLoading = true
 
 	// First Esc closes loading menu
@@ -377,7 +376,7 @@ func TestEscClosesLoadingCompletionBeforeTurnCancellation(t *testing.T) {
 	if m.fileLoading {
 		t.Fatal("first Esc did not dismiss loading state")
 	}
-	if m.cancelling {
+	if m.ctl.Status().Cancelling {
 		t.Fatal("first Esc cancelled turn instead of closing loading completion")
 	}
 }
@@ -644,7 +643,8 @@ func TestFileCompletionE2EUpdateTypingBlinkEnterEsc(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0644)
 	_ = os.WriteFile(filepath.Join(dir, "util.go"), []byte("package main"), 0644)
 
-	m := newModel(&agent.Agent{}, dir)
+	m, _, release := heldModel(t, "")
+	m.cwd = dir
 
 	// Genuine Update typing of "@ma"
 	for _, r := range "@ma" {
@@ -722,21 +722,20 @@ func TestFileCompletionE2EUpdateTypingBlinkEnterEsc(t *testing.T) {
 	}
 
 	// Subsequent Enter submits normally: when busy, it queues steering
-	m.busy = true
-	m.steering = &agent.Steering{}
+	m = startBusy(t, m)
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
 
-	if len(m.queued) != 1 || m.queued[0].Text != "@main.go" {
-		t.Fatalf("subsequent Enter did not submit/queue steering: queued = %v", m.queued)
+	if queued := m.ctl.Status().Queued; len(queued) != 1 || queued[0].Text != "@main.go" {
+		t.Fatalf("subsequent Enter did not submit/queue steering: queued = %v", queued)
 	}
 	if m.input.Value() != "" {
 		t.Fatalf("composer not cleared after submit: %q", m.input.Value())
 	}
 
 	// Test Esc dismisses completion and stays dismissed on non-key messages
-	m.busy = false
-	m.queued = nil
+	release()
+	m = awaitIdle(t, m)
 	for _, r := range "@ut" {
 		next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 		m = next.(model)
@@ -785,7 +784,8 @@ func TestFileCompletionWithAttachedImageAndSteering(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main"), 0644)
 
-	m := newModel(&agent.Agent{}, dir)
+	m, _, release := heldModel(t, "")
+	m.cwd = dir
 	m.images = []repl.Image{{URL: "data:image/png;base64,AA==", Path: filepath.Join(dir, "img.png")}}
 
 	for _, r := range "@ma" {
@@ -827,20 +827,22 @@ func TestFileCompletionWithAttachedImageAndSteering(t *testing.T) {
 	}
 
 	// Subsequent Enter while busy queues steering with image
-	m.busy = true
-	m.steering = &agent.Steering{}
+	m = startBusy(t, m)
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
 
-	if len(m.queued) != 1 {
-		t.Fatalf("expected 1 queued steering instruction, got %d", len(m.queued))
+	queued := m.ctl.Status().Queued
+	if len(queued) != 1 {
+		t.Fatalf("expected 1 queued steering instruction, got %d", len(queued))
 	}
-	if m.queued[0].Text != "@main.go" {
-		t.Fatalf("queued text = %q, want @main.go", m.queued[0].Text)
+	if queued[0].Text != "@main.go" {
+		t.Fatalf("queued text = %q, want @main.go", queued[0].Text)
 	}
-	if len(m.queued[0].Images) != 1 {
-		t.Fatalf("queued images = %d, want 1", len(m.queued[0].Images))
+	if len(queued[0].Images) != 1 {
+		t.Fatalf("queued images = %d, want 1", len(queued[0].Images))
 	}
+	release()
+	awaitIdle(t, m)
 }
 
 func TestFileCompletionMultilineUnicode(t *testing.T) {

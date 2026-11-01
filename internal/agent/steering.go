@@ -13,6 +13,7 @@ import (
 type Input struct {
 	Text   string
 	Images []repl.Image
+	Files  []FileAttachment // snapshot taken when the prompt was submitted
 }
 
 func (input Input) Display() string {
@@ -32,11 +33,12 @@ func (a *Agent) addInput(input Input, emit func(Event), steering bool) {
 
 // commitInput appends the input to API history without displaying it.
 func (a *Agent) commitInput(input Input) {
+	text := input.Display() + fileBlocks(input.Files)
 	if len(input.Images) == 0 {
-		a.message("user", input.Text)
+		a.message("user", text)
 		return
 	}
-	parts := []any{map[string]any{"type": "input_text", "text": input.Display() + imageOriginals(input.Images)}}
+	parts := []any{map[string]any{"type": "input_text", "text": text + imageOriginals(input.Images)}}
 	for _, img := range input.Images {
 		parts = append(parts, map[string]any{"type": "input_image", "image_url": img.URL, "detail": "auto"})
 	}
