@@ -256,18 +256,18 @@ func (m *model) composerKey(key tea.KeyMsg) (tea.Cmd, bool) {
 	case "backspace", "delete", "ctrl+h":
 		cmd := m.replaceComposerSelection("")
 		m.refresh(true)
-		return cmd, true
+		return tea.Batch(cmd, m.checkFileCompletion()), true
 	case "alt+enter", "ctrl+j":
 		cmd := m.replaceComposerSelection("\n")
 		m.refresh(true)
-		return cmd, true
+		return tea.Batch(cmd, m.checkFileCompletion()), true
 	case "ctrl+c":
 		return copyText(m.selectedComposerText()), true
 	case "ctrl+x":
 		copied := copyText(m.selectedComposerText())
 		cut := m.replaceComposerSelection("")
 		m.refresh(true)
-		return tea.Batch(copied, cut), true
+		return tea.Batch(copied, cut, m.checkFileCompletion()), true
 	case "ctrl+v":
 		// Clipboard text replaces the selection when the read completes.
 		return nil, false
@@ -282,8 +282,25 @@ func (m *model) composerKey(key tea.KeyMsg) (tea.Cmd, bool) {
 		}
 		cmd := m.replaceComposerSelection(text)
 		m.refresh(true)
-		return cmd, true
+		return tea.Batch(cmd, m.checkFileCompletion()), true
 	}
 	m.inputSel = nil
 	return nil, false
+}
+
+// composerCursorOffset returns the current cursor position as a rune offset into value.
+func (m *model) composerCursorOffset() int {
+	lines := strings.Split(m.input.Value(), "\n")
+	row := min(m.input.Line(), len(lines)-1)
+	if row < 0 {
+		return 0
+	}
+	offset := 0
+	for i := 0; i < row; i++ {
+		offset += len([]rune(lines[i])) + 1
+	}
+	info := m.input.LineInfo()
+	col := info.StartColumn + info.ColumnOffset
+	lineRunes := len([]rune(lines[row]))
+	return offset + min(max(0, col), lineRunes)
 }

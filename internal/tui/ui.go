@@ -74,6 +74,16 @@ type model struct {
 	statusSem               chan struct{}
 	statusInit              bool
 	statusTornDown          bool
+	fileGen, fileDebounceGen int
+	fileLoading              bool
+	fileCompletions          []string
+	fileSelected             int
+	fileTokenStart           int
+	fileTokenEnd             int
+	fileIndexCache           []string
+	fileIndexCacheTime       time.Time
+	fileIndexCwd             string
+	fileScanCancel           context.CancelFunc
 }
 
 func newModel(a *agent.Agent, cwd string) model {
@@ -214,6 +224,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	msg = normalizeTerminalKey(msg)
 	follow := m.viewport.AtBottom()
 	switch v := msg.(type) {
+	case fileDebounceMsg:
+		return m.handleFileDebounce(v)
+	case fileScanMsg:
+		return m.handleFileScan(v)
 	case clipboardResult:
 		cmd := m.acceptClipboard(v)
 		m.refresh(true)
@@ -425,6 +439,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.executeCommand("/quit")
 			}
 		case "esc":
+			if m.fileLoading || m.hasFileCompletions() {
+				m.dismissFileCompletion()
+				m.refresh(true)
+				return m, nil
+			}
 			if len(m.completions()) == 0 && m.busy {
 				m.requestCancel()
 			}
@@ -446,16 +465,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "tab":
+			if m.hasFileCompletions() {
+				cmd := m.acceptFileCompletion()
+				m.refresh(true)
+				return m, cmd
+			}
 			if m.complete() {
 				m.refresh(true)
 				return m, nil
 			}
 		case "up", "down":
+			delta := 1
+			if v.String() == "up" {
+				delta = -1
+			}
+			if m.hasFileCompletions() {
+				n := len(m.fileCompletions)
+				m.fileSelected = (m.fileSelected + delta + n) % n
+				m.refresh(true)
+				return m, nil
+			}
 			if matches := m.completions(); len(matches) > 0 {
-				delta := 1
-				if v.String() == "up" {
-					delta = -1
-				}
 				m.selected = (m.selected + delta + len(matches)) % len(matches)
 				m.refresh(true)
 				return m, nil
@@ -480,6 +510,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if m.pasting {
 				return m.stop("notice", "Clipboard read in progress; wait before submitting.")
+			}
+			if m.hasFileCompletions() {
+				cmd := m.acceptFileCompletion()
+				m.refresh(true)
+				return m, cmd
 			}
 
 			text := strings.TrimSpace(m.input.Value())
@@ -510,12 +545,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selected = 0
 			m.hideCompletion = false
 		}
+		fileCmd := m.checkFileCompletion()
 		m.refresh(follow || changed)
-		return m, cmd
+		return m, tea.Batch(cmd, fileCmd)
 	}
 	cmd := m.updateInput(msg)
+	fileCmd := m.checkFileCompletion()
 	m.refresh(follow)
-	return m, cmd
+	return m, tea.Batch(cmd, fileCmd)
 }
 func (m model) View() string {
 	lines := strings.Split(m.viewport.View(), "\n")

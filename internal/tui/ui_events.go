@@ -51,6 +51,8 @@ func Run(a *agent.Agent, cwd string) error {
 		}
 		if m.statusCancel != nil {
 			m.statusCancel()
+		if m.fileScanCancel != nil {
+			m.fileScanCancel()
 		}
 	}
 	return err
@@ -136,6 +138,7 @@ func (m model) startTurn(text string) (tea.Model, tea.Cmd) {
 	m.turnImages, m.images = m.images, nil
 	m.input.Reset()
 	m.hideCompletion = false
+	m.dismissFileCompletion()
 	m.busy = true
 	m.cancelling = false
 	m.workingSince = time.Now()

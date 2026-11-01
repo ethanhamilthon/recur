@@ -176,6 +176,8 @@ func (m model) runCommand(name string) (tea.Model, tea.Cmd) {
 		if m.busy {
 			return m.stop("notice", "Wait for the active turn before reloading settings.")
 		}
+		m.dismissFileCompletion()
+		m.fileIndexCache = nil
 		if err := m.a.Reload(); err != nil {
 			return m.stop("error", err.Error())
 		}
@@ -217,6 +219,8 @@ func (m model) runCommand(name string) (tea.Model, tea.Cmd) {
 			m.pending = name
 			m.requestCancel()
 		} else {
+			m.dismissFileCompletion()
+			m.fileIndexCache = nil
 			m.a.RememberDisplay(m.entries)
 			var err error
 			if verb[0] == "/resume" {
@@ -238,6 +242,7 @@ func (m model) runCommand(name string) (tea.Model, tea.Cmd) {
 			m.pending = "/quit"
 			m.requestCancel()
 		} else {
+			m.dismissFileCompletion()
 			m.a.RememberDisplay(m.entries)
 			if m.a.HasSavedSession() {
 				if err := m.a.Save(); err != nil {

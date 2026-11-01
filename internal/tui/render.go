@@ -224,12 +224,17 @@ func (m *model) timeline() string {
 	}
 	m.inputTop = strings.Count(out.String(), "\n") // every row above the composer ends with a newline
 	out.WriteString(m.inputBlock())
+	fileMode := m.hasFileCompletions()
 	matches := m.completions()
-	start, rows := 0, min(8, max(1, m.height-m.input.Height()-5))
-	if len(matches) > 0 {
-		start = max(0, m.selected%len(matches)-rows+1)
+	count, selected := len(matches), m.selected
+	if fileMode {
+		count, selected = len(m.fileCompletions), m.fileSelected
 	}
-	if m.menuKind == "model" {
+	start, rows := 0, min(8, max(1, m.height-m.input.Height()-5))
+	if count > 0 {
+		start = max(0, selected%count-rows+1)
+	}
+	if !fileMode && m.menuKind == "model" {
 		parts := make([]string, len(agent.Efforts))
 		for i, e := range agent.Efforts {
 			parts[i] = " " + e + " "
@@ -239,21 +244,23 @@ func (m *model) timeline() string {
 		}
 		out.WriteString("\n" + paint(ansi.Truncate("  Effort: "+strings.Join(parts, " ")+"  (Left/Right)", m.width, "…"), m.width, lipgloss.NoColor{}, foreground))
 	}
-	for i, cmd := range matches {
-		if i < start || i >= start+rows {
-			continue
-		}
+	for i := start; i < min(count, start+rows); i++ {
 		var bg lipgloss.TerminalColor = lipgloss.NoColor{}
 		fg, marker := muted, "  "
-		if i == m.selected%len(matches) {
+		if i == selected%count {
 			bg, fg, marker = lipgloss.Color("#303030"), foreground, "› "
 		}
-		row := fmt.Sprintf("%s%-2s %-9s %s", marker, cmd.icon, cmd.name, cmd.description)
-		if m.menuKind == "model" {
-			row = marker + cmd.name + "  " + cmd.description // aligned with the Effort line above
-		}
-		if cmd.label != "" {
-			row = marker + cmd.icon + " " + cmd.label
+		var row string
+		if fileMode {
+			row = marker + sanitizeLabel(m.fileCompletions[i])
+		} else {
+			cmd := matches[i]
+			row = fmt.Sprintf("%s%-2s %-9s %s", marker, cmd.icon, cmd.name, cmd.description)
+			if m.menuKind == "model" {
+				row = marker + cmd.name + "  " + cmd.description
+			} else if cmd.label != "" {
+				row = marker + cmd.icon + " " + cmd.label
+			}
 		}
 		out.WriteByte('\n')
 		out.WriteString(paint(ansi.Truncate(row, m.width, "…"), m.width, bg, fg))
