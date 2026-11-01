@@ -427,7 +427,7 @@ func (m *model) acceptFileCompletion() tea.Cmd {
 func (m *model) beginFilePrep(text string, refs []string) tea.Cmd {
 	p := &filePrep{text: text, draft: m.input.Value(), images: m.images}
 	m.prep = p
-	root, limit := m.cwd, m.a.Settings().MaxFileBytes
+	root, limit := m.cwd, m.ctl.Settings().MaxFileBytes
 	return func() tea.Msg {
 		files, err := agent.ReadTextFiles(root, refs, limit)
 		return filePrepMsg{prep: p, files: files, err: err}
@@ -450,5 +450,5 @@ func (m *model) handleFilePrep(msg filePrepMsg) (tea.Model, tea.Cmd) {
 		return m.stop("error", "Could not attach files: "+msg.err.Error()+"\nYour draft is unchanged.")
 	}
 	m.dismissFileCompletion()
-	return m.submit(agent.Input{Text: msg.prep.text, Images: msg.prep.images, Files: msg.files})
+	return m.sendInput(agent.Input{Text: msg.prep.text, Images: msg.prep.images, Files: msg.files})
 }

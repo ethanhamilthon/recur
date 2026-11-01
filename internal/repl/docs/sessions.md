@@ -35,6 +35,11 @@ creates its JSONL file on disk only after the first message completes, unless
 - `/new`: retains older sessions and opens a fresh conversation.
 - `/resume`: provides project-scoped session completions to select and reopen a
   saved session. Switching waits for active work to finish and isolates history.
+  During work, `/new` and `/resume` cancel the turn and switch after it ends. A
+  switch is refused while unaccepted images are returned for editing, so they
+  are never discarded.
+- `/quit` and the JSON `quit` request behave the same way: during work they
+  cancel, then save and exit once the turn ends.
 - `/compact [prompt]`: replaces turns older than `compact_keep_turns` with a
   concise model-generated summary and saves immediately. Automatic compaction
   triggers before an oversized request if history exceeds `max_context_tokens`

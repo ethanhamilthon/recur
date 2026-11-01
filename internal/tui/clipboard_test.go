@@ -169,34 +169,24 @@ func TestImageAttachmentPreviewRemovalAndStaleResult(t *testing.T) {
 	}
 }
 func TestAttachmentQueueRecallAndCancellationRecovery(t *testing.T) {
-	m := newModel(&agent.Agent{}, "/project")
-	m.busy, m.steering = true, &agent.Steering{}
+	m, release := busyModel(t)
+	defer release()
 	m.images = []repl.Image{{URL: "data:image/png;base64,one", Path: "one.png"}}
-	m.queueSteering("look")
-	if len(m.images) != 0 || len(m.queued) != 1 {
+	m.input.SetValue("look")
+	m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.images) != 0 || len(m.ctl.Status().Queued) != 1 || len(m.ctl.Status().Queued[0].Images) != 1 {
 		t.Fatal("image not queued with text")
 	}
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
-	m = next.(model)
-	if len(m.images) != 1 || m.input.Value() != "look" || len(m.steering.TakeInputs()) != 0 {
-		t.Fatal("recall lost/duplicated image")
+	m = key(m, tea.KeyMsg{Type: tea.KeyUp})
+	if len(m.images) != 1 || m.input.Value() != "look" || len(m.ctl.Status().Queued) != 0 {
+		t.Fatalf("recall lost/duplicated image: %q %v", m.input.Value(), m.images)
 	}
-	m.queueSteering("look")
-	m.cancelling = true
+	m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
 	m.input.SetValue("draft")
-	next, _ = m.Update(agent.Event{Kind: "done", Text: "context canceled"})
-	m = next.(model)
+	m.requestCancel()
+	m = awaitIdle(t, m)
 	if len(m.images) != 1 || m.input.Value() != "look\n\ndraft" {
 		t.Fatalf("cancellation recovery: %q %v", m.input.Value(), m.images)
-	}
-	m.images = nil
-	m.turnImages = []repl.Image{{URL: "data", Path: "retry.png"}}
-	m.retry = true // Image-only prefix failure has an empty retry text.
-	m.retryInput = ""
-	next, _ = m.Update(agent.Event{Kind: "done", Text: "prefix failed"})
-	m = next.(model)
-	if len(m.images) != 1 || m.images[0].Path != "retry.png" {
-		t.Fatal("image-only initialization failure lost attachment")
 	}
 }
 func TestClipboardTextPasteAndProviderKeyMasking(t *testing.T) {

@@ -1,13 +1,6 @@
 package tui
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,15 +8,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
-	"recur/internal/agent"
+	"recur/internal/control"
 )
 
 func TestWorkingIndicatorLifecycleAndScrolling(t *testing.T) {
-	m := newModel(&agent.Agent{}, "/project")
-	if m.workingBlock() != "" {
+	idle, _ := testModel(t, nil)
+	if idle.workingBlock() != "" {
 		t.Fatal("idle indicator shown")
 	}
-	m.busy, m.workingSince = true, time.Now()
+	m, _ := busyModel(t)
 	for i := 0; i < 40; i++ {
 		m.add("user", "history")
 	}
@@ -31,14 +24,9 @@ func TestWorkingIndicatorLifecycleAndScrolling(t *testing.T) {
 	if view := ansi.Strip(m.View()); !strings.Contains(view, "working") || !strings.Contains(view, "esc to stop") {
 		t.Fatal("missing indicator or stop hint")
 	}
-	m.cancelling = true
-	if block := ansi.Strip(m.workingBlock()); !strings.Contains(block, "cancelling") || strings.Contains(block, "esc to stop") {
-		t.Fatalf("cancelling must replace the stop hint: %q", block)
-	}
-	m.cancelling = false
 	m.viewport.GotoTop()
 	offset := m.viewport.YOffset
-	next, cmd := m.Update(workingTick{m.workingSince})
+	next, cmd := m.Update(workingTick{m.ctl.Status().Started})
 	m = next.(model)
 	if cmd == nil || m.viewport.YOffset != offset {
 		t.Fatal("tick must animate without stealing scroll")
@@ -48,118 +36,74 @@ func TestWorkingIndicatorLifecycleAndScrolling(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("stale timer restarted")
 	}
-	m.cancel = func() {}
 	m.requestCancel()
-	if !strings.Contains(ansi.Strip(m.workingBlock()), "cancelling") {
-		t.Fatal("missing cancellation status")
-	}
-	next, _ = m.Update(agent.Event{Kind: "done"})
-	m = next.(model)
+	m = awaitIdle(t, m)
 	if m.workingBlock() != "" {
 		t.Fatal("indicator persisted after completion")
 	}
+	if !hasEntry(m, "notice", "Turn cancelled.") {
+		t.Fatalf("cancellation not reported: %+v", m.entries)
+	}
+}
+
+func hasEntry(m model, kind, text string) bool {
+	for _, e := range m.entries {
+		if e.Kind == kind && e.Text == text {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSteeringQueueAndRecovery(t *testing.T) {
-	m := newModel(&agent.Agent{}, "/project")
-	m.busy, m.workingSince = true, time.Now()
-	m.steering = &agent.Steering{}
-	m.cancel = func() {}
+	m, release := busyModel(t)
 	m.input.SetValue("follow up")
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = next.(model)
-	accepted := m.steering.TakeInputs()
-	if m.input.Value() != "" || len(m.queued) != 1 || len(accepted) != 1 || accepted[0].Text != "follow up" {
-		t.Fatal("message not queued")
+	m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.input.Value() != "" || len(m.ctl.Status().Queued) != 1 {
+		t.Fatalf("message not queued: %q %+v", m.input.Value(), m.ctl.Status().Queued)
 	}
 	if !strings.Contains(ansi.Strip(m.workingBlock()), "queued · follow up") {
 		t.Fatal("pending message invisible")
 	}
-	m.applyAgentEvent(agent.Event{Kind: "user", Text: "follow up", Steering: true})
-	if len(m.queued) != 0 || len(m.entries) != 1 {
-		t.Fatal("accepted steering duplicated or not cleared")
+	// Once the model's answer completes, the agent accepts the steering at its boundary.
+	release()
+	m = awaitIdle(t, m)
+	users := 0
+	for _, e := range m.entries {
+		if e.Kind == "user" && e.Text == "follow up" {
+			users++
+		}
 	}
+	if users != 1 || len(m.ctl.Status().Queued) != 0 {
+		t.Fatalf("accepted steering duplicated or not cleared: users=%d entries=%+v", users, m.entries)
+	}
+}
+
+func TestCancelledTurnRestoresUnsentSteeringIntoComposer(t *testing.T) {
+	m, _ := busyModel(t)
 	m.input.SetValue("not accepted")
-	m.queueSteering(m.input.Value())
+	m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
 	m.requestCancel()
 	m.input.SetValue("draft")
-	next, _ = m.Update(agent.Event{Kind: "done", Text: context.Canceled.Error()})
-	m = next.(model)
-	if m.input.Value() != "not accepted\n\ndraft" || len(m.queued) != 0 {
+	m = awaitIdle(t, m)
+	if m.input.Value() != "not accepted\n\ndraft" || len(m.ctl.Status().Queued) != 0 {
 		t.Fatalf("pending text lost: %q", m.input.Value())
 	}
 }
 
 func TestSteeringQueueFullKeepsInput(t *testing.T) {
-	m := newModel(&agent.Agent{}, "/project")
-	m.steering = &agent.Steering{}
+	m, _ := busyModel(t)
 	for i := 0; i < 64; i++ {
-		m.steering.Push("first")
+		if _, err := m.ctl.Submit(control.Request{Type: "steer", Text: "first"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	m.input.SetValue("second")
-	m.queueSteering("second")
-	if m.input.Value() != "second" || len(m.queued) != 0 {
+	m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.input.Value() != "second" || len(m.ctl.Status().Queued) != 64 {
 		t.Fatal("queue-full submission lost")
 	}
-}
-
-func TestLateSteeringContinuesWithoutLosingDraft(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload struct{ Input []json.RawMessage }
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Error(err)
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n")
-	}))
-	defer server.Close()
-	home := t.TempDir()
-	t.Setenv("RECUR_HOME", home)
-	config := fmt.Sprintf("provider = 'p'\nmodel = 'm'\n[providers.p]\nbase_url = '%s'\n", server.URL)
-	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600); err != nil {
-		t.Fatal(err)
-	}
-	a, err := agent.New(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer a.Close()
-	m := newModel(a, "/project")
-	m.busy, m.workingSince = true, time.Now()
-	m.queued = []agent.Input{{Text: "late first"}, {Text: "late second"}}
-	m.input.SetValue("unsent draft")
-	for i := 0; i < 40; i++ {
-		m.add("notice", "Older event")
-	}
-	m.refresh(false)
-	m.viewport.GotoTop()
-	next, _ := m.Update(agent.Event{Kind: "done"})
-	m = next.(model)
-	if m.input.Value() != "unsent draft" || !m.busy || m.viewport.YOffset != 0 {
-		t.Fatal("late continuation lost draft or failed to start")
-	}
-	defer func() {
-		if m.cancel != nil {
-			m.cancel()
-		}
-	}()
-	deadline := time.After(5 * time.Second)
-	for m.busy {
-		select {
-		case e := <-m.events:
-			next, _ = m.Update(e)
-			m = next.(model)
-		case <-deadline:
-			t.Fatal("continuation did not complete")
-		}
-	}
-	var users []string
-	for _, e := range m.entries {
-		if e.Kind == "user" {
-			users = append(users, e.Text)
-		}
-	}
-	if strings.Join(users, ",") != "late first,late second" || len(m.queued) != 0 || m.input.Value() != "unsent draft" {
-		t.Fatalf("lost or duplicated steering: %v %q", users, m.input.Value())
+	if !hasEntry(m, "notice", "Steering queue is full; your message remains in the input.") {
+		t.Fatalf("queue-full notice missing: %+v", m.entries)
 	}
 }

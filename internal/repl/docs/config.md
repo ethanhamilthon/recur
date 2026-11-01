@@ -241,14 +241,14 @@ timeout = 180
 - `send_output`: boolean flag (default `false`). When `true`, stdout/stderr output
   is captured and queued for delivery at the start of the next turn.
 - `headless_support`: boolean flag (default `true`). Setting `headless_support = false`
-  keeps the hook from running in headless runs (`recur -prompt` or `--mode jsonl`).
+  keeps the hook from running in headless runs (`recur --mode jsonl`).
   The hook still runs in the TUI.
 
 See `recur docs hooks` for full hook details and lifecycle events.
 
 ## Headless Mode Hooks
 
-Headless runs (`recur -prompt '...'` or `recur --mode jsonl`) load the same
-configuration as the TUI, so hooks from `./recur.toml` and `$RECUR_HOME/config.toml`
-run without `--config`. Hooks with `headless_support = false` are skipped in
-headless runs only.
+Headless runs (`recur --mode jsonl`) load the same configuration as the TUI, so
+hooks from `./recur.toml` and `$RECUR_HOME/config.toml` run without `--config`.
+Hooks with `headless_support = false` are skipped in headless runs only. The
+`--config` and `--no-extend` flags behave the same way in both interfaces.

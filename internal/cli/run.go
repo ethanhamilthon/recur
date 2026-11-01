@@ -1,9 +1,7 @@
 package cli
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -37,8 +35,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 	}
 	flags := flag.NewFlagSet("recur", flag.ContinueOnError)
 	flags.SetOutput(diagnostics)
-	prompt := flags.String("prompt", "", "run one turn without TUI")
-	mode := flags.String("mode", "", "headless transport: jsonl")
+	mode := flags.String("mode", "", "headless JSON/stdio transport: jsonl")
 	sessionID := flags.String("s", "", "target session for notify/view (default: $RECUR_ENDPOINT)")
 	resume := flags.String("resume", "", "resume a project session ID")
 	configPath := flags.String("config", "", "configuration file (overrides recur.toml and $RECUR_HOME/config.toml)")
@@ -73,7 +70,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 		}
 		return agent.Notify(cwd, *sessionID, text)
 	}
-	headless := *mode != "" || *prompt != ""
+	headless := *mode != ""
 	files := agent.ConfigFiles{Config: *configPath, NoExtend: *noExtend, Headless: headless}
 	if files.Config != "" {
 		if files.Config, err = filepath.Abs(files.Config); err != nil {
@@ -97,87 +94,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, diagnostics io.W
 	if !headless {
 		return tui.Run(a, cwd)
 	}
-	jsonl := *mode == "jsonl"
-	encoder := json.NewEncoder(out)
-	var writeErr error
-	send := func(value any) {
-		if writeErr == nil {
-			writeErr = encoder.Encode(value)
-		}
-	}
-	// Without jsonl, stdout carries only the committed assistant answers.
-	emit := func(e agent.Event) {
-		switch {
-		case jsonl:
-			send(map[string]any{"type": e.Kind, "text": e.Text, "id": e.ID, "meta": e.Meta, "provisional": e.Provisional})
-		case e.Kind == "assistant" && e.Meta != nil && e.Meta.RequestID != "":
-			fmt.Fprintln(out, e.Text)
-		case e.Kind == "error":
-			fmt.Fprintln(diagnostics, e.Text)
-		}
-	}
-	if jsonl {
-		send(map[string]any{"type": "session", "session": a.SessionInfo()})
-	}
-	run := func(text string) error {
-		err := a.Run(ctx, text, emit)
-		if jsonl {
-			send(map[string]any{"type": "done", "ok": err == nil, "session": a.SessionInfo()})
-		}
-		if writeErr != nil {
-			return writeErr
-		}
-		return err
-	}
-	if writeErr != nil {
-		return writeErr
-	}
-	if *prompt != "" {
-		return run(*prompt)
-	}
-	scanner := bufio.NewScanner(in)
-	scanner.Buffer(make([]byte, 4096), 2*1024*1024)
-	lines := make(chan string)
-	finished := make(chan error, 1)
-	go func() {
-		defer close(lines)
-		for scanner.Scan() {
-			select {
-			case lines <- scanner.Text():
-			case <-ctx.Done():
-				finished <- ctx.Err()
-				return
-			}
-		}
-		finished <- scanner.Err()
-	}()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case message := <-a.Inbox():
-			a.Fire("notify_received", "RECUR_NOTIFY_FILE", message)
-			if err = run(message); err != nil {
-				return err
-			}
-		case line, ok := <-lines:
-			if !ok {
-				return <-finished
-			}
-			var request struct {
-				Prompt string `json:"prompt"`
-			}
-			if err = json.Unmarshal([]byte(line), &request); err != nil {
-				return fmt.Errorf("invalid JSONL input: %w", err)
-			}
-			if request.Prompt == "" {
-				return fmt.Errorf("JSONL input requires a nonempty prompt")
-			}
-			if err = run(request.Prompt); err != nil {
-				return err
-			}
-		}
-	}
+	return serveJSON(ctx, a, cwd, in, out, diagnostics)
 }
 
 // view queues PNG/JPEG images for the session's next model request.

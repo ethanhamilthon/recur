@@ -26,12 +26,13 @@ type Record struct {
 	Meta    *Metadata `json:"meta,omitempty"`
 }
 type Event struct {
-	Kind, Text  string
-	ID          string
-	Meta        *Metadata
-	Final       bool
-	Steering    bool
-	Provisional bool
+	Kind        string    `json:"kind"`
+	Text        string    `json:"text,omitempty"`
+	ID          string    `json:"id,omitempty"`
+	Meta        *Metadata `json:"meta,omitempty"`
+	Final       bool      `json:"final,omitempty"`
+	Steering    bool      `json:"steering,omitempty"`
+	Provisional bool      `json:"provisional,omitempty"`
 }
 
 // ApplyEvent is shared by live display and the persisted display journal.

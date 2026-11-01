@@ -44,32 +44,33 @@ func hooksConfig(t *testing.T, record, serverURL string) string {
 }
 
 func TestHeadlessInheritsGlobalHooksUnlessSupportDisabled(t *testing.T) {
+	p := newProvider(t, nil)
 	home := t.TempDir()
 	t.Setenv("RECUR_HOME", home)
 	record := filepath.Join(t.TempDir(), "events")
 	tuiRecord := filepath.Join(t.TempDir(), "tui-events")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}\n\n")
-	}))
-	defer server.Close()
-
 	// Implicit global hooks run in headless mode; the headless_support = false hook does not.
 	homeCfg := fmt.Sprintf("provider='test'\nmodel='m'\n[providers.test]\nbase_url=%q\n"+
 		"[hooks.implicit]\nevents = [\"*\"]\ncommand = 'echo \"$RECUR_EVENT|$RECUR_MODE|$RECUR_EXIT_CODE\" >> %s'\n"+
 		"[hooks.tui_only]\nevents = [\"*\"]\ncommand = 'echo \"$RECUR_EVENT\" >> %s'\nheadless_support = false\n",
-		server.URL, record, tuiRecord)
+		p.server.URL, record, tuiRecord)
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(homeCfg), 0600); err != nil {
 		t.Fatal(err)
 	}
-
-	var out, diagnostics bytes.Buffer
-	if err := Run(context.Background(), []string{"--prompt", "hi"}, strings.NewReader(""), &out, &diagnostics); err != nil {
-		t.Fatal(err)
+	runOnce := func(args ...string) {
+		t.Helper()
+		c := startJSON(t, args...)
+		c.send(`{"id":"r1","type":"input","text":"hi"}`)
+		c.await("done", doneFor(str(c.await("started", resultFor("r1")), "turn")))
+		if err := c.finish(); err != nil {
+			t.Fatal(err)
+		}
 	}
-	got, _ := os.ReadFile(record)
 	want := "recur_start|headless|\nsession_start|headless|\nturn_start|headless|\nsession_title_change|headless|\nmodel_request_start|headless|\nmodel_request_end|headless|\nturn_end|headless|\nsession_end|headless|\nrecur_exit|headless|0\n"
+
+	runOnce()
+	got, _ := os.ReadFile(record)
 	if string(got) != want {
 		t.Fatalf("implicit global hook:\ngot:\n%s\nwant:\n%s", got, want)
 	}
@@ -79,10 +80,8 @@ func TestHeadlessInheritsGlobalHooksUnlessSupportDisabled(t *testing.T) {
 
 	// --no-extend with an explicit --config isolates the global hooks.
 	os.Remove(record)
-	explicitFile := hooksConfig(t, record, server.URL)
-	if err := Run(context.Background(), []string{"--prompt", "hi", "--config", explicitFile, "--no-extend"}, strings.NewReader(""), &out, &diagnostics); err != nil {
-		t.Fatal(err)
-	}
+	explicitFile := hooksConfig(t, record, p.server.URL)
+	runOnce("--config", explicitFile, "--no-extend")
 	got, _ = os.ReadFile(record)
 	if string(got) != want {
 		t.Fatalf("--no-extend run:\ngot:\n%s\nwant:\n%s", got, want)
@@ -90,33 +89,53 @@ func TestHeadlessInheritsGlobalHooksUnlessSupportDisabled(t *testing.T) {
 
 	// Without --no-extend, explicit --config inherits global hooks too.
 	os.Remove(record)
-	if err := Run(context.Background(), []string{"--prompt", "hi", "--config", explicitFile}, strings.NewReader(""), &out, &diagnostics); err != nil {
-		t.Fatal(err)
-	}
+	runOnce("--config", explicitFile)
 	got, _ = os.ReadFile(record)
 	if strings.Count(string(got), "turn_start|headless|") != 2 {
 		t.Fatalf("expected 2 turn_start events when global hooks inherited, got: %s", got)
 	}
 }
 
-func TestRecurExitReportsFailure(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("RECUR_HOME", home)
+func TestInterfaceOnlyHooksNeverFireHeadless(t *testing.T) {
+	p := newProvider(t, nil)
+	p.configure(t, "")
 	record := filepath.Join(t.TempDir(), "events")
+	file := filepath.Join(t.TempDir(), "config.toml")
+	text := fmt.Sprintf("provider='test'\nmodel='m'\n[providers.test]\nbase_url=%q\n[hooks.all]\nevents = [\"idle\", \"steer_queued\", \"image_attached\"]\ncommand = 'echo \"$RECUR_EVENT|$RECUR_IMAGE_SOURCE\" >> %s'\n", p.server.URL, record)
+	if err := os.WriteFile(file, []byte(text), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c := startJSON(t, "--config", file, "--no-extend")
+	c.send(`{"id":"r1","type":"input","text":"hi"}`)
+	c.await("done", doneFor(str(c.await("started", resultFor("r1")), "turn")))
+	if err := c.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(record); len(got) != 0 {
+		t.Fatalf("interface-only hooks fired headless: %q", got)
+	}
+}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestRecurExitReportsTurnFailureInDone(t *testing.T) {
+	p := newProvider(t, nil)
+	p.server.Close()
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)
 	}))
-	defer server.Close()
-
-	file := hooksConfig(t, record, server.URL)
-	var out, diagnostics bytes.Buffer
-	err := Run(context.Background(), []string{"--prompt", "hi", "--config", file}, strings.NewReader(""), &out, &diagnostics)
-	if err == nil {
-		t.Fatal("expected the provider error")
+	defer bad.Close()
+	record := filepath.Join(t.TempDir(), "events")
+	file := hooksConfig(t, record, bad.URL)
+	c := startJSON(t, "--config", file, "--no-extend")
+	c.send(`{"id":"r1","type":"input","text":"hi"}`)
+	turn := str(c.await("started", resultFor("r1")), "turn")
+	if d := c.await("error done", doneFor(turn)); d["status"] != "error" || d["error"] == "" {
+		t.Fatalf("failed turn reported as %v", d)
+	}
+	if err := c.finish(); err != nil {
+		t.Fatalf("a failed turn must not end the transport: %v", err)
 	}
 	got, _ := os.ReadFile(record)
-	if !strings.HasSuffix(string(got), "session_end|headless|\nrecur_exit|headless|1\n") || !strings.Contains(string(got), "error|headless|\n") {
+	if !strings.HasSuffix(string(got), "session_end|headless|\nrecur_exit|headless|0\n") || !strings.Contains(string(got), "error|headless|\n") {
 		t.Fatalf("got:\n%s", got)
 	}
 }
@@ -129,7 +148,7 @@ func TestInvalidHooksFlagFailsStartup(t *testing.T) {
 		_ = os.WriteFile(p, []byte("[hooks.bad]\nevents = [\"typo\"]\ncommand = \"true\"\n"), 0600)
 		return p
 	}()} {
-		if err := Run(context.Background(), []string{"--prompt", "hi", "--config", path}, strings.NewReader(""), &out, &diagnostics); err == nil {
+		if err := Run(context.Background(), []string{"--mode", "jsonl", "--config", path}, strings.NewReader(""), &out, &diagnostics); err == nil {
 			t.Fatalf("--config %s must fail", path)
 		}
 	}

@@ -2,8 +2,6 @@ package tui
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -12,6 +10,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"recur/internal/agent"
+	"recur/internal/control"
+	"recur/internal/repl"
 	"recur/internal/selfupdate"
 )
 
@@ -35,17 +35,16 @@ func checkUpdate() tea.Cmd {
 func Run(a *agent.Agent, cwd string) error {
 	keyboard := keyboardProtocol{}
 	defer keyboard.close()
-	final, err := tea.NewProgram(newModel(a, cwd), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFilter(keyboard.filter)).Run()
+	m := newModel(a, cwd)
+	program := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFilter(keyboard.filter))
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go forwardControl(ctx, m.events, program)
+	final, err := program.Run()
 	keyboard.close()
+	stop()
 	if m, ok := final.(model); ok {
-		if m.cancel != nil {
-			m.cancel()
-			for event := range m.events {
-				if event.Kind == "done" {
-					break
-				}
-			}
-		}
+		m.ctl.Close()
 		if m.menuCancel != nil {
 			m.menuCancel()
 		}
@@ -59,143 +58,112 @@ func Run(a *agent.Agent, cwd string) error {
 	return err
 }
 
+// forwardControl delivers controller events to the program in the order emitted.
+func forwardControl(ctx context.Context, events *control.Queue[control.Event], program *tea.Program) {
+	for {
+		event, ok := events.Pop(ctx)
+		if !ok {
+			return
+		}
+		program.Send(event)
+	}
+}
+
 type workingTick struct{ started time.Time }
 
 func workingPulse(started time.Time) tea.Cmd {
 	return tea.Tick(80*time.Millisecond, func(time.Time) tea.Msg { return workingTick{started} })
 }
-func (m *model) requestCancel() {
-	m.cancelling = true
-	if m.cancel != nil {
-		m.cancel()
-	}
-	m.refresh(false)
-}
-func (m *model) queueSteering(text string) {
-	m.queueInput(agent.Input{Text: text, Images: m.images})
-}
 
-// queueInput hands a complete input (text, images and file snapshot) to the running turn.
-func (m *model) queueInput(input agent.Input) {
-	if m.cancelling {
-		m.add("notice", "Cancellation in progress; your message remains in the input.")
-		return
-	}
-	if m.enqueue(input) {
-		m.images = nil
-		m.input.Reset()
-	} else {
-		m.add("notice", "Steering queue is full; your message remains in the input.")
-	}
-}
-
-// enqueue adds input to the steering queue and to the displayed queued list.
-func (m *model) enqueue(input agent.Input) bool {
-	if !m.steering.PushInput(input) {
-		return false
-	}
-	m.queued = append(m.queued, input)
-	m.a.Fire("steer_queued", "RECUR_MESSAGE_FILE", input.Display())
-	return true
-}
-
-// submit sends a complete input now, or queues it when a turn is already running.
-func (m model) submit(input agent.Input) (tea.Model, tea.Cmd) {
-	if m.compacting {
-		return m.stop("notice", "Compaction is running; wait before sending.")
-	}
-	if m.busy {
-		m.queueInput(input)
-		m.refresh(true)
-		return m, nil
-	}
-	if s := m.a.Settings(); s.Provider == "" || s.Model == "" {
-		return m.stop("notice", m.setupHint())
-	}
-	return m.startTurn(input)
-}
+// workingBlock renders queued steering and the spinner for the active operation.
 func (m model) workingBlock() string {
-	var out strings.Builder
-	for _, input := range m.queued {
-		text := input.Display()
-		row := "  queued · " + strings.ReplaceAll(ansi.Strip(text), "\n", " ")
-		out.WriteString(lipgloss.NewStyle().Foreground(muted).Render(ansi.Truncate(row, max(1, m.width), "…")) + "\n")
+	status := m.ctl.Status()
+	var block strings.Builder
+	for _, input := range status.Queued {
+		row := "  queued · " + strings.ReplaceAll(ansi.Strip(input.Display()), "\n", " ")
+		block.WriteString(lipgloss.NewStyle().Foreground(muted).Render(ansi.Truncate(row, max(1, m.width), "…")) + "\n")
 	}
-	if m.busy {
+	if status.Busy {
 		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-		elapsed := max(time.Duration(0), time.Since(m.workingSince))
+		elapsed := max(time.Duration(0), time.Since(status.Started))
 		label := "working"
-		if m.compacting {
+		if status.Compacting {
 			label = "compacting"
 		}
 		hint := " · esc to stop"
-		if m.cancelling {
+		if status.Cancelling {
 			label, hint = "cancelling", ""
 		}
 		line := "  " + lipgloss.NewStyle().Foreground(inputBlue).Render(frames[int(elapsed/(80*time.Millisecond))%len(frames)]) +
-			lipgloss.NewStyle().Foreground(muted).Render(fmt.Sprintf(" %s · %s%s", label, formatDuration(elapsed), hint))
-		out.WriteString(ansi.Truncate(line, max(1, m.width), "…") + "\n\n")
+			lipgloss.NewStyle().Foreground(muted).Render(" "+label+" · "+formatDuration(elapsed)+hint)
+		block.WriteString(ansi.Truncate(line, max(1, m.width), "…") + "\n\n")
 	}
-	return out.String()
+	return block.String()
 }
 
-// compactMsg carries the result of the background summary started by /compact.
-type compactMsg struct {
-	text string
-	err  error
-}
-
-// startCompact summarizes the old turns in the background so the interface keeps
-// responding and the summary request can still be cancelled.
-func (m model) startCompact(prompt string) (tea.Model, tea.Cmd) {
-	m.busy, m.cancelling, m.compacting = true, false, true
-	m.workingSince = time.Now()
-	ctx, cancel := context.WithCancel(context.Background())
-	m.cancel = cancel
-	a := m.a
-	m.refresh(true)
-	return m, tea.Batch(func() tea.Msg {
-		defer cancel()
-		text, err := a.Compact(ctx, prompt)
-		return compactMsg{text: text, err: err}
-	}, workingPulse(m.workingSince))
-}
-
-func (m model) startTurn(submission agent.Input) (tea.Model, tea.Cmd) {
-	m.a.RememberDisplay(m.entries)
-	m.turnImages, m.images = submission.Images, nil
-	m.input.Reset()
-	m.hideCompletion = false
-	m.dismissFileCompletion()
-	m.busy = true
-	m.cancelling = false
-	m.workingSince = time.Now()
-	m.steering = &agent.Steering{}
-	m.queued = nil
-	m.retryInput = ""
-	m.events = make(chan agent.Event, 64)
-	ctx, cancel := context.WithCancel(context.Background())
-	m.cancel = cancel
-	ch, a, steering := m.events, m.a, m.steering
-	go func() {
-		defer cancel()
-		err := a.RunInput(ctx, submission, func(e agent.Event) { ch <- e }, steering)
-		if errors.Is(err, context.Canceled) {
-			ch <- agent.Event{Kind: "notice", Text: "Turn cancelled."}
+// handleControl applies one controller event to the interface.
+func (m model) handleControl(e control.Event) (tea.Model, tea.Cmd) {
+	follow := m.viewport.AtBottom()
+	var cmd tea.Cmd
+	switch e.Kind {
+	case "started":
+		m.refresh(true)
+		cmd = workingPulse(m.ctl.Status().Started)
+	case "agent":
+		m.applyAgentEvent(*e.Agent)
+		m.refresh(follow)
+	case "notice", "error":
+		m.add(e.Kind, e.Text)
+		m.refresh(true)
+	case "session":
+		m.setEntries(e.Records)
+		if e.Operation != "compact" {
+			// A session change starts a fresh composer context, as /new and /resume always have.
+			m.pasteGeneration++
+			m.pasting = false
+			m.dismissFileCompletion()
+			m.fileIndexCache = nil
 		}
-		message := ""
-		if err != nil {
-			message = err.Error()
+		m.refresh(true)
+	case "done":
+		if e.Operation == "compact" && e.Message != "" {
+			m.add("notice", e.Message)
 		}
-		ch <- agent.Event{Kind: "done", Text: message}
-	}()
-	m.refresh(true)
-	return m, tea.Batch(m.wait(), workingPulse(m.workingSince))
+		if len(e.Unsent) > 0 {
+			m.restoreUnsent(e.Unsent)
+		}
+		m.refresh(follow)
+	}
+	if m.ctl.Closed() != nil {
+		select {
+		case <-m.ctl.Closed():
+			return m, tea.Quit
+		default:
+		}
+	}
+	return m, cmd
 }
+
+// restoreUnsent puts instructions the model did not accept back into the composer,
+// ahead of the text already typed there.
+func (m *model) restoreUnsent(unsent []agent.Input) {
+	var texts []string
+	var images []repl.Image
+	for _, in := range unsent {
+		if in.Text != "" {
+			texts = append(texts, in.Text)
+		}
+		images = append(images, in.Images...)
+	}
+	if draft := m.input.Value(); draft != "" {
+		texts = append(texts, draft)
+	}
+	images = append(images, m.images...)
+	m.images = images
+	m.input.SetValue(strings.Join(texts, "\n\n"))
+}
+
 func (m *model) applyAgentEvent(e agent.Event) {
-	if e.Kind == "user" && e.Steering && len(m.queued) > 0 && m.queued[0].Display() == e.Text {
-		m.queued = m.queued[1:]
-	}
 	if e.Meta != nil && e.Meta.RequestID != "" {
 		m.contextInput = e.Meta.ContextInput
 	}

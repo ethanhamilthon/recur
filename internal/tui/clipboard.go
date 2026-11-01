@@ -141,7 +141,7 @@ func (m model) pasteClipboard() (tea.Model, tea.Cmd) {
 	if m.pasting {
 		return m, nil
 	}
-	directory := m.a.Settings().AttachmentDir
+	directory := m.ctl.Settings().AttachmentDir
 	if directory != "" && !filepath.IsAbs(directory) {
 		directory = filepath.Join(m.cwd, directory)
 	}
@@ -172,16 +172,12 @@ func (m *model) acceptClipboard(result clipboardResult) tea.Cmd {
 			m.add("notice", "Images can only be pasted into a message draft.")
 			return nil
 		}
-		count := len(m.images) + len(m.turnImages)
-		for _, input := range m.queued {
-			count += len(input.Images)
-		}
-		if count >= 8 {
+		if len(m.images)+m.ctl.Status().Images >= 8 {
 			_ = os.Remove(result.image.Path)
 			m.add("error", "At most eight clipboard images may be pending. Remove or submit images first.")
 		} else {
 			m.images = append(m.images, result.image)
-			m.a.Fire("image_attached", "RECUR_IMAGE_SOURCE", "paste")
+			m.ctl.FireInteractive("image_attached", "RECUR_IMAGE_SOURCE", "paste")
 		}
 		return nil
 	}

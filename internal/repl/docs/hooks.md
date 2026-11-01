@@ -45,15 +45,15 @@ Hook handler fields:
 - `send_output`: boolean flag (default `false`). When `true`, command output is
   captured and queued for delivery at the start of the next turn.
 - `headless_support`: boolean flag (default `true`). Setting `headless_support = false`
-  keeps the hook from running in headless runs (`recur -prompt` or `--mode jsonl`).
+  keeps the hook from running in headless runs (`recur --mode jsonl`).
 
 Hooks merge by name: an entry in `./recur.toml` overrides or disables an entry
 with the same name in `$RECUR_HOME/config.toml`. Array fields like `events`
 replace inherited arrays completely.
 
-Headless runs (`recur -prompt '...'` or `recur --mode jsonl`) run the same hooks as
-the TUI, including hooks from `$RECUR_HOME/config.toml` and `./recur.toml`, except
-hooks with `headless_support = false`. `RECUR_MODE` is set to `headless` or `tui`.
+Headless runs (`recur --mode jsonl`) run the same hooks as the TUI, including
+hooks from `$RECUR_HOME/config.toml` and `./recur.toml`, except hooks with
+`headless_support = false`. `RECUR_MODE` is set to `headless` or `tui`.
 
 ## Delivery and Execution
 
@@ -204,8 +204,8 @@ Input:
   `RECUR_MESSAGE_FILE`.
 - `steer_accepted`: active turn accepted a queued message. `RECUR_MESSAGE_FILE`.
 - `notify_received`: `recur notify` delivered a message. `RECUR_NOTIFY_FILE`.
-- `image_attached`: an image was attached. `RECUR_IMAGE_SOURCE` (`paste` or
-  `view`).
+- `image_attached`: an image was attached. `RECUR_IMAGE_SOURCE` (`paste`,
+  `view`, or `input` for an image sent in a headless request).
 
 Model:
 - `model_change`: `/model` changed selection. `RECUR_PREV_PROVIDER`,

@@ -31,7 +31,7 @@ func TestTimelineCacheAndResize(t *testing.T) {
 		t.Fatal("completed entry was reformatted")
 	}
 	inputWidth, inputHeight := m.inputWidth, m.inputHeight
-	next, _ := m.Update(agent.Event{Kind: "delta", ID: "stream", Text: " second"})
+	next, _ := m.Update(agentEvent(agent.Event{Kind: "delta", ID: "stream", Text: " second"}))
 	m = next.(model)
 	if m.inputWidth != inputWidth || m.inputHeight != inputHeight || unsafe.StringData(cached) != unsafe.StringData(m.cache[0].Text) {
 		t.Fatal("delta invalidated input layout or completed cache")

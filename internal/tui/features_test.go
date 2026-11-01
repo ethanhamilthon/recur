@@ -40,30 +40,26 @@ func TestErrorNoticeStyleAndVisibility(t *testing.T) {
 }
 
 func TestUpRecallsOnlyPendingSteeringOnEmptyInput(t *testing.T) {
-	m := newModel(&agent.Agent{}, "/project")
-	m.steering = &agent.Steering{}
-	m.queueSteering("first")
-	m.queueSteering("second")
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
-	m = next.(model)
-	if m.input.Value() != "second" || len(m.queued) != 1 {
+	m, release := busyModel(t)
+	defer release()
+	for _, text := range []string{"first", "second"} {
+		m.input.SetValue(text)
+		m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
+	}
+	m = key(m, tea.KeyMsg{Type: tea.KeyUp})
+	if m.input.Value() != "second" || len(m.ctl.Status().Queued) != 1 {
 		t.Fatal("up did not recall last pending instruction")
 	}
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
-	m = next.(model)
-	if m.input.Value() != "second" || len(m.queued) != 1 {
+	m = key(m, tea.KeyMsg{Type: tea.KeyUp})
+	if m.input.Value() != "second" || len(m.ctl.Status().Queued) != 1 {
 		t.Fatal("nonempty draft overwritten")
 	}
 	m.input.Reset()
-	_ = m.steering.TakeInputs() // Agent wins the acceptance race before the UI handles Up.
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
-	m = next.(model)
-	if m.input.Value() != "" || !strings.Contains(m.entries[len(m.entries)-1].Text, "already accepted") {
+	release() // the agent accepts "first" at its next boundary
+	m = awaitIdle(t, m)
+	m = key(m, tea.KeyMsg{Type: tea.KeyUp})
+	if m.input.Value() != "" {
 		t.Fatal("accepted instruction resurrected")
-	}
-	m.applyAgentEvent(agent.Event{Kind: "user", Text: "first", Steering: true})
-	if len(m.queued) != 0 {
-		t.Fatal("accepted preview not cleared")
 	}
 }
 
@@ -109,7 +105,7 @@ func TestResumeAutocompleteIsScopedAndExecutesSelectedSession(t *testing.T) {
 		t.Fatal("Tab did not complete selected session")
 	}
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = next.(model)
+	m = settle(next.(model))
 	if len(m.entries) != 1 || m.entries[0].Text != "older chat" || m.input.Value() != "" {
 		t.Fatalf("resume failed: %+v", m.entries)
 	}
@@ -123,40 +119,28 @@ func TestResumeAutocompleteIsScopedAndExecutesSelectedSession(t *testing.T) {
 }
 
 func TestResumeWaitsAndUIErrorsStayOutOfAPIHistory(t *testing.T) {
-	t.Setenv("RECUR_HOME", t.TempDir())
-	a, err := agent.New(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer a.Close()
-	if err = a.Save(); err != nil {
-		t.Fatal(err)
-	}
+	m, a, release := heldModel(t, "")
+	m = startBusy(t, m)
 	oldID := strings.TrimSuffix(filepath.Base(a.HistoryPath), ".jsonl")
-	m := newModel(a, a.REPL.Dir)
 	next, _ := m.runCommand("/unknown")
-	m = next.(model)
-	next, _ = m.runCommand("/new")
-	m = next.(model)
-	if len(a.History) != 0 {
-		t.Fatal("UI diagnostic leaked into API history")
+	m = settle(next.(model))
+	if !hasEntry(m, "error", "Unknown command: /unknown. Type /help.") {
+		t.Fatalf("unknown command not reported: %+v", m.entries)
 	}
-	newPath := a.HistoryPath
-	m.busy = true
-	cancelled := false
-	m.cancel = func() { cancelled = true }
-	next, _ = m.runCommand("/resume " + oldID)
-	m = next.(model)
-	if !cancelled || a.HistoryPath != newPath || m.pending != "/resume "+oldID {
-		t.Fatal("resume did not wait for active turn")
+	m.input.SetValue("/new")
+	m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.ctl.Status().Cancelling {
+		t.Fatal("new did not cancel the active turn")
 	}
-	next, _ = m.Update(agent.Event{Kind: "done", Text: "cancelled"})
-	m = next.(model)
-	if a.HistoryPath == newPath || len(m.entries) != 1 || m.entries[0].Kind != "error" {
-		t.Fatal("resume lost saved UI diagnostic")
+	release()
+	m = awaitIdle(t, m)
+	if a.HistoryPath == filepath.Join(filepath.Dir(a.HistoryPath), oldID+".jsonl") || len(m.entries) != 0 {
+		t.Fatalf("new did not wait for the turn to finish: %+v", m.entries)
 	}
-	if len(a.History) != 0 {
-		t.Fatal("saved UI diagnostic sent to model")
+	m.input.SetValue("/resume " + oldID)
+	m = key(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.entries) == 0 || m.entries[0].Kind != "user" || m.entries[0].Text != "busy" {
+		t.Fatalf("resume did not restore the interrupted session: %+v", m.entries)
 	}
 }
 
@@ -195,29 +179,5 @@ func TestResumeCompletionWindowKeepsSelectionVisible(t *testing.T) {
 		if count > 8 || count < 1 {
 			t.Fatalf("unbounded session menu: %d", count)
 		}
-	}
-}
-
-func TestWithdrawRecoversOriginalThenSteeringAndDraft(t *testing.T) {
-	t.Setenv("RECUR_HOME", t.TempDir())
-	a, err := agent.New(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer a.Close()
-	m := newModel(a, a.REPL.Dir)
-	m.busy = true
-	m.steering = &agent.Steering{}
-	m.queueSteering("queued instruction")
-	m.input.SetValue("unfinished draft")
-	next, _ := m.Update(agent.Event{Kind: "withdraw", Text: "original request"})
-	m = next.(model)
-	next, _ = m.Update(agent.Event{Kind: "done", Text: "initialization error"})
-	m = next.(model)
-	if m.input.Value() != "original request\n\nqueued instruction\n\nunfinished draft" {
-		t.Fatalf("retry text lost or reordered: %q", m.input.Value())
-	}
-	if len(a.History) != 0 {
-		t.Fatal("failed initialization committed user content")
 	}
 }

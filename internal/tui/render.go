@@ -267,7 +267,7 @@ func (m model) inputBlock() string {
 
 // setupHint explains what is missing before the first message can be sent.
 func (m model) setupHint() string {
-	s := m.a.Settings()
+	s := m.ctl.Settings()
 	if len(s.Providers) == 0 {
 		return "No provider configured. Use /login to add a provider, then choose a model with /model."
 	}
@@ -282,10 +282,10 @@ func (m *model) timeline() string {
 		out.WriteString(lipgloss.NewStyle().Foreground(warnColor).Render(" · v" + strings.TrimPrefix(m.latest, "v") + " available — run recur update"))
 	}
 	out.WriteString("\n" + lipgloss.NewStyle().Foreground(muted).Render("Enter to send · Shift+Enter for newline · / for commands") + "\n")
-	if s := m.a.Settings(); s.Provider == "" || s.Model == "" {
+	if s := m.ctl.Settings(); s.Provider == "" || s.Model == "" {
 		out.WriteString(lipgloss.NewStyle().Foreground(warnColor).Render(m.setupHint()) + "\n")
 	}
-	for _, s := range m.a.Sources {
+	for _, s := range m.ctl.Sources() {
 		where := s.Origin
 		if s.Path != "" {
 			where = shortPath(s.Path) + " (" + s.Origin + ")"
@@ -297,7 +297,7 @@ func (m *model) timeline() string {
 	if len(m.cache) > len(m.entries) {
 		m.cache = m.cache[:len(m.entries)]
 	}
-	settings := m.a.Settings()
+	settings := m.ctl.Settings()
 	for i, e := range m.entries {
 		limit := -1
 		switch e.Kind {

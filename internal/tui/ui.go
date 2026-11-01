@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -15,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"recur/internal/agent"
+	"recur/internal/control"
 	"recur/internal/repl"
 )
 
@@ -26,24 +26,14 @@ type renderedEntry struct {
 	Text     string
 }
 type model struct {
-	a                        *agent.Agent
+	ctl                      *control.Controller
+	events                   *control.Queue[control.Event]
 	input                    textarea.Model
 	viewport                 viewport.Model
 	entries                  []entry
-	events                   chan agent.Event
-	busy                     bool
-	cancelling               bool
-	compacting               bool
-	workingSince             time.Time
-	steering                 *agent.Steering
-	queued                   []agent.Input
-	images, turnImages       []repl.Image
-	retry                    bool
+	images                   []repl.Image
 	pasteGeneration          int
 	pasting                  bool
-	retryInput               string
-	cancel                   context.CancelFunc
-	pending                  string
 	width, height            int
 	cwd                      string
 	selected                 int
@@ -65,7 +55,7 @@ type model struct {
 	effort, menuGeneration   int
 	menuCancel               context.CancelFunc
 	setup                    []string
-	sessions                 []agent.SessionSummary
+	sessions                 []control.SessionInfo
 	statusEvents             <-chan map[string]string
 	statusGen                uint64
 	statusCancel             context.CancelFunc
@@ -105,17 +95,21 @@ func newModel(a *agent.Agent, cwd string) model {
 	style := textarea.Style{Base: base, CursorLine: base, Text: base, Placeholder: base.Foreground(muted), EndOfBuffer: base}
 	input.FocusedStyle = style
 	input.BlurredStyle = style
-	m := model{a: a, input: input, viewport: viewport.New(80, 24), width: 80, height: 24, cwd: cwd, statusSem: make(chan struct{}, 4)}
+	events := control.NewQueue[control.Event](0)
+	ctl := control.New(a, func(e control.Event) { events.Push(e) })
+	ctl.SetInteractive(true)
+	m := model{ctl: ctl, events: events, input: input, viewport: viewport.New(80, 24), width: 80, height: 24, cwd: cwd, statusSem: make(chan struct{}, 4)}
 	if a != nil {
 		m.statusEvents = a.StatusEvents()
 	}
-	m.restoreHistory()
+	m.setEntries(ctl.History())
 	m.refresh(true)
 	return m
 }
 
-func (m *model) restoreHistory() {
-	m.entries, m.cache, m.contextInput = m.a.Records(), nil, nil
+// setEntries replaces the timeline with the controller's display journal.
+func (m *model) setEntries(records []entry) {
+	m.entries, m.cache, m.contextInput = records, nil, nil
 	for _, r := range m.entries {
 		if r.Meta != nil && r.Meta.RequestID != "" {
 			m.contextInput = r.Meta.ContextInput
@@ -124,13 +118,6 @@ func (m *model) restoreHistory() {
 }
 
 type followerTick struct{}
-
-func (m model) idleNotifications() []string {
-	if m.busy {
-		return nil
-	}
-	return m.a.Notifications()
-}
 
 func followerPulse() tea.Cmd {
 	return tea.Tick(time.Second, func(time.Time) tea.Msg { return followerTick{} })
@@ -144,7 +131,6 @@ func (m model) Init() tea.Cmd {
 		func() tea.Msg { return statusInitMsg{} },
 	)
 }
-func (m model) wait() tea.Cmd { ch := m.events; return func() tea.Msg { return <-ch } }
 func (m *model) resizeInput() {
 	value, width, height := m.input.Value(), max(1, m.width-2), max(1, m.height/2)
 	if m.inputWidth == width && m.inputHeight == height && m.inputValue == value {
@@ -183,7 +169,7 @@ func (m *model) updateInput(msg tea.Msg) tea.Cmd {
 func (m *model) refresh(follow bool) {
 	if text := m.input.Value(); !m.hideCompletion && (text == "/resume" || strings.HasPrefix(text, "/resume ")) {
 		if m.sessions == nil {
-			m.sessions, _ = m.a.Sessions()
+			m.sessions, _ = m.ctl.Sessions()
 		}
 	} else {
 		m.sessions = nil
@@ -197,24 +183,6 @@ func (m *model) refresh(follow bool) {
 	}
 }
 
-// draft is the composer state that must survive a background turn start.
-type draft struct {
-	text   string
-	images []repl.Image
-	offset int
-}
-
-func (m *model) keepDraft() draft {
-	return draft{m.input.Value(), m.images, m.viewport.YOffset}
-}
-func (m *model) restoreDraft(d draft, follow bool) {
-	m.input.SetValue(d.text)
-	m.images = d.images
-	m.refresh(follow)
-	if !follow {
-		m.viewport.SetYOffset(d.offset)
-	}
-}
 func (m *model) add(kind, text string) { m.entries = append(m.entries, entry{Kind: kind, Text: text}) }
 
 // stop adds a diagnostic, refreshes the view and ends the update cycle.
@@ -254,25 +222,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh(true)
 		return m, tea.Batch(cmd, fileCmd)
 	case followerTick:
-		// While busy, the turn itself accepts notifications as steering.
-		if messages := m.idleNotifications(); len(messages) > 0 {
-			draft := m.keepDraft()
-			next, cmd := m.startTurn(agent.Input{Text: messages[0], Images: m.images})
-			m = next.(model)
-			for _, text := range messages[1:] {
-				m.steering.Push(text)
-			}
-			m.restoreDraft(draft, follow)
-			return m, tea.Batch(cmd, followerPulse())
-		}
+		// Notifications that arrive while idle start a turn; busy turns accept them as steering.
+		m.ctl.Deliver()
 		return m, followerPulse()
 	case modelChoices:
 		if m.menuKind != "model" || v.generation != m.menuGeneration {
 			return m, nil
 		}
+		if v.err != nil {
+			m.closePicker()
+			return m.reject(v.err)
+		}
 		var failed []string
 		for name, err := range v.errs {
-			failed = append(failed, name+": "+err.Error())
+			failed = append(failed, name+": "+err)
 		}
 		sort.Strings(failed)
 		if len(v.models) == 0 {
@@ -283,7 +246,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.add("notice", "No models returned by providers.")
 			}
 		} else {
-			current := m.a.Settings()
+			current := m.ctl.Settings()
 			for i, c := range v.models {
 				m.menu = append(m.menu, command{name: c.Model, description: c.Provider})
 				if c.Provider == current.Provider && c.Model == current.Model {
@@ -331,11 +294,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case workingTick:
-		if !m.busy || !v.started.Equal(m.workingSince) {
+		status := m.ctl.Status()
+		if !status.Busy || !v.started.Equal(status.Started) {
 			return m, nil
 		}
 		m.refresh(follow)
-		return m, workingPulse(m.workingSince)
+		return m, workingPulse(status.Started)
 
 	case tea.WindowSizeMsg:
 		m.width, m.height = max(1, v.Width), max(1, v.Height)
@@ -363,70 +327,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.stop("error", "Copy failed: "+v.err.Error())
 		}
 		return m.stop("notice", fmt.Sprintf("Copied %d lines to the clipboard.", v.lines))
-	case compactMsg:
-		m.busy, m.compacting, m.cancel = false, false, nil
-		m.a.Fire("idle")
-		if errors.Is(v.err, context.Canceled) {
-			return m.stop("notice", "Compaction cancelled.")
-		}
-		if v.err != nil {
-			return m.stop("error", v.err.Error())
-		}
-		m.restoreHistory()
-		return m.stop("notice", v.text)
-	case agent.Event:
-		if v.Kind == "done" {
-			m.busy = false
-			m.cancel = nil
-			if len(m.queued) > 0 && v.Text == "" && !m.cancelling && m.pending == "" {
-				draft := m.keepDraft()
-				queued := append([]agent.Input(nil), m.queued...)
-				next, cmd := m.startTurn(queued[0])
-				m = next.(model)
-				for _, input := range queued[1:] {
-					m.enqueue(input) // the new queue is empty, so it has room
-				}
-				m.restoreDraft(draft, follow)
-				return m, cmd
-			}
-			if len(m.queued) > 0 || m.retry {
-				drafts := m.queued
-				if m.retry {
-					drafts = append([]agent.Input{{Text: m.retryInput, Images: m.turnImages}}, drafts...)
-				}
-				drafts = append(drafts, agent.Input{Text: m.input.Value(), Images: m.images})
-				var texts []string
-				m.images = nil
-				for _, draft := range drafts {
-					if draft.Text != "" {
-						texts = append(texts, draft.Text)
-					}
-					m.images = append(m.images, draft.Images...)
-				}
-				m.input.SetValue(strings.Join(texts, "\n\n"))
-				m.queued = nil
-			}
-			m.turnImages = nil
-			m.retry = false
-			m.steering = nil
-			m.retryInput = ""
-			m.cancelling = false
-			m.a.Fire("idle")
-
-			if m.pending != "" {
-				name := m.pending
-				m.pending = ""
-				return m.executeCommand(name)
-			}
-			m.refresh(follow)
-			return m, nil
-		}
-		if v.Kind == "withdraw" {
-			m.retryInput, m.retry = v.Text, true
-		}
-		m.applyAgentEvent(v)
-		m.refresh(follow)
-		return m, m.wait()
+	case control.Event:
+		return m.handleControl(v)
 	case tea.KeyMsg:
 		if next, cmd, handled := m.pickerKey(v); handled {
 			return next, cmd
@@ -448,13 +350,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "ctrl+c":
-			if m.busy {
+			if m.ctl.Status().Busy {
 				m.requestCancel()
 				return m, nil
 			}
 			return m.executeCommand("/quit")
 		case "ctrl+d":
-			if !m.busy && m.input.Value() == "" {
+			if !m.ctl.Status().Busy && m.input.Value() == "" {
 				return m.executeCommand("/quit")
 			}
 		case "esc":
@@ -468,7 +370,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refresh(true)
 				return m, nil
 			}
-			if len(m.completions()) == 0 && m.busy {
+			if len(m.completions()) == 0 && m.ctl.Status().Busy {
 				m.requestCancel()
 			}
 			m.hideCompletion = true
@@ -514,20 +416,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refresh(true)
 				return m, nil
 			}
-			if v.String() == "up" && m.input.Value() == "" && len(m.images) == 0 && len(m.queued) > 0 {
-				if input, ok := m.steering.RecallInput(); ok {
-					for i := len(m.queued) - 1; i >= 0; i-- {
-						if m.queued[i].Display() == input.Display() {
-							m.queued = append(m.queued[:i], m.queued[i+1:]...)
-							break
-						}
-					}
-					m.input.SetValue(input.Text)
-					m.images = input.Images
-					m.input.CursorEnd()
-				} else {
-					return m.stop("notice", "That instruction was already accepted and cannot be recalled.")
+			if v.String() == "up" && m.input.Value() == "" && len(m.images) == 0 && len(m.ctl.Status().Queued) > 0 {
+				resp, err := m.ctl.Submit(control.Request{Type: "recall"})
+				if err != nil {
+					return m.reject(err)
 				}
+				m.input.SetValue(resp.Input.Text)
+				m.images = resp.Input.Images
+				m.input.CursorEnd()
 				m.refresh(true)
 				return m, nil
 			}
@@ -551,11 +447,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if matches := m.completions(); len(matches) > 0 && len(m.images) == 0 {
 				return m.executeCommand(matches[m.selected%len(matches)].name)
 			}
-			if refs := fileReferences(text); len(refs) > 0 {
-				cmd := m.beginFilePrep(text, refs)
-				return m, cmd
-			}
-			return m.submit(agent.Input{Text: text, Images: m.images})
+			return m.submitInput(text)
 
 		}
 		valBefore := m.input.Value()
@@ -598,6 +490,35 @@ func (m model) View() string {
 		lines = m.sel.highlight(lines, m.viewport.Width)
 	}
 	return strings.Join(m.composerHighlight(lines), "\n")
+}
+
+// submitInput sends the composer as input. Explicit @file references are read
+// first, so the request carries the content as it is at submission.
+func (m model) submitInput(text string) (tea.Model, tea.Cmd) {
+	if refs := fileReferences(text); len(refs) > 0 {
+		return m, m.beginFilePrep(text, refs)
+	}
+	return m.sendInput(agent.Input{Text: text, Images: m.images})
+}
+
+// sendInput hands a complete input to the controller. Idle input starts a turn;
+// input during a turn is queued as steering. The composer clears only once accepted.
+func (m model) sendInput(input agent.Input) (tea.Model, tea.Cmd) {
+	if _, err := m.ctl.Submit(control.Request{Type: "input", Text: input.Text, Images: input.Images, Files: input.Files}); err != nil {
+		return m.reject(err)
+	}
+	m.input.Reset()
+	m.images = nil
+	m.hideCompletion = false
+	m.dismissFileCompletion()
+	m.refresh(true)
+	return m, nil
+}
+
+// requestCancel stops the active operation; the cancellation completes later as a done event.
+func (m *model) requestCancel() {
+	_, _ = m.ctl.Submit(control.Request{Type: "stop"})
+	m.refresh(false)
 }
 
 func (m model) executeCommand(name string) (tea.Model, tea.Cmd) {
