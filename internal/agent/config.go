@@ -43,6 +43,7 @@ type rawConfig struct {
 	MaxContextTokens *int64                 `toml:"max_context_tokens"`
 	CompactKeepTurns *int                   `toml:"compact_keep_turns"`
 	MaxAgentSteps    *int                   `toml:"max_agent_steps"`
+	MaxFileBytes     *int                   `toml:"max_file_bytes"`
 	AttachmentDir    *string                `toml:"attachment_dir"`
 	System           *string                `toml:"system"`
 	Providers        map[string]rawProvider `toml:"providers"`
@@ -117,6 +118,7 @@ func applyLayer(s *Settings, system *string, hooksMap map[string]hooks.Hook, raw
 	}
 	setInt(&s.CompactKeepTurns, raw.CompactKeepTurns)
 	setInt(&s.MaxAgentSteps, raw.MaxAgentSteps)
+	setInt(&s.MaxFileBytes, raw.MaxFileBytes)
 	setInt(&s.MaxCodeLines, raw.UI.MaxCodeLines)
 	setInt(&s.MaxResultLines, raw.UI.MaxResultLines)
 	setInt(&s.MaxThinkingLines, raw.UI.MaxThinkingLines)

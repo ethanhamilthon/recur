@@ -26,6 +26,7 @@ type Settings struct {
 	MaxContextTokens int64               `toml:"max_context_tokens"`
 	CompactKeepTurns int                 `toml:"compact_keep_turns"`
 	MaxAgentSteps    int                 `toml:"max_agent_steps"`
+	MaxFileBytes     int                 `toml:"max_file_bytes"`
 	MaxCodeLines     int                 `toml:"max_code_lines"`
 	MaxResultLines   int                 `toml:"max_result_lines"`
 	MaxThinkingLines int                 `toml:"max_thinking_lines"`
@@ -49,8 +50,8 @@ func validateSettings(s Settings) error {
 	if s.MaxCodeLines < 0 || s.MaxResultLines < 0 || s.MaxThinkingLines < 0 {
 		return fmt.Errorf("max_*_lines must be non-negative")
 	}
-	if s.MaxContextTokens < 0 || s.CompactKeepTurns < 0 || s.MaxAgentSteps < 0 {
-		return fmt.Errorf("max_context_tokens, compact_keep_turns and max_agent_steps must be non-negative")
+	if s.MaxContextTokens < 0 || s.CompactKeepTurns < 0 || s.MaxAgentSteps < 0 || s.MaxFileBytes < 0 {
+		return fmt.Errorf("max_context_tokens, compact_keep_turns, max_agent_steps and max_file_bytes must be non-negative")
 	}
 	if s.ShellTimeout <= 0 || s.ShellMaxTimeout <= 0 {
 		return fmt.Errorf("shell timeout and max_timeout must be positive")

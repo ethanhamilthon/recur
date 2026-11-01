@@ -225,3 +225,46 @@ func TestShellTimeoutDurationOverflowAndBoundaries(t *testing.T) {
 		t.Fatalf("expected zerooutput / no truncation, got: %+v", res)
 	}
 }
+
+func TestMaxFileBytesReloadAppliesToNewSubmissions(t *testing.T) {
+	home, cwd := t.TempDir(), t.TempDir()
+	t.Setenv("RECUR_HOME", home)
+	a, err := New(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if a.Settings().MaxFileBytes != 65536 {
+		t.Fatalf("default max_file_bytes = %d", a.Settings().MaxFileBytes)
+	}
+	if err = os.WriteFile(filepath.Join(home, "config.toml"), []byte("max_file_bytes = 100\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if a.Settings().MaxFileBytes != 100 {
+		t.Fatalf("reloaded max_file_bytes = %d", a.Settings().MaxFileBytes)
+	}
+	if err = os.WriteFile(filepath.Join(home, "config.toml"), []byte("max_file_bytes = -1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Reload(); err == nil {
+		t.Fatal("reload accepted negative max_file_bytes")
+	}
+	if a.Settings().MaxFileBytes != 100 {
+		t.Fatal("failed reload changed max_file_bytes")
+	}
+}
+
+func TestMaxFileBytesValidation(t *testing.T) {
+	base := Settings{Provider: "p", Providers: map[string]Provider{"p": {BaseURL: "https://example.com"}}, ShellTimeout: 120, ShellMaxTimeout: 600}
+	base.MaxFileBytes = -1
+	if err := validateSettings(base); err == nil {
+		t.Fatal("negative max_file_bytes accepted")
+	}
+	base.MaxFileBytes = 0
+	if err := validateSettings(base); err != nil {
+		t.Fatalf("zero (unlimited) rejected: %v", err)
+	}
+}

@@ -64,6 +64,7 @@ reasoning_summary = "auto"
 max_context_tokens = 400000
 compact_keep_turns = 4
 max_agent_steps = 0
+max_file_bytes = 65536
 attachment_dir = ""
 system = "You are Recur, a coding agent"
 
@@ -104,6 +105,15 @@ max_output = 8192
   runs (default `4`).
 - `max_agent_steps`: maximum tool iterations allowed per turn (default `0`,
   unlimited).
+- `max_file_bytes`: maximum bytes of each file included when a prompt references
+  it with `@path` (default `65536`; `0` means unlimited; negative values are
+  invalid). The limit counts raw source bytes, not tokens, and applies per file:
+  it does not bound the combined size of several attached files or the model's
+  context window. Over-limit files are sent as their leading bytes, cut before an
+  incomplete UTF-8 character, and marked as truncated with the included and
+  original sizes. The limit is read when a prompt is submitted, so `/reload`
+  affects the next submission but not instructions already queued or running.
+  See the `@` file references section in `interface.md`.
 - `attachment_dir`: directory for full-resolution captured clipboard images
   (default `""` uses `$RECUR_HOME/attachments` or temporary storage). Relative
   paths resolve against launch cwd.
